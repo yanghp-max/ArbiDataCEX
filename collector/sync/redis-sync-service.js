@@ -10,7 +10,6 @@ class RedisSyncService {
   constructor() {
     this.redis = new RedisClient(config.redis);
     this.timer = null;
-    this.initialTimer = null;
     this.running = false;
     this.syncing = false;
     this.stats = {
@@ -151,24 +150,11 @@ class RedisSyncService {
       }
     }, config.sync.intervalMs);
     console.log(`[Sync] started interval=${config.sync.intervalMs}ms`);
-
-    // 首次同步延迟执行，避免系统刚启动时采集数据尚未进入 Redis。
-    this.initialTimer = setTimeout(async () => {
-      try {
-        const result = await this.runOnce();
-        console.log(`[Sync] initial run synced=${result.synced}, trimmed=${result.trimmed}`);
-      } catch (error) {
-        console.error('[Sync] initial run failed:', error.message);
-      }
-    }, config.sync.initialDelayMs);
-    console.log(`[Sync] initial run delay=${config.sync.initialDelayMs}ms`);
   }
 
   stop() {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
-    if (this.initialTimer) clearTimeout(this.initialTimer);
-    this.initialTimer = null;
     this.running = false;
   }
 
