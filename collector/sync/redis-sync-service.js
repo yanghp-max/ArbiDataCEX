@@ -41,12 +41,16 @@ class RedisSyncService {
   }
 
   async trimById(symbol, streamId) {
+    if (!streamId || streamId === '-') return 0;
     const key = `price:stream:${symbol}`;
-    // node-redis v4 object form
-    return this.redis.client.xTrim(key, {
-      strategy: 'MINID',
-      threshold: streamId
-    });
+    // 兼容 redis@4.x：直接发送原生命令，避免 xTrim 参数签名差异导致报错
+    const result = await this.redis.client.sendCommand([
+      'XTRIM',
+      key,
+      'MINID',
+      streamId
+    ]);
+    return Number(result || 0);
   }
 
   async runOnce(targetSymbols = null) {
