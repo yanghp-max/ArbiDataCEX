@@ -1,0 +1,4510 @@
+{
+  "generated_at": 1778990134922,
+  "source": "binance_futures + gate_futures_usdt",
+  "sort_rule": "liquidity_score_desc_then_symbol_asc",
+  "top_n": 52,
+  "total_common_symbols": 494,
+  "selected_symbols_count": 52,
+  "selected_symbols": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "SOLUSDT",
+    "XRPUSDT",
+    "DOGEUSDT",
+    "LABUSDT",
+    "ZECUSDT",
+    "UBUSDT",
+    "BNBUSDT",
+    "SUIUSDT",
+    "HYPEUSDT",
+    "BILLUSDT",
+    "ADAUSDT",
+    "SKYAIUSDT",
+    "ARCUSDT",
+    "BUSDT",
+    "LINKUSDT",
+    "AIAUSDT",
+    "XAUTUSDT",
+    "TONUSDT",
+    "STORJUSDT",
+    "AVAXUSDT",
+    "IRYSUSDT",
+    "LTCUSDT",
+    "BCHUSDT",
+    "FARTCOINUSDT",
+    "ICPUSDT",
+    "ENAUSDT",
+    "FILUSDT",
+    "BSBUSDT",
+    "TRUMPUSDT",
+    "ONDOUSDT",
+    "WLFIUSDT",
+    "SIRENUSDT",
+    "AAVEUSDT",
+    "TAOUSDT",
+    "RAVEUSDT",
+    "CHZUSDT",
+    "PHBUSDT",
+    "SAGAUSDT",
+    "CFXUSDT",
+    "VVVUSDT",
+    "UNIUSDT",
+    "ORCAUSDT",
+    "ARBUSDT",
+    "AIGENSYNUSDT",
+    "RIVERUSDT",
+    "RECALLUSDT",
+    "VIRTUALUSDT",
+    "TRUTHUSDT",
+    "DOTUSDT",
+    "NEARUSDT"
+  ],
+  "symbols": [
+    {
+      "symbol_id": "BTCUSDT",
+      "binance_symbol": "BTCUSDT",
+      "gate_symbol": "BTC_USDT",
+      "binance_quote_volume_24h": 7284400237.6,
+      "gate_quote_volume_24h": 3287444198,
+      "liquidity_score": 3287444198,
+      "rank": 1
+    },
+    {
+      "symbol_id": "ETHUSDT",
+      "binance_symbol": "ETHUSDT",
+      "gate_symbol": "ETH_USDT",
+      "binance_quote_volume_24h": 5518599654.28,
+      "gate_quote_volume_24h": 3160937777,
+      "liquidity_score": 3160937777,
+      "rank": 2
+    },
+    {
+      "symbol_id": "SOLUSDT",
+      "binance_symbol": "SOLUSDT",
+      "gate_symbol": "SOL_USDT",
+      "binance_quote_volume_24h": 1497105205.1227,
+      "gate_quote_volume_24h": 420350478,
+      "liquidity_score": 420350478,
+      "rank": 3
+    },
+    {
+      "symbol_id": "XRPUSDT",
+      "binance_symbol": "XRPUSDT",
+      "gate_symbol": "XRP_USDT",
+      "binance_quote_volume_24h": 592174218.8026,
+      "gate_quote_volume_24h": 120258347,
+      "liquidity_score": 120258347,
+      "rank": 4
+    },
+    {
+      "symbol_id": "DOGEUSDT",
+      "binance_symbol": "DOGEUSDT",
+      "gate_symbol": "DOGE_USDT",
+      "binance_quote_volume_24h": 479027061.95905,
+      "gate_quote_volume_24h": 112488923,
+      "liquidity_score": 112488923,
+      "rank": 5
+    },
+    {
+      "symbol_id": "LABUSDT",
+      "binance_symbol": "LABUSDT",
+      "gate_symbol": "LAB_USDT",
+      "binance_quote_volume_24h": 357634819.62208,
+      "gate_quote_volume_24h": 53340214,
+      "liquidity_score": 53340214,
+      "rank": 6
+    },
+    {
+      "symbol_id": "ZECUSDT",
+      "binance_symbol": "ZECUSDT",
+      "gate_symbol": "ZEC_USDT",
+      "binance_quote_volume_24h": 727016705.25,
+      "gate_quote_volume_24h": 34079535,
+      "liquidity_score": 34079535,
+      "rank": 7
+    },
+    {
+      "symbol_id": "UBUSDT",
+      "binance_symbol": "UBUSDT",
+      "gate_symbol": "UB_USDT",
+      "binance_quote_volume_24h": 188532838.90071,
+      "gate_quote_volume_24h": 28419893,
+      "liquidity_score": 28419893,
+      "rank": 8
+    },
+    {
+      "symbol_id": "BNBUSDT",
+      "binance_symbol": "BNBUSDT",
+      "gate_symbol": "BNB_USDT",
+      "binance_quote_volume_24h": 383681875.103,
+      "gate_quote_volume_24h": 27795032,
+      "liquidity_score": 27795032,
+      "rank": 9
+    },
+    {
+      "symbol_id": "SUIUSDT",
+      "binance_symbol": "SUIUSDT",
+      "gate_symbol": "SUI_USDT",
+      "binance_quote_volume_24h": 276270352.83018,
+      "gate_quote_volume_24h": 22762471,
+      "liquidity_score": 22762471,
+      "rank": 10
+    },
+    {
+      "symbol_id": "HYPEUSDT",
+      "binance_symbol": "HYPEUSDT",
+      "gate_symbol": "HYPE_USDT",
+      "binance_quote_volume_24h": 642960736.28202,
+      "gate_quote_volume_24h": 21703697,
+      "liquidity_score": 21703697,
+      "rank": 11
+    },
+    {
+      "symbol_id": "BILLUSDT",
+      "binance_symbol": "BILLUSDT",
+      "gate_symbol": "BILL_USDT",
+      "binance_quote_volume_24h": 321013464.00948,
+      "gate_quote_volume_24h": 20320975,
+      "liquidity_score": 20320975,
+      "rank": 12
+    },
+    {
+      "symbol_id": "ADAUSDT",
+      "binance_symbol": "ADAUSDT",
+      "gate_symbol": "ADA_USDT",
+      "binance_quote_volume_24h": 125424229.6757,
+      "gate_quote_volume_24h": 18639411,
+      "liquidity_score": 18639411,
+      "rank": 13
+    },
+    {
+      "symbol_id": "SKYAIUSDT",
+      "binance_symbol": "SKYAIUSDT",
+      "gate_symbol": "SKYAI_USDT",
+      "binance_quote_volume_24h": 87213790.88048,
+      "gate_quote_volume_24h": 17307897,
+      "liquidity_score": 17307897,
+      "rank": 14
+    },
+    {
+      "symbol_id": "ARCUSDT",
+      "binance_symbol": "ARCUSDT",
+      "gate_symbol": "ARC_USDT",
+      "binance_quote_volume_24h": 190607709.29049,
+      "gate_quote_volume_24h": 14623962,
+      "liquidity_score": 14623962,
+      "rank": 15
+    },
+    {
+      "symbol_id": "BUSDT",
+      "binance_symbol": "BUSDT",
+      "gate_symbol": "B_USDT",
+      "binance_quote_volume_24h": 70427401.0041,
+      "gate_quote_volume_24h": 12063289,
+      "liquidity_score": 12063289,
+      "rank": 16
+    },
+    {
+      "symbol_id": "LINKUSDT",
+      "binance_symbol": "LINKUSDT",
+      "gate_symbol": "LINK_USDT",
+      "binance_quote_volume_24h": 111750684.07,
+      "gate_quote_volume_24h": 11304965,
+      "liquidity_score": 11304965,
+      "rank": 17
+    },
+    {
+      "symbol_id": "AIAUSDT",
+      "binance_symbol": "AIAUSDT",
+      "gate_symbol": "AIA_USDT",
+      "binance_quote_volume_24h": 172041399.37087,
+      "gate_quote_volume_24h": 11078105,
+      "liquidity_score": 11078105,
+      "rank": 18
+    },
+    {
+      "symbol_id": "XAUTUSDT",
+      "binance_symbol": "XAUTUSDT",
+      "gate_symbol": "XAUT_USDT",
+      "binance_quote_volume_24h": 12936645.51,
+      "gate_quote_volume_24h": 11049092,
+      "liquidity_score": 11049092,
+      "rank": 19
+    },
+    {
+      "symbol_id": "TONUSDT",
+      "binance_symbol": "TONUSDT",
+      "gate_symbol": "TON_USDT",
+      "binance_quote_volume_24h": 164871250.72936,
+      "gate_quote_volume_24h": 8819109,
+      "liquidity_score": 8819109,
+      "rank": 20
+    },
+    {
+      "symbol_id": "STORJUSDT",
+      "binance_symbol": "STORJUSDT",
+      "gate_symbol": "STORJ_USDT",
+      "binance_quote_volume_24h": 168423746.0065,
+      "gate_quote_volume_24h": 8668696,
+      "liquidity_score": 8668696,
+      "rank": 21
+    },
+    {
+      "symbol_id": "AVAXUSDT",
+      "binance_symbol": "AVAXUSDT",
+      "gate_symbol": "AVAX_USDT",
+      "binance_quote_volume_24h": 93673266.571,
+      "gate_quote_volume_24h": 8201186,
+      "liquidity_score": 8201186,
+      "rank": 22
+    },
+    {
+      "symbol_id": "IRYSUSDT",
+      "binance_symbol": "IRYSUSDT",
+      "gate_symbol": "IRYS_USDT",
+      "binance_quote_volume_24h": 60167823.61001,
+      "gate_quote_volume_24h": 7760335,
+      "liquidity_score": 7760335,
+      "rank": 23
+    },
+    {
+      "symbol_id": "LTCUSDT",
+      "binance_symbol": "LTCUSDT",
+      "gate_symbol": "LTC_USDT",
+      "binance_quote_volume_24h": 49401467.35,
+      "gate_quote_volume_24h": 7404141,
+      "liquidity_score": 7404141,
+      "rank": 24
+    },
+    {
+      "symbol_id": "BCHUSDT",
+      "binance_symbol": "BCHUSDT",
+      "gate_symbol": "BCH_USDT",
+      "binance_quote_volume_24h": 113347129.97,
+      "gate_quote_volume_24h": 6429058,
+      "liquidity_score": 6429058,
+      "rank": 25
+    },
+    {
+      "symbol_id": "FARTCOINUSDT",
+      "binance_symbol": "FARTCOINUSDT",
+      "gate_symbol": "FARTCOIN_USDT",
+      "binance_quote_volume_24h": 26574323.36832,
+      "gate_quote_volume_24h": 6135851,
+      "liquidity_score": 6135851,
+      "rank": 26
+    },
+    {
+      "symbol_id": "ICPUSDT",
+      "binance_symbol": "ICPUSDT",
+      "gate_symbol": "ICP_USDT",
+      "binance_quote_volume_24h": 45128500.928,
+      "gate_quote_volume_24h": 5761959,
+      "liquidity_score": 5761959,
+      "rank": 27
+    },
+    {
+      "symbol_id": "ENAUSDT",
+      "binance_symbol": "ENAUSDT",
+      "gate_symbol": "ENA_USDT",
+      "binance_quote_volume_24h": 59368831.48571,
+      "gate_quote_volume_24h": 5365482,
+      "liquidity_score": 5365482,
+      "rank": 28
+    },
+    {
+      "symbol_id": "FILUSDT",
+      "binance_symbol": "FILUSDT",
+      "gate_symbol": "FIL_USDT",
+      "binance_quote_volume_24h": 78922775.711,
+      "gate_quote_volume_24h": 5196121,
+      "liquidity_score": 5196121,
+      "rank": 29
+    },
+    {
+      "symbol_id": "BSBUSDT",
+      "binance_symbol": "BSBUSDT",
+      "gate_symbol": "BSB_USDT",
+      "binance_quote_volume_24h": 49040463.30512,
+      "gate_quote_volume_24h": 5176800,
+      "liquidity_score": 5176800,
+      "rank": 30
+    },
+    {
+      "symbol_id": "TRUMPUSDT",
+      "binance_symbol": "TRUMPUSDT",
+      "gate_symbol": "TRUMP_USDT",
+      "binance_quote_volume_24h": 55604864.45137,
+      "gate_quote_volume_24h": 5010102,
+      "liquidity_score": 5010102,
+      "rank": 31
+    },
+    {
+      "symbol_id": "ONDOUSDT",
+      "binance_symbol": "ONDOUSDT",
+      "gate_symbol": "ONDO_USDT",
+      "binance_quote_volume_24h": 53457420.97893,
+      "gate_quote_volume_24h": 4977822,
+      "liquidity_score": 4977822,
+      "rank": 32
+    },
+    {
+      "symbol_id": "WLFIUSDT",
+      "binance_symbol": "WLFIUSDT",
+      "gate_symbol": "WLFI_USDT",
+      "binance_quote_volume_24h": 41135634.8794,
+      "gate_quote_volume_24h": 4798793,
+      "liquidity_score": 4798793,
+      "rank": 33
+    },
+    {
+      "symbol_id": "SIRENUSDT",
+      "binance_symbol": "SIRENUSDT",
+      "gate_symbol": "SIREN_USDT",
+      "binance_quote_volume_24h": 26955807.23136,
+      "gate_quote_volume_24h": 4765993,
+      "liquidity_score": 4765993,
+      "rank": 34
+    },
+    {
+      "symbol_id": "AAVEUSDT",
+      "binance_symbol": "AAVEUSDT",
+      "gate_symbol": "AAVE_USDT",
+      "binance_quote_volume_24h": 72935309.777,
+      "gate_quote_volume_24h": 4188451,
+      "liquidity_score": 4188451,
+      "rank": 35
+    },
+    {
+      "symbol_id": "TAOUSDT",
+      "binance_symbol": "TAOUSDT",
+      "gate_symbol": "TAO_USDT",
+      "binance_quote_volume_24h": 109571159.07,
+      "gate_quote_volume_24h": 4155309,
+      "liquidity_score": 4155309,
+      "rank": 36
+    },
+    {
+      "symbol_id": "RAVEUSDT",
+      "binance_symbol": "RAVEUSDT",
+      "gate_symbol": "RAVE_USDT",
+      "binance_quote_volume_24h": 46806591.86083,
+      "gate_quote_volume_24h": 4077879,
+      "liquidity_score": 4077879,
+      "rank": 37
+    },
+    {
+      "symbol_id": "CHZUSDT",
+      "binance_symbol": "CHZUSDT",
+      "gate_symbol": "CHZ_USDT",
+      "binance_quote_volume_24h": 83188452.85492,
+      "gate_quote_volume_24h": 3758756,
+      "liquidity_score": 3758756,
+      "rank": 38
+    },
+    {
+      "symbol_id": "PHBUSDT",
+      "binance_symbol": "PHBUSDT",
+      "gate_symbol": "PHB_USDT",
+      "binance_quote_volume_24h": 52243441.5093,
+      "gate_quote_volume_24h": 3557590,
+      "liquidity_score": 3557590,
+      "rank": 39
+    },
+    {
+      "symbol_id": "SAGAUSDT",
+      "binance_symbol": "SAGAUSDT",
+      "gate_symbol": "SAGA_USDT",
+      "binance_quote_volume_24h": 35181529.635009,
+      "gate_quote_volume_24h": 3454980,
+      "liquidity_score": 3454980,
+      "rank": 40
+    },
+    {
+      "symbol_id": "CFXUSDT",
+      "binance_symbol": "CFXUSDT",
+      "gate_symbol": "CFX_USDT",
+      "binance_quote_volume_24h": 15194291.0933,
+      "gate_quote_volume_24h": 3312657,
+      "liquidity_score": 3312657,
+      "rank": 41
+    },
+    {
+      "symbol_id": "VVVUSDT",
+      "binance_symbol": "VVVUSDT",
+      "gate_symbol": "VVV_USDT",
+      "binance_quote_volume_24h": 52832255.26496,
+      "gate_quote_volume_24h": 3259058,
+      "liquidity_score": 3259058,
+      "rank": 42
+    },
+    {
+      "symbol_id": "UNIUSDT",
+      "binance_symbol": "UNIUSDT",
+      "gate_symbol": "UNI_USDT",
+      "binance_quote_volume_24h": 40588304.685,
+      "gate_quote_volume_24h": 3210983,
+      "liquidity_score": 3210983,
+      "rank": 43
+    },
+    {
+      "symbol_id": "ORCAUSDT",
+      "binance_symbol": "ORCAUSDT",
+      "gate_symbol": "ORCA_USDT",
+      "binance_quote_volume_24h": 78309050.8247,
+      "gate_quote_volume_24h": 3188501,
+      "liquidity_score": 3188501,
+      "rank": 44
+    },
+    {
+      "symbol_id": "ARBUSDT",
+      "binance_symbol": "ARBUSDT",
+      "gate_symbol": "ARB_USDT",
+      "binance_quote_volume_24h": 21883615.40252,
+      "gate_quote_volume_24h": 2832964,
+      "liquidity_score": 2832964,
+      "rank": 45
+    },
+    {
+      "symbol_id": "AIGENSYNUSDT",
+      "binance_symbol": "AIGENSYNUSDT",
+      "gate_symbol": "AIGENSYN_USDT",
+      "binance_quote_volume_24h": 91391558.79619,
+      "gate_quote_volume_24h": 2786814,
+      "liquidity_score": 2786814,
+      "rank": 46
+    },
+    {
+      "symbol_id": "RIVERUSDT",
+      "binance_symbol": "RIVERUSDT",
+      "gate_symbol": "RIVER_USDT",
+      "binance_quote_volume_24h": 73835094.9636,
+      "gate_quote_volume_24h": 2480705,
+      "liquidity_score": 2480705,
+      "rank": 47
+    },
+    {
+      "symbol_id": "RECALLUSDT",
+      "binance_symbol": "RECALLUSDT",
+      "gate_symbol": "RECALL_USDT",
+      "binance_quote_volume_24h": 117283576.43133,
+      "gate_quote_volume_24h": 2275849,
+      "liquidity_score": 2275849,
+      "rank": 48
+    },
+    {
+      "symbol_id": "VIRTUALUSDT",
+      "binance_symbol": "VIRTUALUSDT",
+      "gate_symbol": "VIRTUAL_USDT",
+      "binance_quote_volume_24h": 18319247.23034,
+      "gate_quote_volume_24h": 2203676,
+      "liquidity_score": 2203676,
+      "rank": 49
+    },
+    {
+      "symbol_id": "TRUTHUSDT",
+      "binance_symbol": "TRUTHUSDT",
+      "gate_symbol": "TRUTH_USDT",
+      "binance_quote_volume_24h": 31400281.634032,
+      "gate_quote_volume_24h": 2186833,
+      "liquidity_score": 2186833,
+      "rank": 50
+    },
+    {
+      "symbol_id": "DOTUSDT",
+      "binance_symbol": "DOTUSDT",
+      "gate_symbol": "DOT_USDT",
+      "binance_quote_volume_24h": 41654888.538,
+      "gate_quote_volume_24h": 2174044,
+      "liquidity_score": 2174044,
+      "rank": 51
+    },
+    {
+      "symbol_id": "NEARUSDT",
+      "binance_symbol": "NEARUSDT",
+      "gate_symbol": "NEAR_USDT",
+      "binance_quote_volume_24h": 73745445.093,
+      "gate_quote_volume_24h": 2155113,
+      "liquidity_score": 2155113,
+      "rank": 52
+    },
+    {
+      "symbol_id": "ORDIUSDT",
+      "binance_symbol": "ORDIUSDT",
+      "gate_symbol": "ORDI_USDT",
+      "binance_quote_volume_24h": 24571462.6713,
+      "gate_quote_volume_24h": 2127427,
+      "liquidity_score": 2127427,
+      "rank": 53
+    },
+    {
+      "symbol_id": "WLDUSDT",
+      "binance_symbol": "WLDUSDT",
+      "gate_symbol": "WLD_USDT",
+      "binance_quote_volume_24h": 66739043.6518,
+      "gate_quote_volume_24h": 2009322,
+      "liquidity_score": 2009322,
+      "rank": 54
+    },
+    {
+      "symbol_id": "HUSDT",
+      "binance_symbol": "HUSDT",
+      "gate_symbol": "H_USDT",
+      "binance_quote_volume_24h": 33120939.72902,
+      "gate_quote_volume_24h": 2003631,
+      "liquidity_score": 2003631,
+      "rank": 55
+    },
+    {
+      "symbol_id": "NAORISUSDT",
+      "binance_symbol": "NAORISUSDT",
+      "gate_symbol": "NAORIS_USDT",
+      "binance_quote_volume_24h": 34403974.56546,
+      "gate_quote_volume_24h": 1999596,
+      "liquidity_score": 1999596,
+      "rank": 56
+    },
+    {
+      "symbol_id": "CGPTUSDT",
+      "binance_symbol": "CGPTUSDT",
+      "gate_symbol": "CGPT_USDT",
+      "binance_quote_volume_24h": 64248512.52023,
+      "gate_quote_volume_24h": 1851258,
+      "liquidity_score": 1851258,
+      "rank": 57
+    },
+    {
+      "symbol_id": "FHEUSDT",
+      "binance_symbol": "FHEUSDT",
+      "gate_symbol": "FHE_USDT",
+      "binance_quote_volume_24h": 18816382.72675,
+      "gate_quote_volume_24h": 1789734,
+      "liquidity_score": 1789734,
+      "rank": 58
+    },
+    {
+      "symbol_id": "SAHARAUSDT",
+      "binance_symbol": "SAHARAUSDT",
+      "gate_symbol": "SAHARA_USDT",
+      "binance_quote_volume_24h": 35766416.32681,
+      "gate_quote_volume_24h": 1778073,
+      "liquidity_score": 1778073,
+      "rank": 59
+    },
+    {
+      "symbol_id": "PENGUUSDT",
+      "binance_symbol": "PENGUUSDT",
+      "gate_symbol": "PENGU_USDT",
+      "binance_quote_volume_24h": 35587138.407614,
+      "gate_quote_volume_24h": 1730397,
+      "liquidity_score": 1730397,
+      "rank": 60
+    },
+    {
+      "symbol_id": "LYNUSDT",
+      "binance_symbol": "LYNUSDT",
+      "gate_symbol": "LYN_USDT",
+      "binance_quote_volume_24h": 36154766.02139,
+      "gate_quote_volume_24h": 1729545,
+      "liquidity_score": 1729545,
+      "rank": 61
+    },
+    {
+      "symbol_id": "TRBUSDT",
+      "binance_symbol": "TRBUSDT",
+      "gate_symbol": "TRB_USDT",
+      "binance_quote_volume_24h": 7392786.92,
+      "gate_quote_volume_24h": 1665827,
+      "liquidity_score": 1665827,
+      "rank": 62
+    },
+    {
+      "symbol_id": "APEUSDT",
+      "binance_symbol": "APEUSDT",
+      "gate_symbol": "APE_USDT",
+      "binance_quote_volume_24h": 14156320.4019,
+      "gate_quote_volume_24h": 1652305,
+      "liquidity_score": 1652305,
+      "rank": 63
+    },
+    {
+      "symbol_id": "XPLUSDT",
+      "binance_symbol": "XPLUSDT",
+      "gate_symbol": "XPL_USDT",
+      "binance_quote_volume_24h": 21985069.7633,
+      "gate_quote_volume_24h": 1623953,
+      "liquidity_score": 1623953,
+      "rank": 64
+    },
+    {
+      "symbol_id": "FFUSDT",
+      "binance_symbol": "FFUSDT",
+      "gate_symbol": "FF_USDT",
+      "binance_quote_volume_24h": 51885824.56315,
+      "gate_quote_volume_24h": 1601377,
+      "liquidity_score": 1601377,
+      "rank": 65
+    },
+    {
+      "symbol_id": "GUAUSDT",
+      "binance_symbol": "GUAUSDT",
+      "gate_symbol": "GUA_USDT",
+      "binance_quote_volume_24h": 74517774.00992,
+      "gate_quote_volume_24h": 1582754,
+      "liquidity_score": 1582754,
+      "rank": 66
+    },
+    {
+      "symbol_id": "ATOMUSDT",
+      "binance_symbol": "ATOMUSDT",
+      "gate_symbol": "ATOM_USDT",
+      "binance_quote_volume_24h": 47725363.451,
+      "gate_quote_volume_24h": 1547856,
+      "liquidity_score": 1547856,
+      "rank": 67
+    },
+    {
+      "symbol_id": "CHIPUSDT",
+      "binance_symbol": "CHIPUSDT",
+      "gate_symbol": "CHIP_USDT",
+      "binance_quote_volume_24h": 29074477.14992,
+      "gate_quote_volume_24h": 1497777,
+      "liquidity_score": 1497777,
+      "rank": 68
+    },
+    {
+      "symbol_id": "WIFUSDT",
+      "binance_symbol": "WIFUSDT",
+      "gate_symbol": "WIF_USDT",
+      "binance_quote_volume_24h": 17052638.37495,
+      "gate_quote_volume_24h": 1495388,
+      "liquidity_score": 1495388,
+      "rank": 69
+    },
+    {
+      "symbol_id": "SWARMSUSDT",
+      "binance_symbol": "SWARMSUSDT",
+      "gate_symbol": "SWARMS_USDT",
+      "binance_quote_volume_24h": 9787765.827872,
+      "gate_quote_volume_24h": 1486874,
+      "liquidity_score": 1486874,
+      "rank": 70
+    },
+    {
+      "symbol_id": "GALAUSDT",
+      "binance_symbol": "GALAUSDT",
+      "gate_symbol": "GALA_USDT",
+      "binance_quote_volume_24h": 7526585.068345,
+      "gate_quote_volume_24h": 1478472,
+      "liquidity_score": 1478472,
+      "rank": 71
+    },
+    {
+      "symbol_id": "TRXUSDT",
+      "binance_symbol": "TRXUSDT",
+      "gate_symbol": "TRX_USDT",
+      "binance_quote_volume_24h": 56351787.24853,
+      "gate_quote_volume_24h": 1421772,
+      "liquidity_score": 1421772,
+      "rank": 72
+    },
+    {
+      "symbol_id": "MYXUSDT",
+      "binance_symbol": "MYXUSDT",
+      "gate_symbol": "MYX_USDT",
+      "binance_quote_volume_24h": 8343767.3942,
+      "gate_quote_volume_24h": 1375334,
+      "liquidity_score": 1375334,
+      "rank": 73
+    },
+    {
+      "symbol_id": "INJUSDT",
+      "binance_symbol": "INJUSDT",
+      "gate_symbol": "INJ_USDT",
+      "binance_quote_volume_24h": 56903969.2434,
+      "gate_quote_volume_24h": 1369487,
+      "liquidity_score": 1369487,
+      "rank": 74
+    },
+    {
+      "symbol_id": "PAXGUSDT",
+      "binance_symbol": "PAXGUSDT",
+      "gate_symbol": "PAXG_USDT",
+      "binance_quote_volume_24h": 28664393.4928,
+      "gate_quote_volume_24h": 1354992,
+      "liquidity_score": 1354992,
+      "rank": 75
+    },
+    {
+      "symbol_id": "FETUSDT",
+      "binance_symbol": "FETUSDT",
+      "gate_symbol": "FET_USDT",
+      "binance_quote_volume_24h": 22794168.4321,
+      "gate_quote_volume_24h": 1350609,
+      "liquidity_score": 1350609,
+      "rank": 76
+    },
+    {
+      "symbol_id": "BASUSDT",
+      "binance_symbol": "BASUSDT",
+      "gate_symbol": "BAS_USDT",
+      "binance_quote_volume_24h": 28478368.313642,
+      "gate_quote_volume_24h": 1326674,
+      "liquidity_score": 1326674,
+      "rank": 77
+    },
+    {
+      "symbol_id": "XLMUSDT",
+      "binance_symbol": "XLMUSDT",
+      "gate_symbol": "XLM_USDT",
+      "binance_quote_volume_24h": 29848216.6979,
+      "gate_quote_volume_24h": 1314826,
+      "liquidity_score": 1314826,
+      "rank": 78
+    },
+    {
+      "symbol_id": "CLOUSDT",
+      "binance_symbol": "CLOUSDT",
+      "gate_symbol": "CLO_USDT",
+      "binance_quote_volume_24h": 22682117.96143,
+      "gate_quote_volume_24h": 1309494,
+      "liquidity_score": 1309494,
+      "rank": 79
+    },
+    {
+      "symbol_id": "PIEVERSEUSDT",
+      "binance_symbol": "PIEVERSEUSDT",
+      "gate_symbol": "PIEVERSE_USDT",
+      "binance_quote_volume_24h": 20195001.2569,
+      "gate_quote_volume_24h": 1253874,
+      "liquidity_score": 1253874,
+      "rank": 80
+    },
+    {
+      "symbol_id": "ASTERUSDT",
+      "binance_symbol": "ASTERUSDT",
+      "gate_symbol": "ASTER_USDT",
+      "binance_quote_volume_24h": 31219957.4873,
+      "gate_quote_volume_24h": 1235914,
+      "liquidity_score": 1235914,
+      "rank": 81
+    },
+    {
+      "symbol_id": "BEATUSDT",
+      "binance_symbol": "BEATUSDT",
+      "gate_symbol": "BEAT_USDT",
+      "binance_quote_volume_24h": 13492872.9643,
+      "gate_quote_volume_24h": 1226165,
+      "liquidity_score": 1226165,
+      "rank": 82
+    },
+    {
+      "symbol_id": "ETCUSDT",
+      "binance_symbol": "ETCUSDT",
+      "gate_symbol": "ETC_USDT",
+      "binance_quote_volume_24h": 25420119.402,
+      "gate_quote_volume_24h": 1165714,
+      "liquidity_score": 1165714,
+      "rank": 83
+    },
+    {
+      "symbol_id": "STABLEUSDT",
+      "binance_symbol": "STABLEUSDT",
+      "gate_symbol": "STABLE_USDT",
+      "binance_quote_volume_24h": 29839407.722171,
+      "gate_quote_volume_24h": 1152751,
+      "liquidity_score": 1152751,
+      "rank": 84
+    },
+    {
+      "symbol_id": "PUMPUSDT",
+      "binance_symbol": "PUMPUSDT",
+      "gate_symbol": "PUMP_USDT",
+      "binance_quote_volume_24h": 33596136.74238,
+      "gate_quote_volume_24h": 1059361,
+      "liquidity_score": 1059361,
+      "rank": 85
+    },
+    {
+      "symbol_id": "TAUSDT",
+      "binance_symbol": "TAUSDT",
+      "gate_symbol": "TA_USDT",
+      "binance_quote_volume_24h": 30452595.16156,
+      "gate_quote_volume_24h": 1040643,
+      "liquidity_score": 1040643,
+      "rank": 86
+    },
+    {
+      "symbol_id": "GWEIUSDT",
+      "binance_symbol": "GWEIUSDT",
+      "gate_symbol": "GWEI_USDT",
+      "binance_quote_volume_24h": 27357095.265565,
+      "gate_quote_volume_24h": 1036399,
+      "liquidity_score": 1036399,
+      "rank": 87
+    },
+    {
+      "symbol_id": "MEGAUSDT",
+      "binance_symbol": "MEGAUSDT",
+      "gate_symbol": "MEGA_USDT",
+      "binance_quote_volume_24h": 17162287.39541,
+      "gate_quote_volume_24h": 989608,
+      "liquidity_score": 989608,
+      "rank": 88
+    },
+    {
+      "symbol_id": "RUNEUSDT",
+      "binance_symbol": "RUNEUSDT",
+      "gate_symbol": "RUNE_USDT",
+      "binance_quote_volume_24h": 38373765.3426,
+      "gate_quote_volume_24h": 975493,
+      "liquidity_score": 975493,
+      "rank": 89
+    },
+    {
+      "symbol_id": "PLAYUSDT",
+      "binance_symbol": "PLAYUSDT",
+      "gate_symbol": "PLAY_USDT",
+      "binance_quote_volume_24h": 20184546.09828,
+      "gate_quote_volume_24h": 967980,
+      "liquidity_score": 967980,
+      "rank": 90
+    },
+    {
+      "symbol_id": "PIPPINUSDT",
+      "binance_symbol": "PIPPINUSDT",
+      "gate_symbol": "PIPPIN_USDT",
+      "binance_quote_volume_24h": 12579162.35894,
+      "gate_quote_volume_24h": 956486,
+      "liquidity_score": 956486,
+      "rank": 91
+    },
+    {
+      "symbol_id": "BIOUSDT",
+      "binance_symbol": "BIOUSDT",
+      "gate_symbol": "BIO_USDT",
+      "binance_quote_volume_24h": 12498548.38906,
+      "gate_quote_volume_24h": 946774,
+      "liquidity_score": 946774,
+      "rank": 92
+    },
+    {
+      "symbol_id": "CYSUSDT",
+      "binance_symbol": "CYSUSDT",
+      "gate_symbol": "CYS_USDT",
+      "binance_quote_volume_24h": 7761793.4781,
+      "gate_quote_volume_24h": 937253,
+      "liquidity_score": 937253,
+      "rank": 93
+    },
+    {
+      "symbol_id": "CRVUSDT",
+      "binance_symbol": "CRVUSDT",
+      "gate_symbol": "CRV_USDT",
+      "binance_quote_volume_24h": 16776338.639395,
+      "gate_quote_volume_24h": 917602,
+      "liquidity_score": 917602,
+      "rank": 94
+    },
+    {
+      "symbol_id": "ZBTUSDT",
+      "binance_symbol": "ZBTUSDT",
+      "gate_symbol": "ZBT_USDT",
+      "binance_quote_volume_24h": 41512590.80421,
+      "gate_quote_volume_24h": 904430,
+      "liquidity_score": 904430,
+      "rank": 95
+    },
+    {
+      "symbol_id": "POLYXUSDT",
+      "binance_symbol": "POLYXUSDT",
+      "gate_symbol": "POLYX_USDT",
+      "binance_quote_volume_24h": 21750814.52125,
+      "gate_quote_volume_24h": 848975,
+      "liquidity_score": 848975,
+      "rank": 96
+    },
+    {
+      "symbol_id": "PNUTUSDT",
+      "binance_symbol": "PNUTUSDT",
+      "gate_symbol": "PNUT_USDT",
+      "binance_quote_volume_24h": 9724857.75054,
+      "gate_quote_volume_24h": 824259,
+      "liquidity_score": 824259,
+      "rank": 97
+    },
+    {
+      "symbol_id": "AIXBTUSDT",
+      "binance_symbol": "AIXBTUSDT",
+      "gate_symbol": "AIXBT_USDT",
+      "binance_quote_volume_24h": 10005271.76339,
+      "gate_quote_volume_24h": 797208,
+      "liquidity_score": 797208,
+      "rank": 98
+    },
+    {
+      "symbol_id": "JCTUSDT",
+      "binance_symbol": "JCTUSDT",
+      "gate_symbol": "JCT_USDT",
+      "binance_quote_volume_24h": 17114340.885308,
+      "gate_quote_volume_24h": 758503,
+      "liquidity_score": 758503,
+      "rank": 99
+    },
+    {
+      "symbol_id": "BASEDUSDT",
+      "binance_symbol": "BASEDUSDT",
+      "gate_symbol": "BASED_USDT",
+      "binance_quote_volume_24h": 15260545.19039,
+      "gate_quote_volume_24h": 750813,
+      "liquidity_score": 750813,
+      "rank": 100
+    },
+    {
+      "symbol_id": "APTUSDT",
+      "binance_symbol": "APTUSDT",
+      "gate_symbol": "APT_USDT",
+      "binance_quote_volume_24h": 22713629.71821,
+      "gate_quote_volume_24h": 727111,
+      "liquidity_score": 727111,
+      "rank": 101
+    },
+    {
+      "symbol_id": "KITEUSDT",
+      "binance_symbol": "KITEUSDT",
+      "gate_symbol": "KITE_USDT",
+      "binance_quote_volume_24h": 25331611.04448,
+      "gate_quote_volume_24h": 726033,
+      "liquidity_score": 726033,
+      "rank": 102
+    },
+    {
+      "symbol_id": "ZEREBROUSDT",
+      "binance_symbol": "ZEREBROUSDT",
+      "gate_symbol": "ZEREBRO_USDT",
+      "binance_quote_volume_24h": 15117623.401832,
+      "gate_quote_volume_24h": 721490,
+      "liquidity_score": 721490,
+      "rank": 103
+    },
+    {
+      "symbol_id": "BSVUSDT",
+      "binance_symbol": "BSVUSDT",
+      "gate_symbol": "BSV_USDT",
+      "binance_quote_volume_24h": 1271116.515,
+      "gate_quote_volume_24h": 717301,
+      "liquidity_score": 717301,
+      "rank": 104
+    },
+    {
+      "symbol_id": "SOONUSDT",
+      "binance_symbol": "SOONUSDT",
+      "gate_symbol": "SOON_USDT",
+      "binance_quote_volume_24h": 7453313.0645,
+      "gate_quote_volume_24h": 669502,
+      "liquidity_score": 669502,
+      "rank": 105
+    },
+    {
+      "symbol_id": "TIAUSDT",
+      "binance_symbol": "TIAUSDT",
+      "gate_symbol": "TIA_USDT",
+      "binance_quote_volume_24h": 25677598.3572,
+      "gate_quote_volume_24h": 662583,
+      "liquidity_score": 662583,
+      "rank": 106
+    },
+    {
+      "symbol_id": "BABYUSDT",
+      "binance_symbol": "BABYUSDT",
+      "gate_symbol": "BABY_USDT",
+      "binance_quote_volume_24h": 12533471.57756,
+      "gate_quote_volume_24h": 649638,
+      "liquidity_score": 649638,
+      "rank": 107
+    },
+    {
+      "symbol_id": "币安人生USDT",
+      "binance_symbol": "币安人生USDT",
+      "gate_symbol": "币安人生_USDT",
+      "binance_quote_volume_24h": 25563429.74371,
+      "gate_quote_volume_24h": 642625,
+      "liquidity_score": 642625,
+      "rank": 108
+    },
+    {
+      "symbol_id": "GIGGLEUSDT",
+      "binance_symbol": "GIGGLEUSDT",
+      "gate_symbol": "GIGGLE_USDT",
+      "binance_quote_volume_24h": 11483809.5797,
+      "gate_quote_volume_24h": 642226,
+      "liquidity_score": 642226,
+      "rank": 109
+    },
+    {
+      "symbol_id": "MONUSDT",
+      "binance_symbol": "MONUSDT",
+      "gate_symbol": "MON_USDT",
+      "binance_quote_volume_24h": 8850631.91116,
+      "gate_quote_volume_24h": 630689,
+      "liquidity_score": 630689,
+      "rank": 110
+    },
+    {
+      "symbol_id": "IOUSDT",
+      "binance_symbol": "IOUSDT",
+      "gate_symbol": "IO_USDT",
+      "binance_quote_volume_24h": 3208784.17606,
+      "gate_quote_volume_24h": 626867,
+      "liquidity_score": 626867,
+      "rank": 111
+    },
+    {
+      "symbol_id": "SYSUSDT",
+      "binance_symbol": "SYSUSDT",
+      "gate_symbol": "SYS_USDT",
+      "binance_quote_volume_24h": 31069376.33429,
+      "gate_quote_volume_24h": 607399,
+      "liquidity_score": 607399,
+      "rank": 112
+    },
+    {
+      "symbol_id": "VICUSDT",
+      "binance_symbol": "VICUSDT",
+      "gate_symbol": "VIC_USDT",
+      "binance_quote_volume_24h": 11180440.4496,
+      "gate_quote_volume_24h": 605657,
+      "liquidity_score": 605657,
+      "rank": 113
+    },
+    {
+      "symbol_id": "DYMUSDT",
+      "binance_symbol": "DYMUSDT",
+      "gate_symbol": "DYM_USDT",
+      "binance_quote_volume_24h": 8334487.736385,
+      "gate_quote_volume_24h": 599087,
+      "liquidity_score": 599087,
+      "rank": 114
+    },
+    {
+      "symbol_id": "OPGUSDT",
+      "binance_symbol": "OPGUSDT",
+      "gate_symbol": "OPG_USDT",
+      "binance_quote_volume_24h": 11661392.1666,
+      "gate_quote_volume_24h": 595597,
+      "liquidity_score": 595597,
+      "rank": 115
+    },
+    {
+      "symbol_id": "SPXUSDT",
+      "binance_symbol": "SPXUSDT",
+      "gate_symbol": "SPX_USDT",
+      "binance_quote_volume_24h": 6406507.167,
+      "gate_quote_volume_24h": 586979,
+      "liquidity_score": 586979,
+      "rank": 116
+    },
+    {
+      "symbol_id": "INXUSDT",
+      "binance_symbol": "INXUSDT",
+      "gate_symbol": "INX_USDT",
+      "binance_quote_volume_24h": 8696517.238982,
+      "gate_quote_volume_24h": 585169,
+      "liquidity_score": 585169,
+      "rank": 117
+    },
+    {
+      "symbol_id": "SEIUSDT",
+      "binance_symbol": "SEIUSDT",
+      "gate_symbol": "SEI_USDT",
+      "binance_quote_volume_24h": 13307492.55665,
+      "gate_quote_volume_24h": 582465,
+      "liquidity_score": 582465,
+      "rank": 118
+    },
+    {
+      "symbol_id": "STARUSDT",
+      "binance_symbol": "STARUSDT",
+      "gate_symbol": "STAR_USDT",
+      "binance_quote_volume_24h": 8094922.72919,
+      "gate_quote_volume_24h": 562142,
+      "liquidity_score": 562142,
+      "rank": 119
+    },
+    {
+      "symbol_id": "DASHUSDT",
+      "binance_symbol": "DASHUSDT",
+      "gate_symbol": "DASH_USDT",
+      "binance_quote_volume_24h": 24875932.64,
+      "gate_quote_volume_24h": 555313,
+      "liquidity_score": 555313,
+      "rank": 120
+    },
+    {
+      "symbol_id": "AKEUSDT",
+      "binance_symbol": "AKEUSDT",
+      "gate_symbol": "AKE_USDT",
+      "binance_quote_volume_24h": 11193621.1526918,
+      "gate_quote_volume_24h": 554824,
+      "liquidity_score": 554824,
+      "rank": 121
+    },
+    {
+      "symbol_id": "JELLYJELLYUSDT",
+      "binance_symbol": "JELLYJELLYUSDT",
+      "gate_symbol": "JELLYJELLY_USDT",
+      "binance_quote_volume_24h": 7952854.33966,
+      "gate_quote_volume_24h": 553362,
+      "liquidity_score": 553362,
+      "rank": 122
+    },
+    {
+      "symbol_id": "IPUSDT",
+      "binance_symbol": "IPUSDT",
+      "gate_symbol": "IP_USDT",
+      "binance_quote_volume_24h": 8150572.09211,
+      "gate_quote_volume_24h": 550051,
+      "liquidity_score": 550051,
+      "rank": 123
+    },
+    {
+      "symbol_id": "ETHFIUSDT",
+      "binance_symbol": "ETHFIUSDT",
+      "gate_symbol": "ETHFI_USDT",
+      "binance_quote_volume_24h": 12904826.1931,
+      "gate_quote_volume_24h": 543870,
+      "liquidity_score": 543870,
+      "rank": 124
+    },
+    {
+      "symbol_id": "RESOLVUSDT",
+      "binance_symbol": "RESOLVUSDT",
+      "gate_symbol": "RESOLV_USDT",
+      "binance_quote_volume_24h": 3563523.25778,
+      "gate_quote_volume_24h": 534355,
+      "liquidity_score": 534355,
+      "rank": 125
+    },
+    {
+      "symbol_id": "AXSUSDT",
+      "binance_symbol": "AXSUSDT",
+      "gate_symbol": "AXS_USDT",
+      "binance_quote_volume_24h": 11419924.633,
+      "gate_quote_volume_24h": 530704,
+      "liquidity_score": 530704,
+      "rank": 126
+    },
+    {
+      "symbol_id": "YBUSDT",
+      "binance_symbol": "YBUSDT",
+      "gate_symbol": "YB_USDT",
+      "binance_quote_volume_24h": 7416400.9086,
+      "gate_quote_volume_24h": 525557,
+      "liquidity_score": 525557,
+      "rank": 127
+    },
+    {
+      "symbol_id": "PENDLEUSDT",
+      "binance_symbol": "PENDLEUSDT",
+      "gate_symbol": "PENDLE_USDT",
+      "binance_quote_volume_24h": 27828126.6451,
+      "gate_quote_volume_24h": 520425,
+      "liquidity_score": 520425,
+      "rank": 128
+    },
+    {
+      "symbol_id": "BERAUSDT",
+      "binance_symbol": "BERAUSDT",
+      "gate_symbol": "BERA_USDT",
+      "binance_quote_volume_24h": 10207666.14314,
+      "gate_quote_volume_24h": 519148,
+      "liquidity_score": 519148,
+      "rank": 129
+    },
+    {
+      "symbol_id": "TRADOORUSDT",
+      "binance_symbol": "TRADOORUSDT",
+      "gate_symbol": "TRADOOR_USDT",
+      "binance_quote_volume_24h": 8701612.4742,
+      "gate_quote_volume_24h": 513992,
+      "liquidity_score": 513992,
+      "rank": 130
+    },
+    {
+      "symbol_id": "HBARUSDT",
+      "binance_symbol": "HBARUSDT",
+      "gate_symbol": "HBAR_USDT",
+      "binance_quote_volume_24h": 24189640.18327,
+      "gate_quote_volume_24h": 501704,
+      "liquidity_score": 501704,
+      "rank": 131
+    },
+    {
+      "symbol_id": "KATUSDT",
+      "binance_symbol": "KATUSDT",
+      "gate_symbol": "KAT_USDT",
+      "binance_quote_volume_24h": 7959599.17448,
+      "gate_quote_volume_24h": 500084,
+      "liquidity_score": 500084,
+      "rank": 132
+    },
+    {
+      "symbol_id": "MUSDT",
+      "binance_symbol": "MUSDT",
+      "gate_symbol": "M_USDT",
+      "binance_quote_volume_24h": 4111200.4907,
+      "gate_quote_volume_24h": 496687,
+      "liquidity_score": 496687,
+      "rank": 133
+    },
+    {
+      "symbol_id": "KASUSDT",
+      "binance_symbol": "KASUSDT",
+      "gate_symbol": "KAS_USDT",
+      "binance_quote_volume_24h": 3402538.24648,
+      "gate_quote_volume_24h": 493798,
+      "liquidity_score": 493798,
+      "rank": 134
+    },
+    {
+      "symbol_id": "STRKUSDT",
+      "binance_symbol": "STRKUSDT",
+      "gate_symbol": "STRK_USDT",
+      "binance_quote_volume_24h": 9072092.154378,
+      "gate_quote_volume_24h": 493617,
+      "liquidity_score": 493617,
+      "rank": 135
+    },
+    {
+      "symbol_id": "MOODENGUSDT",
+      "binance_symbol": "MOODENGUSDT",
+      "gate_symbol": "MOODENG_USDT",
+      "binance_quote_volume_24h": 4738935.74138,
+      "gate_quote_volume_24h": 491987,
+      "liquidity_score": 491987,
+      "rank": 136
+    },
+    {
+      "symbol_id": "QUSDT",
+      "binance_symbol": "QUSDT",
+      "gate_symbol": "Q_USDT",
+      "binance_quote_volume_24h": 13606675.168546,
+      "gate_quote_volume_24h": 486733,
+      "liquidity_score": 486733,
+      "rank": 137
+    },
+    {
+      "symbol_id": "BTRUSDT",
+      "binance_symbol": "BTRUSDT",
+      "gate_symbol": "BTR_USDT",
+      "binance_quote_volume_24h": 2989577.70721,
+      "gate_quote_volume_24h": 475737,
+      "liquidity_score": 475737,
+      "rank": 138
+    },
+    {
+      "symbol_id": "BOMEUSDT",
+      "binance_symbol": "BOMEUSDT",
+      "gate_symbol": "BOME_USDT",
+      "binance_quote_volume_24h": 6848866.4899384,
+      "gate_quote_volume_24h": 468460,
+      "liquidity_score": 468460,
+      "rank": 139
+    },
+    {
+      "symbol_id": "CCUSDT",
+      "binance_symbol": "CCUSDT",
+      "gate_symbol": "CC_USDT",
+      "binance_quote_volume_24h": 20031201.61826,
+      "gate_quote_volume_24h": 464179,
+      "liquidity_score": 464179,
+      "rank": 140
+    },
+    {
+      "symbol_id": "SPKUSDT",
+      "binance_symbol": "SPKUSDT",
+      "gate_symbol": "SPK_USDT",
+      "binance_quote_volume_24h": 10421469.9481,
+      "gate_quote_volume_24h": 458896,
+      "liquidity_score": 458896,
+      "rank": 141
+    },
+    {
+      "symbol_id": "DOGSUSDT",
+      "binance_symbol": "DOGSUSDT",
+      "gate_symbol": "DOGS_USDT",
+      "binance_quote_volume_24h": 14169767.96732219,
+      "gate_quote_volume_24h": 446662,
+      "liquidity_score": 446662,
+      "rank": 142
+    },
+    {
+      "symbol_id": "KGENUSDT",
+      "binance_symbol": "KGENUSDT",
+      "gate_symbol": "KGEN_USDT",
+      "binance_quote_volume_24h": 5981128.51891,
+      "gate_quote_volume_24h": 436420,
+      "liquidity_score": 436420,
+      "rank": 143
+    },
+    {
+      "symbol_id": "GOATUSDT",
+      "binance_symbol": "GOATUSDT",
+      "gate_symbol": "GOAT_USDT",
+      "binance_quote_volume_24h": 3243369.58047,
+      "gate_quote_volume_24h": 434424,
+      "liquidity_score": 434424,
+      "rank": 144
+    },
+    {
+      "symbol_id": "NMRUSDT",
+      "binance_symbol": "NMRUSDT",
+      "gate_symbol": "NMR_USDT",
+      "binance_quote_volume_24h": 44522575.2328,
+      "gate_quote_volume_24h": 432101,
+      "liquidity_score": 432101,
+      "rank": 145
+    },
+    {
+      "symbol_id": "AZTECUSDT",
+      "binance_symbol": "AZTECUSDT",
+      "gate_symbol": "AZTEC_USDT",
+      "binance_quote_volume_24h": 1648353.25088,
+      "gate_quote_volume_24h": 428924,
+      "liquidity_score": 428924,
+      "rank": 146
+    },
+    {
+      "symbol_id": "EDENUSDT",
+      "binance_symbol": "EDENUSDT",
+      "gate_symbol": "EDEN_USDT",
+      "binance_quote_volume_24h": 9811953.39115,
+      "gate_quote_volume_24h": 426257,
+      "liquidity_score": 426257,
+      "rank": 147
+    },
+    {
+      "symbol_id": "PARTIUSDT",
+      "binance_symbol": "PARTIUSDT",
+      "gate_symbol": "PARTI_USDT",
+      "binance_quote_volume_24h": 8070320.15836,
+      "gate_quote_volume_24h": 421339,
+      "liquidity_score": 421339,
+      "rank": 148
+    },
+    {
+      "symbol_id": "LDOUSDT",
+      "binance_symbol": "LDOUSDT",
+      "gate_symbol": "LDO_USDT",
+      "binance_quote_volume_24h": 11730678.4474,
+      "gate_quote_volume_24h": 414335,
+      "liquidity_score": 414335,
+      "rank": 149
+    },
+    {
+      "symbol_id": "USELESSUSDT",
+      "binance_symbol": "USELESSUSDT",
+      "gate_symbol": "USELESS_USDT",
+      "binance_quote_volume_24h": 6261179.48794,
+      "gate_quote_volume_24h": 412947,
+      "liquidity_score": 412947,
+      "rank": 150
+    },
+    {
+      "symbol_id": "POLUSDT",
+      "binance_symbol": "POLUSDT",
+      "gate_symbol": "POL_USDT",
+      "binance_quote_volume_24h": 8840377.67076,
+      "gate_quote_volume_24h": 397552,
+      "liquidity_score": 397552,
+      "rank": 151
+    },
+    {
+      "symbol_id": "OPUSDT",
+      "binance_symbol": "OPUSDT",
+      "gate_symbol": "OP_USDT",
+      "binance_quote_volume_24h": 18243970.74727,
+      "gate_quote_volume_24h": 394067,
+      "liquidity_score": 394067,
+      "rank": 152
+    },
+    {
+      "symbol_id": "USUSDT",
+      "binance_symbol": "USUSDT",
+      "gate_symbol": "US_USDT",
+      "binance_quote_volume_24h": 4989080.591825,
+      "gate_quote_volume_24h": 389157,
+      "liquidity_score": 389157,
+      "rank": 153
+    },
+    {
+      "symbol_id": "LAYERUSDT",
+      "binance_symbol": "LAYERUSDT",
+      "gate_symbol": "LAYER_USDT",
+      "binance_quote_volume_24h": 16691956.569468,
+      "gate_quote_volume_24h": 389075,
+      "liquidity_score": 389075,
+      "rank": 154
+    },
+    {
+      "symbol_id": "ENSOUSDT",
+      "binance_symbol": "ENSOUSDT",
+      "gate_symbol": "ENSO_USDT",
+      "binance_quote_volume_24h": 6688911.73943,
+      "gate_quote_volume_24h": 384120,
+      "liquidity_score": 384120,
+      "rank": 155
+    },
+    {
+      "symbol_id": "NILUSDT",
+      "binance_symbol": "NILUSDT",
+      "gate_symbol": "NIL_USDT",
+      "binance_quote_volume_24h": 7317591.837597,
+      "gate_quote_volume_24h": 348639,
+      "liquidity_score": 348639,
+      "rank": 156
+    },
+    {
+      "symbol_id": "MERLUSDT",
+      "binance_symbol": "MERLUSDT",
+      "gate_symbol": "MERL_USDT",
+      "binance_quote_volume_24h": 3309487.43191,
+      "gate_quote_volume_24h": 339401,
+      "liquidity_score": 339401,
+      "rank": 157
+    },
+    {
+      "symbol_id": "BLUAIUSDT",
+      "binance_symbol": "BLUAIUSDT",
+      "gate_symbol": "BLUAI_USDT",
+      "binance_quote_volume_24h": 23067181.66324,
+      "gate_quote_volume_24h": 339118,
+      "liquidity_score": 339118,
+      "rank": 158
+    },
+    {
+      "symbol_id": "AWEUSDT",
+      "binance_symbol": "AWEUSDT",
+      "gate_symbol": "AWE_USDT",
+      "binance_quote_volume_24h": 3521748.0524,
+      "gate_quote_volume_24h": 338518,
+      "liquidity_score": 338518,
+      "rank": 159
+    },
+    {
+      "symbol_id": "ESPORTSUSDT",
+      "binance_symbol": "ESPORTSUSDT",
+      "gate_symbol": "ESPORTS_USDT",
+      "binance_quote_volume_24h": 12800402.97608,
+      "gate_quote_volume_24h": 320043,
+      "liquidity_score": 320043,
+      "rank": 160
+    },
+    {
+      "symbol_id": "PEOPLEUSDT",
+      "binance_symbol": "PEOPLEUSDT",
+      "gate_symbol": "PEOPLE_USDT",
+      "binance_quote_volume_24h": 2527376.87932,
+      "gate_quote_volume_24h": 318660,
+      "liquidity_score": 318660,
+      "rank": 161
+    },
+    {
+      "symbol_id": "TACUSDT",
+      "binance_symbol": "TACUSDT",
+      "gate_symbol": "TAC_USDT",
+      "binance_quote_volume_24h": 10625986.854519,
+      "gate_quote_volume_24h": 314114,
+      "liquidity_score": 314114,
+      "rank": 162
+    },
+    {
+      "symbol_id": "SANDUSDT",
+      "binance_symbol": "SANDUSDT",
+      "gate_symbol": "SAND_USDT",
+      "binance_quote_volume_24h": 9666759.32322,
+      "gate_quote_volume_24h": 310803,
+      "liquidity_score": 310803,
+      "rank": 163
+    },
+    {
+      "symbol_id": "AVNTUSDT",
+      "binance_symbol": "AVNTUSDT",
+      "gate_symbol": "AVNT_USDT",
+      "binance_quote_volume_24h": 3921182.4323,
+      "gate_quote_volume_24h": 310073,
+      "liquidity_score": 310073,
+      "rank": 164
+    },
+    {
+      "symbol_id": "BANUSDT",
+      "binance_symbol": "BANUSDT",
+      "gate_symbol": "BAN_USDT",
+      "binance_quote_volume_24h": 3601734.80879,
+      "gate_quote_volume_24h": 307908,
+      "liquidity_score": 307908,
+      "rank": 165
+    },
+    {
+      "symbol_id": "EGLDUSDT",
+      "binance_symbol": "EGLDUSDT",
+      "gate_symbol": "EGLD_USDT",
+      "binance_quote_volume_24h": 3227116.134,
+      "gate_quote_volume_24h": 307566,
+      "liquidity_score": 307566,
+      "rank": 166
+    },
+    {
+      "symbol_id": "ARUSDT",
+      "binance_symbol": "ARUSDT",
+      "gate_symbol": "AR_USDT",
+      "binance_quote_volume_24h": 6300700.95,
+      "gate_quote_volume_24h": 307456,
+      "liquidity_score": 307456,
+      "rank": 167
+    },
+    {
+      "symbol_id": "BLESSUSDT",
+      "binance_symbol": "BLESSUSDT",
+      "gate_symbol": "BLESS_USDT",
+      "binance_quote_volume_24h": 2786623.497827,
+      "gate_quote_volume_24h": 307094,
+      "liquidity_score": 307094,
+      "rank": 168
+    },
+    {
+      "symbol_id": "TURBOUSDT",
+      "binance_symbol": "TURBOUSDT",
+      "gate_symbol": "TURBO_USDT",
+      "binance_quote_volume_24h": 5049622.4534146,
+      "gate_quote_volume_24h": 303917,
+      "liquidity_score": 303917,
+      "rank": 169
+    },
+    {
+      "symbol_id": "MITOUSDT",
+      "binance_symbol": "MITOUSDT",
+      "gate_symbol": "MITO_USDT",
+      "binance_quote_volume_24h": 4530052.45938,
+      "gate_quote_volume_24h": 303688,
+      "liquidity_score": 303688,
+      "rank": 170
+    },
+    {
+      "symbol_id": "JUPUSDT",
+      "binance_symbol": "JUPUSDT",
+      "gate_symbol": "JUP_USDT",
+      "binance_quote_volume_24h": 7596086.6785,
+      "gate_quote_volume_24h": 301936,
+      "liquidity_score": 301936,
+      "rank": 171
+    },
+    {
+      "symbol_id": "KAIAUSDT",
+      "binance_symbol": "KAIAUSDT",
+      "gate_symbol": "KAIA_USDT",
+      "binance_quote_volume_24h": 8745625.73117,
+      "gate_quote_volume_24h": 301169,
+      "liquidity_score": 301169,
+      "rank": 172
+    },
+    {
+      "symbol_id": "XPINUSDT",
+      "binance_symbol": "XPINUSDT",
+      "gate_symbol": "XPIN_USDT",
+      "binance_quote_volume_24h": 3173076.689631,
+      "gate_quote_volume_24h": 299290,
+      "liquidity_score": 299290,
+      "rank": 173
+    },
+    {
+      "symbol_id": "KERNELUSDT",
+      "binance_symbol": "KERNELUSDT",
+      "gate_symbol": "KERNEL_USDT",
+      "binance_quote_volume_24h": 4287993.38131,
+      "gate_quote_volume_24h": 298868,
+      "liquidity_score": 298868,
+      "rank": 174
+    },
+    {
+      "symbol_id": "COAIUSDT",
+      "binance_symbol": "COAIUSDT",
+      "gate_symbol": "COAI_USDT",
+      "binance_quote_volume_24h": 3021791.4711,
+      "gate_quote_volume_24h": 289598,
+      "liquidity_score": 289598,
+      "rank": 175
+    },
+    {
+      "symbol_id": "COLLECTUSDT",
+      "binance_symbol": "COLLECTUSDT",
+      "gate_symbol": "COLLECT_USDT",
+      "binance_quote_volume_24h": 8595037.13682,
+      "gate_quote_volume_24h": 285654,
+      "liquidity_score": 285654,
+      "rank": 176
+    },
+    {
+      "symbol_id": "ENSUSDT",
+      "binance_symbol": "ENSUSDT",
+      "gate_symbol": "ENS_USDT",
+      "binance_quote_volume_24h": 5550511.149,
+      "gate_quote_volume_24h": 283712,
+      "liquidity_score": 283712,
+      "rank": 177
+    },
+    {
+      "symbol_id": "ARIAUSDT",
+      "binance_symbol": "ARIAUSDT",
+      "gate_symbol": "ARIA_USDT",
+      "binance_quote_volume_24h": 2773878.0243,
+      "gate_quote_volume_24h": 283500,
+      "liquidity_score": 283500,
+      "rank": 178
+    },
+    {
+      "symbol_id": "QNTUSDT",
+      "binance_symbol": "QNTUSDT",
+      "gate_symbol": "QNT_USDT",
+      "binance_quote_volume_24h": 25417657.092,
+      "gate_quote_volume_24h": 281124,
+      "liquidity_score": 281124,
+      "rank": 179
+    },
+    {
+      "symbol_id": "AKTUSDT",
+      "binance_symbol": "AKTUSDT",
+      "gate_symbol": "AKT_USDT",
+      "binance_quote_volume_24h": 5836148.07361,
+      "gate_quote_volume_24h": 278586,
+      "liquidity_score": 278586,
+      "rank": 180
+    },
+    {
+      "symbol_id": "ZROUSDT",
+      "binance_symbol": "ZROUSDT",
+      "gate_symbol": "ZRO_USDT",
+      "binance_quote_volume_24h": 9307324.97257,
+      "gate_quote_volume_24h": 275875,
+      "liquidity_score": 275875,
+      "rank": 181
+    },
+    {
+      "symbol_id": "ZRXUSDT",
+      "binance_symbol": "ZRXUSDT",
+      "gate_symbol": "ZRX_USDT",
+      "binance_quote_volume_24h": 1533978.5318,
+      "gate_quote_volume_24h": 271112,
+      "liquidity_score": 271112,
+      "rank": 182
+    },
+    {
+      "symbol_id": "LIGHTUSDT",
+      "binance_symbol": "LIGHTUSDT",
+      "gate_symbol": "LIGHT_USDT",
+      "binance_quote_volume_24h": 3347244.9022,
+      "gate_quote_volume_24h": 270085,
+      "liquidity_score": 270085,
+      "rank": 183
+    },
+    {
+      "symbol_id": "KAITOUSDT",
+      "binance_symbol": "KAITOUSDT",
+      "gate_symbol": "KAITO_USDT",
+      "binance_quote_volume_24h": 5358705.78124,
+      "gate_quote_volume_24h": 269993,
+      "liquidity_score": 269993,
+      "rank": 184
+    },
+    {
+      "symbol_id": "4USDT",
+      "binance_symbol": "4USDT",
+      "gate_symbol": "4_USDT",
+      "binance_quote_volume_24h": 2188845.49544,
+      "gate_quote_volume_24h": 269923,
+      "liquidity_score": 269923,
+      "rank": 185
+    },
+    {
+      "symbol_id": "STXUSDT",
+      "binance_symbol": "STXUSDT",
+      "gate_symbol": "STX_USDT",
+      "binance_quote_volume_24h": 7234125.7902,
+      "gate_quote_volume_24h": 266944,
+      "liquidity_score": 266944,
+      "rank": 186
+    },
+    {
+      "symbol_id": "HANAUSDT",
+      "binance_symbol": "HANAUSDT",
+      "gate_symbol": "HANA_USDT",
+      "binance_quote_volume_24h": 2796622.40713,
+      "gate_quote_volume_24h": 264968,
+      "liquidity_score": 264968,
+      "rank": 187
+    },
+    {
+      "symbol_id": "BRUSDT",
+      "binance_symbol": "BRUSDT",
+      "gate_symbol": "BR_USDT",
+      "binance_quote_volume_24h": 1616216.47118,
+      "gate_quote_volume_24h": 263000,
+      "liquidity_score": 263000,
+      "rank": 188
+    },
+    {
+      "symbol_id": "BLURUSDT",
+      "binance_symbol": "BLURUSDT",
+      "gate_symbol": "BLUR_USDT",
+      "binance_quote_volume_24h": 3327168.83114,
+      "gate_quote_volume_24h": 260380,
+      "liquidity_score": 260380,
+      "rank": 189
+    },
+    {
+      "symbol_id": "NOTUSDT",
+      "binance_symbol": "NOTUSDT",
+      "gate_symbol": "NOT_USDT",
+      "binance_quote_volume_24h": 3840927.5017034,
+      "gate_quote_volume_24h": 255410,
+      "liquidity_score": 255410,
+      "rank": 190
+    },
+    {
+      "symbol_id": "GENIUSUSDT",
+      "binance_symbol": "GENIUSUSDT",
+      "gate_symbol": "GENIUS_USDT",
+      "binance_quote_volume_24h": 5432693.5035,
+      "gate_quote_volume_24h": 251425,
+      "liquidity_score": 251425,
+      "rank": 191
+    },
+    {
+      "symbol_id": "RENDERUSDT",
+      "binance_symbol": "RENDERUSDT",
+      "gate_symbol": "RENDER_USDT",
+      "binance_quote_volume_24h": 21160982.1428,
+      "gate_quote_volume_24h": 250117,
+      "liquidity_score": 250117,
+      "rank": 192
+    },
+    {
+      "symbol_id": "GPSUSDT",
+      "binance_symbol": "GPSUSDT",
+      "gate_symbol": "GPS_USDT",
+      "binance_quote_volume_24h": 15473181.01334,
+      "gate_quote_volume_24h": 247407,
+      "liquidity_score": 247407,
+      "rank": 193
+    },
+    {
+      "symbol_id": "MORPHOUSDT",
+      "binance_symbol": "MORPHOUSDT",
+      "gate_symbol": "MORPHO_USDT",
+      "binance_quote_volume_24h": 5100481.44459,
+      "gate_quote_volume_24h": 238349,
+      "liquidity_score": 238349,
+      "rank": 194
+    },
+    {
+      "symbol_id": "SQDUSDT",
+      "binance_symbol": "SQDUSDT",
+      "gate_symbol": "SQD_USDT",
+      "binance_quote_volume_24h": 2596962.23775,
+      "gate_quote_volume_24h": 236391,
+      "liquidity_score": 236391,
+      "rank": 195
+    },
+    {
+      "symbol_id": "SPACEUSDT",
+      "binance_symbol": "SPACEUSDT",
+      "gate_symbol": "SPACE_USDT",
+      "binance_quote_volume_24h": 2385977.407044,
+      "gate_quote_volume_24h": 233538,
+      "liquidity_score": 233538,
+      "rank": 196
+    },
+    {
+      "symbol_id": "PYTHUSDT",
+      "binance_symbol": "PYTHUSDT",
+      "gate_symbol": "PYTH_USDT",
+      "binance_quote_volume_24h": 6026108.53206,
+      "gate_quote_volume_24h": 229945,
+      "liquidity_score": 229945,
+      "rank": 197
+    },
+    {
+      "symbol_id": "我踏马来了USDT",
+      "binance_symbol": "我踏马来了USDT",
+      "gate_symbol": "我踏马来了_USDT",
+      "binance_quote_volume_24h": 1814590.26199,
+      "gate_quote_volume_24h": 223599,
+      "liquidity_score": 223599,
+      "rank": 198
+    },
+    {
+      "symbol_id": "XANUSDT",
+      "binance_symbol": "XANUSDT",
+      "gate_symbol": "XAN_USDT",
+      "binance_quote_volume_24h": 2921994.86499,
+      "gate_quote_volume_24h": 221377,
+      "liquidity_score": 221377,
+      "rank": 199
+    },
+    {
+      "symbol_id": "TAGUSDT",
+      "binance_symbol": "TAGUSDT",
+      "gate_symbol": "TAG_USDT",
+      "binance_quote_volume_24h": 3636887.1795314,
+      "gate_quote_volume_24h": 219029,
+      "liquidity_score": 219029,
+      "rank": 200
+    },
+    {
+      "symbol_id": "JTOUSDT",
+      "binance_symbol": "JTOUSDT",
+      "gate_symbol": "JTO_USDT",
+      "binance_quote_volume_24h": 12846949.0479,
+      "gate_quote_volume_24h": 217641,
+      "liquidity_score": 217641,
+      "rank": 201
+    },
+    {
+      "symbol_id": "XMRUSDT",
+      "binance_symbol": "XMRUSDT",
+      "gate_symbol": "XMR_USDT",
+      "binance_quote_volume_24h": 21679300.56,
+      "gate_quote_volume_24h": 216979,
+      "liquidity_score": 216979,
+      "rank": 202
+    },
+    {
+      "symbol_id": "ALGOUSDT",
+      "binance_symbol": "ALGOUSDT",
+      "gate_symbol": "ALGO_USDT",
+      "binance_quote_volume_24h": 11399236.7524,
+      "gate_quote_volume_24h": 216339,
+      "liquidity_score": 216339,
+      "rank": 203
+    },
+    {
+      "symbol_id": "SIGNUSDT",
+      "binance_symbol": "SIGNUSDT",
+      "gate_symbol": "SIGN_USDT",
+      "binance_quote_volume_24h": 5613213.75851,
+      "gate_quote_volume_24h": 216097,
+      "liquidity_score": 216097,
+      "rank": 204
+    },
+    {
+      "symbol_id": "DYDXUSDT",
+      "binance_symbol": "DYDXUSDT",
+      "gate_symbol": "DYDX_USDT",
+      "binance_quote_volume_24h": 4451753.19256,
+      "gate_quote_volume_24h": 207830,
+      "liquidity_score": 207830,
+      "rank": 205
+    },
+    {
+      "symbol_id": "STBLUSDT",
+      "binance_symbol": "STBLUSDT",
+      "gate_symbol": "STBL_USDT",
+      "binance_quote_volume_24h": 4194973.40588,
+      "gate_quote_volume_24h": 205499,
+      "liquidity_score": 205499,
+      "rank": 206
+    },
+    {
+      "symbol_id": "YGGUSDT",
+      "binance_symbol": "YGGUSDT",
+      "gate_symbol": "YGG_USDT",
+      "binance_quote_volume_24h": 1987120.70726,
+      "gate_quote_volume_24h": 205360,
+      "liquidity_score": 205360,
+      "rank": 207
+    },
+    {
+      "symbol_id": "USTCUSDT",
+      "binance_symbol": "USTCUSDT",
+      "gate_symbol": "USTC_USDT",
+      "binance_quote_volume_24h": 3547345.255859,
+      "gate_quote_volume_24h": 203449,
+      "liquidity_score": 203449,
+      "rank": 208
+    },
+    {
+      "symbol_id": "AIOTUSDT",
+      "binance_symbol": "AIOTUSDT",
+      "gate_symbol": "AIOT_USDT",
+      "binance_quote_volume_24h": 6229117.71901,
+      "gate_quote_volume_24h": 201992,
+      "liquidity_score": 201992,
+      "rank": 209
+    },
+    {
+      "symbol_id": "OPENUSDT",
+      "binance_symbol": "OPENUSDT",
+      "gate_symbol": "OPEN_USDT",
+      "binance_quote_volume_24h": 7825853.643,
+      "gate_quote_volume_24h": 201156,
+      "liquidity_score": 201156,
+      "rank": 210
+    },
+    {
+      "symbol_id": "ESPUSDT",
+      "binance_symbol": "ESPUSDT",
+      "gate_symbol": "ESP_USDT",
+      "binance_quote_volume_24h": 4588613.89319,
+      "gate_quote_volume_24h": 199236,
+      "liquidity_score": 199236,
+      "rank": 211
+    },
+    {
+      "symbol_id": "BANANAUSDT",
+      "binance_symbol": "BANANAUSDT",
+      "gate_symbol": "BANANA_USDT",
+      "binance_quote_volume_24h": 2353036.3245,
+      "gate_quote_volume_24h": 196639,
+      "liquidity_score": 196639,
+      "rank": 212
+    },
+    {
+      "symbol_id": "POPCATUSDT",
+      "binance_symbol": "POPCATUSDT",
+      "gate_symbol": "POPCAT_USDT",
+      "binance_quote_volume_24h": 3069550.00914,
+      "gate_quote_volume_24h": 196347,
+      "liquidity_score": 196347,
+      "rank": 213
+    },
+    {
+      "symbol_id": "MANAUSDT",
+      "binance_symbol": "MANAUSDT",
+      "gate_symbol": "MANA_USDT",
+      "binance_quote_volume_24h": 3497244.9191,
+      "gate_quote_volume_24h": 195627,
+      "liquidity_score": 195627,
+      "rank": 214
+    },
+    {
+      "symbol_id": "VELVETUSDT",
+      "binance_symbol": "VELVETUSDT",
+      "gate_symbol": "VELVET_USDT",
+      "binance_quote_volume_24h": 23035380.78558,
+      "gate_quote_volume_24h": 195081,
+      "liquidity_score": 195081,
+      "rank": 215
+    },
+    {
+      "symbol_id": "EIGENUSDT",
+      "binance_symbol": "EIGENUSDT",
+      "gate_symbol": "EIGEN_USDT",
+      "binance_quote_volume_24h": 8871649.15031,
+      "gate_quote_volume_24h": 192482,
+      "liquidity_score": 192482,
+      "rank": 216
+    },
+    {
+      "symbol_id": "WUSDT",
+      "binance_symbol": "WUSDT",
+      "gate_symbol": "W_USDT",
+      "binance_quote_volume_24h": 5098837.332185,
+      "gate_quote_volume_24h": 191176,
+      "liquidity_score": 191176,
+      "rank": 217
+    },
+    {
+      "symbol_id": "AEROUSDT",
+      "binance_symbol": "AEROUSDT",
+      "gate_symbol": "AERO_USDT",
+      "binance_quote_volume_24h": 7263387.27742,
+      "gate_quote_volume_24h": 188899,
+      "liquidity_score": 188899,
+      "rank": 218
+    },
+    {
+      "symbol_id": "JASMYUSDT",
+      "binance_symbol": "JASMYUSDT",
+      "gate_symbol": "JASMY_USDT",
+      "binance_quote_volume_24h": 3559035.117085,
+      "gate_quote_volume_24h": 188719,
+      "liquidity_score": 188719,
+      "rank": 219
+    },
+    {
+      "symbol_id": "SUSHIUSDT",
+      "binance_symbol": "SUSHIUSDT",
+      "gate_symbol": "SUSHI_USDT",
+      "binance_quote_volume_24h": 2880692.5276,
+      "gate_quote_volume_24h": 186948,
+      "liquidity_score": 186948,
+      "rank": 220
+    },
+    {
+      "symbol_id": "BANANAS31USDT",
+      "binance_symbol": "BANANAS31USDT",
+      "gate_symbol": "BANANAS31_USDT",
+      "binance_quote_volume_24h": 7994710.577051,
+      "gate_quote_volume_24h": 186926,
+      "liquidity_score": 186926,
+      "rank": 221
+    },
+    {
+      "symbol_id": "PTBUSDT",
+      "binance_symbol": "PTBUSDT",
+      "gate_symbol": "PTB_USDT",
+      "binance_quote_volume_24h": 2868895.1588891,
+      "gate_quote_volume_24h": 184161,
+      "liquidity_score": 184161,
+      "rank": 222
+    },
+    {
+      "symbol_id": "HUMAUSDT",
+      "binance_symbol": "HUMAUSDT",
+      "gate_symbol": "HUMA_USDT",
+      "binance_quote_volume_24h": 4947870.474373,
+      "gate_quote_volume_24h": 184125,
+      "liquidity_score": 184125,
+      "rank": 223
+    },
+    {
+      "symbol_id": "HIVEUSDT",
+      "binance_symbol": "HIVEUSDT",
+      "gate_symbol": "HIVE_USDT",
+      "binance_quote_volume_24h": 2562269.22005,
+      "gate_quote_volume_24h": 181294,
+      "liquidity_score": 181294,
+      "rank": 224
+    },
+    {
+      "symbol_id": "MANTRAUSDT",
+      "binance_symbol": "MANTRAUSDT",
+      "gate_symbol": "MANTRA_USDT",
+      "binance_quote_volume_24h": 3822435.35413,
+      "gate_quote_volume_24h": 180072,
+      "liquidity_score": 180072,
+      "rank": 225
+    },
+    {
+      "symbol_id": "EVAAUSDT",
+      "binance_symbol": "EVAAUSDT",
+      "gate_symbol": "EVAA_USDT",
+      "binance_quote_volume_24h": 2311900.38955,
+      "gate_quote_volume_24h": 177951,
+      "liquidity_score": 177951,
+      "rank": 226
+    },
+    {
+      "symbol_id": "STOUSDT",
+      "binance_symbol": "STOUSDT",
+      "gate_symbol": "STO_USDT",
+      "binance_quote_volume_24h": 6836763.63849,
+      "gate_quote_volume_24h": 176812,
+      "liquidity_score": 176812,
+      "rank": 227
+    },
+    {
+      "symbol_id": "TRIAUSDT",
+      "binance_symbol": "TRIAUSDT",
+      "gate_symbol": "TRIA_USDT",
+      "binance_quote_volume_24h": 8965260.57554,
+      "gate_quote_volume_24h": 175502,
+      "liquidity_score": 175502,
+      "rank": 228
+    },
+    {
+      "symbol_id": "HOMEUSDT",
+      "binance_symbol": "HOMEUSDT",
+      "gate_symbol": "HOME_USDT",
+      "binance_quote_volume_24h": 3864976.779526,
+      "gate_quote_volume_24h": 173281,
+      "liquidity_score": 173281,
+      "rank": 229
+    },
+    {
+      "symbol_id": "IMXUSDT",
+      "binance_symbol": "IMXUSDT",
+      "gate_symbol": "IMX_USDT",
+      "binance_quote_volume_24h": 9924231.045,
+      "gate_quote_volume_24h": 173141,
+      "liquidity_score": 173141,
+      "rank": 230
+    },
+    {
+      "symbol_id": "MOVRUSDT",
+      "binance_symbol": "MOVRUSDT",
+      "gate_symbol": "MOVR_USDT",
+      "binance_quote_volume_24h": 4230619.74292,
+      "gate_quote_volume_24h": 173064,
+      "liquidity_score": 173064,
+      "rank": 231
+    },
+    {
+      "symbol_id": "DRIFTUSDT",
+      "binance_symbol": "DRIFTUSDT",
+      "gate_symbol": "DRIFT_USDT",
+      "binance_quote_volume_24h": 1632084.71358,
+      "gate_quote_volume_24h": 171434,
+      "liquidity_score": 171434,
+      "rank": 232
+    },
+    {
+      "symbol_id": "SAPIENUSDT",
+      "binance_symbol": "SAPIENUSDT",
+      "gate_symbol": "SAPIEN_USDT",
+      "binance_quote_volume_24h": 10083467.11046,
+      "gate_quote_volume_24h": 168132,
+      "liquidity_score": 168132,
+      "rank": 233
+    },
+    {
+      "symbol_id": "HOLOUSDT",
+      "binance_symbol": "HOLOUSDT",
+      "gate_symbol": "HOLO_USDT",
+      "binance_quote_volume_24h": 4473428.10959,
+      "gate_quote_volume_24h": 167264,
+      "liquidity_score": 167264,
+      "rank": 234
+    },
+    {
+      "symbol_id": "VETUSDT",
+      "binance_symbol": "VETUSDT",
+      "gate_symbol": "VET_USDT",
+      "binance_quote_volume_24h": 4990489.083519,
+      "gate_quote_volume_24h": 166699,
+      "liquidity_score": 166699,
+      "rank": 235
+    },
+    {
+      "symbol_id": "OPNUSDT",
+      "binance_symbol": "OPNUSDT",
+      "gate_symbol": "OPN_USDT",
+      "binance_quote_volume_24h": 3404220.9204,
+      "gate_quote_volume_24h": 164252,
+      "liquidity_score": 164252,
+      "rank": 236
+    },
+    {
+      "symbol_id": "BARDUSDT",
+      "binance_symbol": "BARDUSDT",
+      "gate_symbol": "BARD_USDT",
+      "binance_quote_volume_24h": 2617519.5533,
+      "gate_quote_volume_24h": 164080,
+      "liquidity_score": 164080,
+      "rank": 237
+    },
+    {
+      "symbol_id": "BREVUSDT",
+      "binance_symbol": "BREVUSDT",
+      "gate_symbol": "BREV_USDT",
+      "binance_quote_volume_24h": 1798108.9743,
+      "gate_quote_volume_24h": 163640,
+      "liquidity_score": 163640,
+      "rank": 238
+    },
+    {
+      "symbol_id": "ZKUSDT",
+      "binance_symbol": "ZKUSDT",
+      "gate_symbol": "ZK_USDT",
+      "binance_quote_volume_24h": 4106508.08766,
+      "gate_quote_volume_24h": 163120,
+      "liquidity_score": 163120,
+      "rank": 239
+    },
+    {
+      "symbol_id": "DEEPUSDT",
+      "binance_symbol": "DEEPUSDT",
+      "gate_symbol": "DEEP_USDT",
+      "binance_quote_volume_24h": 3150431.49577,
+      "gate_quote_volume_24h": 161345,
+      "liquidity_score": 161345,
+      "rank": 240
+    },
+    {
+      "symbol_id": "COMPUSDT",
+      "binance_symbol": "COMPUSDT",
+      "gate_symbol": "COMP_USDT",
+      "binance_quote_volume_24h": 3888465,
+      "gate_quote_volume_24h": 161154,
+      "liquidity_score": 161154,
+      "rank": 241
+    },
+    {
+      "symbol_id": "CYBERUSDT",
+      "binance_symbol": "CYBERUSDT",
+      "gate_symbol": "CYBER_USDT",
+      "binance_quote_volume_24h": 1620924.91327,
+      "gate_quote_volume_24h": 160152,
+      "liquidity_score": 160152,
+      "rank": 242
+    },
+    {
+      "symbol_id": "FOLKSUSDT",
+      "binance_symbol": "FOLKSUSDT",
+      "gate_symbol": "FOLKS_USDT",
+      "binance_quote_volume_24h": 2882316.6819,
+      "gate_quote_volume_24h": 158327,
+      "liquidity_score": 158327,
+      "rank": 243
+    },
+    {
+      "symbol_id": "BBUSDT",
+      "binance_symbol": "BBUSDT",
+      "gate_symbol": "BB_USDT",
+      "binance_quote_volume_24h": 4225576.55983,
+      "gate_quote_volume_24h": 155359,
+      "liquidity_score": 155359,
+      "rank": 244
+    },
+    {
+      "symbol_id": "ANIMEUSDT",
+      "binance_symbol": "ANIMEUSDT",
+      "gate_symbol": "ANIME_USDT",
+      "binance_quote_volume_24h": 2165128.09731,
+      "gate_quote_volume_24h": 153554,
+      "liquidity_score": 153554,
+      "rank": 245
+    },
+    {
+      "symbol_id": "BRETTUSDT",
+      "binance_symbol": "BRETTUSDT",
+      "gate_symbol": "BRETT_USDT",
+      "binance_quote_volume_24h": 3089379.221497,
+      "gate_quote_volume_24h": 153298,
+      "liquidity_score": 153298,
+      "rank": 246
+    },
+    {
+      "symbol_id": "XTZUSDT",
+      "binance_symbol": "XTZUSDT",
+      "gate_symbol": "XTZ_USDT",
+      "binance_quote_volume_24h": 2581662.38758,
+      "gate_quote_volume_24h": 151153,
+      "liquidity_score": 151153,
+      "rank": 247
+    },
+    {
+      "symbol_id": "YFIUSDT",
+      "binance_symbol": "YFIUSDT",
+      "gate_symbol": "YFI_USDT",
+      "binance_quote_volume_24h": 2878177.1,
+      "gate_quote_volume_24h": 150794,
+      "liquidity_score": 150794,
+      "rank": 248
+    },
+    {
+      "symbol_id": "MASKUSDT",
+      "binance_symbol": "MASKUSDT",
+      "gate_symbol": "MASK_USDT",
+      "binance_quote_volume_24h": 2389561.9885,
+      "gate_quote_volume_24h": 150227,
+      "liquidity_score": 150227,
+      "rank": 249
+    },
+    {
+      "symbol_id": "OGUSDT",
+      "binance_symbol": "OGUSDT",
+      "gate_symbol": "OG_USDT",
+      "binance_quote_volume_24h": 3605520.6383,
+      "gate_quote_volume_24h": 150149,
+      "liquidity_score": 150149,
+      "rank": 250
+    },
+    {
+      "symbol_id": "MELANIAUSDT",
+      "binance_symbol": "MELANIAUSDT",
+      "gate_symbol": "MELANIA_USDT",
+      "binance_quote_volume_24h": 1400122.406858,
+      "gate_quote_volume_24h": 149444,
+      "liquidity_score": 149444,
+      "rank": 251
+    },
+    {
+      "symbol_id": "PLUMEUSDT",
+      "binance_symbol": "PLUMEUSDT",
+      "gate_symbol": "PLUME_USDT",
+      "binance_quote_volume_24h": 3493870.30958,
+      "gate_quote_volume_24h": 148539,
+      "liquidity_score": 148539,
+      "rank": 252
+    },
+    {
+      "symbol_id": "EDUUSDT",
+      "binance_symbol": "EDUUSDT",
+      "gate_symbol": "EDU_USDT",
+      "binance_quote_volume_24h": 4221485.64403,
+      "gate_quote_volume_24h": 145918,
+      "liquidity_score": 145918,
+      "rank": 253
+    },
+    {
+      "symbol_id": "MBOXUSDT",
+      "binance_symbol": "MBOXUSDT",
+      "gate_symbol": "MBOX_USDT",
+      "binance_quote_volume_24h": 2956892.60982,
+      "gate_quote_volume_24h": 144909,
+      "liquidity_score": 144909,
+      "rank": 254
+    },
+    {
+      "symbol_id": "HFTUSDT",
+      "binance_symbol": "HFTUSDT",
+      "gate_symbol": "HFT_USDT",
+      "binance_quote_volume_24h": 1544784.09785,
+      "gate_quote_volume_24h": 143033,
+      "liquidity_score": 143033,
+      "rank": 255
+    },
+    {
+      "symbol_id": "AIOUSDT",
+      "binance_symbol": "AIOUSDT",
+      "gate_symbol": "AIO_USDT",
+      "binance_quote_volume_24h": 7085573.51082,
+      "gate_quote_volume_24h": 142877,
+      "liquidity_score": 142877,
+      "rank": 256
+    },
+    {
+      "symbol_id": "AEVOUSDT",
+      "binance_symbol": "AEVOUSDT",
+      "gate_symbol": "AEVO_USDT",
+      "binance_quote_volume_24h": 4688236.188227,
+      "gate_quote_volume_24h": 140194,
+      "liquidity_score": 140194,
+      "rank": 257
+    },
+    {
+      "symbol_id": "POWERUSDT",
+      "binance_symbol": "POWERUSDT",
+      "gate_symbol": "POWER_USDT",
+      "binance_quote_volume_24h": 2707817.61157,
+      "gate_quote_volume_24h": 137905,
+      "liquidity_score": 137905,
+      "rank": 258
+    },
+    {
+      "symbol_id": "ENJUSDT",
+      "binance_symbol": "ENJUSDT",
+      "gate_symbol": "ENJ_USDT",
+      "binance_quote_volume_24h": 5842770.36813,
+      "gate_quote_volume_24h": 134971,
+      "liquidity_score": 134971,
+      "rank": 259
+    },
+    {
+      "symbol_id": "KAVAUSDT",
+      "binance_symbol": "KAVAUSDT",
+      "gate_symbol": "KAVA_USDT",
+      "binance_quote_volume_24h": 3100249.2815,
+      "gate_quote_volume_24h": 134690,
+      "liquidity_score": 134690,
+      "rank": 260
+    },
+    {
+      "symbol_id": "AVAAIUSDT",
+      "binance_symbol": "AVAAIUSDT",
+      "gate_symbol": "AVAAI_USDT",
+      "binance_quote_volume_24h": 1314290.086327,
+      "gate_quote_volume_24h": 134382,
+      "liquidity_score": 134382,
+      "rank": 261
+    },
+    {
+      "symbol_id": "SNXUSDT",
+      "binance_symbol": "SNXUSDT",
+      "gate_symbol": "SNX_USDT",
+      "binance_quote_volume_24h": 2321701.75696,
+      "gate_quote_volume_24h": 132616,
+      "liquidity_score": 132616,
+      "rank": 262
+    },
+    {
+      "symbol_id": "IOTAUSDT",
+      "binance_symbol": "IOTAUSDT",
+      "gate_symbol": "IOTA_USDT",
+      "binance_quote_volume_24h": 3200990.8256,
+      "gate_quote_volume_24h": 131729,
+      "liquidity_score": 131729,
+      "rank": 263
+    },
+    {
+      "symbol_id": "MEUSDT",
+      "binance_symbol": "MEUSDT",
+      "gate_symbol": "ME_USDT",
+      "binance_quote_volume_24h": 2169744.90623,
+      "gate_quote_volume_24h": 129229,
+      "liquidity_score": 129229,
+      "rank": 264
+    },
+    {
+      "symbol_id": "LPTUSDT",
+      "binance_symbol": "LPTUSDT",
+      "gate_symbol": "LPT_USDT",
+      "binance_quote_volume_24h": 3537518.811,
+      "gate_quote_volume_24h": 128989,
+      "liquidity_score": 128989,
+      "rank": 265
+    },
+    {
+      "symbol_id": "BNTUSDT",
+      "binance_symbol": "BNTUSDT",
+      "gate_symbol": "BNT_USDT",
+      "binance_quote_volume_24h": 1061343.5929,
+      "gate_quote_volume_24h": 127918,
+      "liquidity_score": 127918,
+      "rank": 266
+    },
+    {
+      "symbol_id": "ZKPUSDT",
+      "binance_symbol": "ZKPUSDT",
+      "gate_symbol": "ZKP_USDT",
+      "binance_quote_volume_24h": 2345192.39332,
+      "gate_quote_volume_24h": 127164,
+      "liquidity_score": 127164,
+      "rank": 267
+    },
+    {
+      "symbol_id": "EDGEUSDT",
+      "binance_symbol": "EDGEUSDT",
+      "gate_symbol": "EDGE_USDT",
+      "binance_quote_volume_24h": 14438913.8476,
+      "gate_quote_volume_24h": 126599,
+      "liquidity_score": 126599,
+      "rank": 268
+    },
+    {
+      "symbol_id": "LITUSDT",
+      "binance_symbol": "LITUSDT",
+      "gate_symbol": "LIT_USDT",
+      "binance_quote_volume_24h": 7787417.39703,
+      "gate_quote_volume_24h": 126397,
+      "liquidity_score": 126397,
+      "rank": 269
+    },
+    {
+      "symbol_id": "FORMUSDT",
+      "binance_symbol": "FORMUSDT",
+      "gate_symbol": "FORM_USDT",
+      "binance_quote_volume_24h": 1830571.44231,
+      "gate_quote_volume_24h": 123899,
+      "liquidity_score": 123899,
+      "rank": 270
+    },
+    {
+      "symbol_id": "MOVEUSDT",
+      "binance_symbol": "MOVEUSDT",
+      "gate_symbol": "MOVE_USDT",
+      "binance_quote_volume_24h": 3070935.35187,
+      "gate_quote_volume_24h": 122989,
+      "liquidity_score": 122989,
+      "rank": 271
+    },
+    {
+      "symbol_id": "ROBOUSDT",
+      "binance_symbol": "ROBOUSDT",
+      "gate_symbol": "ROBO_USDT",
+      "binance_quote_volume_24h": 4841272.19023,
+      "gate_quote_volume_24h": 122448,
+      "liquidity_score": 122448,
+      "rank": 272
+    },
+    {
+      "symbol_id": "LINEAUSDT",
+      "binance_symbol": "LINEAUSDT",
+      "gate_symbol": "LINEA_USDT",
+      "binance_quote_volume_24h": 3262318.559232,
+      "gate_quote_volume_24h": 121314,
+      "liquidity_score": 121314,
+      "rank": 273
+    },
+    {
+      "symbol_id": "ATHUSDT",
+      "binance_symbol": "ATHUSDT",
+      "gate_symbol": "ATH_USDT",
+      "binance_quote_volume_24h": 2359120.89064,
+      "gate_quote_volume_24h": 120322,
+      "liquidity_score": 120322,
+      "rank": 274
+    },
+    {
+      "symbol_id": "XNYUSDT",
+      "binance_symbol": "XNYUSDT",
+      "gate_symbol": "XNY_USDT",
+      "binance_quote_volume_24h": 2293849.899438,
+      "gate_quote_volume_24h": 119933,
+      "liquidity_score": 119933,
+      "rank": 275
+    },
+    {
+      "symbol_id": "GUSDT",
+      "binance_symbol": "GUSDT",
+      "gate_symbol": "G_USDT",
+      "binance_quote_volume_24h": 1627116.327759,
+      "gate_quote_volume_24h": 118447,
+      "liquidity_score": 118447,
+      "rank": 276
+    },
+    {
+      "symbol_id": "SHELLUSDT",
+      "binance_symbol": "SHELLUSDT",
+      "gate_symbol": "SHELL_USDT",
+      "binance_quote_volume_24h": 1136608.64677,
+      "gate_quote_volume_24h": 118425,
+      "liquidity_score": 118425,
+      "rank": 277
+    },
+    {
+      "symbol_id": "CFGUSDT",
+      "binance_symbol": "CFGUSDT",
+      "gate_symbol": "CFG_USDT",
+      "binance_quote_volume_24h": 6003641.4134,
+      "gate_quote_volume_24h": 118085,
+      "liquidity_score": 118085,
+      "rank": 278
+    },
+    {
+      "symbol_id": "HIGHUSDT",
+      "binance_symbol": "HIGHUSDT",
+      "gate_symbol": "HIGH_USDT",
+      "binance_quote_volume_24h": 3397086.75275,
+      "gate_quote_volume_24h": 117836,
+      "liquidity_score": 117836,
+      "rank": 279
+    },
+    {
+      "symbol_id": "METISUSDT",
+      "binance_symbol": "METISUSDT",
+      "gate_symbol": "METIS_USDT",
+      "binance_quote_volume_24h": 992117.0185,
+      "gate_quote_volume_24h": 116538,
+      "liquidity_score": 116538,
+      "rank": 280
+    },
+    {
+      "symbol_id": "龙虾USDT",
+      "binance_symbol": "龙虾USDT",
+      "gate_symbol": "龙虾_USDT",
+      "binance_quote_volume_24h": 2152123.412511,
+      "gate_quote_volume_24h": 116318,
+      "liquidity_score": 116318,
+      "rank": 281
+    },
+    {
+      "symbol_id": "KSMUSDT",
+      "binance_symbol": "KSMUSDT",
+      "gate_symbol": "KSM_USDT",
+      "binance_quote_volume_24h": 2040371.472,
+      "gate_quote_volume_24h": 116012,
+      "liquidity_score": 116012,
+      "rank": 282
+    },
+    {
+      "symbol_id": "ACTUSDT",
+      "binance_symbol": "ACTUSDT",
+      "gate_symbol": "ACT_USDT",
+      "binance_quote_volume_24h": 1788173.60692,
+      "gate_quote_volume_24h": 115868,
+      "liquidity_score": 115868,
+      "rank": 283
+    },
+    {
+      "symbol_id": "NEOUSDT",
+      "binance_symbol": "NEOUSDT",
+      "gate_symbol": "NEO_USDT",
+      "binance_quote_volume_24h": 3065453.82,
+      "gate_quote_volume_24h": 114611,
+      "liquidity_score": 114611,
+      "rank": 284
+    },
+    {
+      "symbol_id": "HYPERUSDT",
+      "binance_symbol": "HYPERUSDT",
+      "gate_symbol": "HYPER_USDT",
+      "binance_quote_volume_24h": 3444057.47151,
+      "gate_quote_volume_24h": 113315,
+      "liquidity_score": 113315,
+      "rank": 285
+    },
+    {
+      "symbol_id": "GLMUSDT",
+      "binance_symbol": "GLMUSDT",
+      "gate_symbol": "GLM_USDT",
+      "binance_quote_volume_24h": 7310137.3141,
+      "gate_quote_volume_24h": 112527,
+      "liquidity_score": 112527,
+      "rank": 286
+    },
+    {
+      "symbol_id": "PRLUSDT",
+      "binance_symbol": "PRLUSDT",
+      "gate_symbol": "PRL_USDT",
+      "binance_quote_volume_24h": 5248674.7468,
+      "gate_quote_volume_24h": 111650,
+      "liquidity_score": 111650,
+      "rank": 287
+    },
+    {
+      "symbol_id": "ORDERUSDT",
+      "binance_symbol": "ORDERUSDT",
+      "gate_symbol": "ORDER_USDT",
+      "binance_quote_volume_24h": 2817640.23642,
+      "gate_quote_volume_24h": 111443,
+      "liquidity_score": 111443,
+      "rank": 288
+    },
+    {
+      "symbol_id": "RAREUSDT",
+      "binance_symbol": "RAREUSDT",
+      "gate_symbol": "RARE_USDT",
+      "binance_quote_volume_24h": 2014952.81116,
+      "gate_quote_volume_24h": 111237,
+      "liquidity_score": 111237,
+      "rank": 289
+    },
+    {
+      "symbol_id": "B2USDT",
+      "binance_symbol": "B2USDT",
+      "gate_symbol": "B2_USDT",
+      "binance_quote_volume_24h": 989466.4181,
+      "gate_quote_volume_24h": 109889,
+      "liquidity_score": 109889,
+      "rank": 290
+    },
+    {
+      "symbol_id": "MIRAUSDT",
+      "binance_symbol": "MIRAUSDT",
+      "gate_symbol": "MIRA_USDT",
+      "binance_quote_volume_24h": 2123156.48446,
+      "gate_quote_volume_24h": 109263,
+      "liquidity_score": 109263,
+      "rank": 291
+    },
+    {
+      "symbol_id": "HMSTRUSDT",
+      "binance_symbol": "HMSTRUSDT",
+      "gate_symbol": "HMSTR_USDT",
+      "binance_quote_volume_24h": 1587251.8735244,
+      "gate_quote_volume_24h": 109231,
+      "liquidity_score": 109231,
+      "rank": 292
+    },
+    {
+      "symbol_id": "DUSDT",
+      "binance_symbol": "DUSDT",
+      "gate_symbol": "D_USDT",
+      "binance_quote_volume_24h": 7178101.715555,
+      "gate_quote_volume_24h": 108848,
+      "liquidity_score": 108848,
+      "rank": 293
+    },
+    {
+      "symbol_id": "TWTUSDT",
+      "binance_symbol": "TWTUSDT",
+      "gate_symbol": "TWT_USDT",
+      "binance_quote_volume_24h": 3666596.1659,
+      "gate_quote_volume_24h": 108134,
+      "liquidity_score": 108134,
+      "rank": 294
+    },
+    {
+      "symbol_id": "NOMUSDT",
+      "binance_symbol": "NOMUSDT",
+      "gate_symbol": "NOM_USDT",
+      "binance_quote_volume_24h": 3126702.504975,
+      "gate_quote_volume_24h": 107837,
+      "liquidity_score": 107837,
+      "rank": 295
+    },
+    {
+      "symbol_id": "GUNUSDT",
+      "binance_symbol": "GUNUSDT",
+      "gate_symbol": "GUN_USDT",
+      "binance_quote_volume_24h": 2532946.0725,
+      "gate_quote_volume_24h": 106634,
+      "liquidity_score": 106634,
+      "rank": 296
+    },
+    {
+      "symbol_id": "NIGHTUSDT",
+      "binance_symbol": "NIGHTUSDT",
+      "gate_symbol": "NIGHT_USDT",
+      "binance_quote_volume_24h": 4782561.19013,
+      "gate_quote_volume_24h": 106478,
+      "liquidity_score": 106478,
+      "rank": 297
+    },
+    {
+      "symbol_id": "ZAMAUSDT",
+      "binance_symbol": "ZAMAUSDT",
+      "gate_symbol": "ZAMA_USDT",
+      "binance_quote_volume_24h": 3669704.23746,
+      "gate_quote_volume_24h": 106438,
+      "liquidity_score": 106438,
+      "rank": 298
+    },
+    {
+      "symbol_id": "UAIUSDT",
+      "binance_symbol": "UAIUSDT",
+      "gate_symbol": "UAI_USDT",
+      "binance_quote_volume_24h": 1948871.4175,
+      "gate_quote_volume_24h": 105267,
+      "liquidity_score": 105267,
+      "rank": 299
+    },
+    {
+      "symbol_id": "SKRUSDT",
+      "binance_symbol": "SKRUSDT",
+      "gate_symbol": "SKR_USDT",
+      "binance_quote_volume_24h": 1120977.383011,
+      "gate_quote_volume_24h": 104430,
+      "liquidity_score": 104430,
+      "rank": 300
+    },
+    {
+      "symbol_id": "API3USDT",
+      "binance_symbol": "API3USDT",
+      "gate_symbol": "API3_USDT",
+      "binance_quote_volume_24h": 4060695.2197,
+      "gate_quote_volume_24h": 104428,
+      "liquidity_score": 104428,
+      "rank": 301
+    },
+    {
+      "symbol_id": "WCTUSDT",
+      "binance_symbol": "WCTUSDT",
+      "gate_symbol": "WCT_USDT",
+      "binance_quote_volume_24h": 1678688.44463,
+      "gate_quote_volume_24h": 103003,
+      "liquidity_score": 103003,
+      "rank": 302
+    },
+    {
+      "symbol_id": "APRUSDT",
+      "binance_symbol": "APRUSDT",
+      "gate_symbol": "APR_USDT",
+      "binance_quote_volume_24h": 2716529.53535,
+      "gate_quote_volume_24h": 102395,
+      "liquidity_score": 102395,
+      "rank": 303
+    },
+    {
+      "symbol_id": "DUSKUSDT",
+      "binance_symbol": "DUSKUSDT",
+      "gate_symbol": "DUSK_USDT",
+      "binance_quote_volume_24h": 10205211.79562,
+      "gate_quote_volume_24h": 102376,
+      "liquidity_score": 102376,
+      "rank": 304
+    },
+    {
+      "symbol_id": "FRAXUSDT",
+      "binance_symbol": "FRAXUSDT",
+      "gate_symbol": "FRAX_USDT",
+      "binance_quote_volume_24h": 922751.907,
+      "gate_quote_volume_24h": 101721,
+      "liquidity_score": 101721,
+      "rank": 305
+    },
+    {
+      "symbol_id": "ATUSDT",
+      "binance_symbol": "ATUSDT",
+      "gate_symbol": "AT_USDT",
+      "binance_quote_volume_24h": 2295158.02268,
+      "gate_quote_volume_24h": 101249,
+      "liquidity_score": 101249,
+      "rank": 306
+    },
+    {
+      "symbol_id": "MEMEUSDT",
+      "binance_symbol": "MEMEUSDT",
+      "gate_symbol": "MEME_USDT",
+      "binance_quote_volume_24h": 3241844.206303,
+      "gate_quote_volume_24h": 100178,
+      "liquidity_score": 100178,
+      "rank": 307
+    },
+    {
+      "symbol_id": "CROSSUSDT",
+      "binance_symbol": "CROSSUSDT",
+      "gate_symbol": "CROSS_USDT",
+      "binance_quote_volume_24h": 1782108.14563,
+      "gate_quote_volume_24h": 100131,
+      "liquidity_score": 100131,
+      "rank": 308
+    },
+    {
+      "symbol_id": "AUCTIONUSDT",
+      "binance_symbol": "AUCTIONUSDT",
+      "gate_symbol": "AUCTION_USDT",
+      "binance_quote_volume_24h": 1545399.15801,
+      "gate_quote_volume_24h": 99611,
+      "liquidity_score": 99611,
+      "rank": 309
+    },
+    {
+      "symbol_id": "ALTUSDT",
+      "binance_symbol": "ALTUSDT",
+      "gate_symbol": "ALT_USDT",
+      "binance_quote_volume_24h": 8846962.376884,
+      "gate_quote_volume_24h": 99589,
+      "liquidity_score": 99589,
+      "rank": 310
+    },
+    {
+      "symbol_id": "LAUSDT",
+      "binance_symbol": "LAUSDT",
+      "gate_symbol": "LA_USDT",
+      "binance_quote_volume_24h": 2638340.61395,
+      "gate_quote_volume_24h": 99305,
+      "liquidity_score": 99305,
+      "rank": 311
+    },
+    {
+      "symbol_id": "AUSDT",
+      "binance_symbol": "AUSDT",
+      "gate_symbol": "A_USDT",
+      "binance_quote_volume_24h": 2280493.42219,
+      "gate_quote_volume_24h": 98791,
+      "liquidity_score": 98791,
+      "rank": 312
+    },
+    {
+      "symbol_id": "CARVUSDT",
+      "binance_symbol": "CARVUSDT",
+      "gate_symbol": "CARV_USDT",
+      "binance_quote_volume_24h": 1309373.10946,
+      "gate_quote_volume_24h": 98634,
+      "liquidity_score": 98634,
+      "rank": 313
+    },
+    {
+      "symbol_id": "XVSUSDT",
+      "binance_symbol": "XVSUSDT",
+      "gate_symbol": "XVS_USDT",
+      "binance_quote_volume_24h": 1792282.6424,
+      "gate_quote_volume_24h": 97845,
+      "liquidity_score": 97845,
+      "rank": 314
+    },
+    {
+      "symbol_id": "WETUSDT",
+      "binance_symbol": "WETUSDT",
+      "gate_symbol": "WET_USDT",
+      "binance_quote_volume_24h": 1978641.88744,
+      "gate_quote_volume_24h": 97379,
+      "liquidity_score": 97379,
+      "rank": 315
+    },
+    {
+      "symbol_id": "MUBARAKUSDT",
+      "binance_symbol": "MUBARAKUSDT",
+      "gate_symbol": "MUBARAK_USDT",
+      "binance_quote_volume_24h": 2020015.1492,
+      "gate_quote_volume_24h": 97305,
+      "liquidity_score": 97305,
+      "rank": 316
+    },
+    {
+      "symbol_id": "PIXELUSDT",
+      "binance_symbol": "PIXELUSDT",
+      "gate_symbol": "PIXEL_USDT",
+      "binance_quote_volume_24h": 4373362.133439,
+      "gate_quote_volume_24h": 97178,
+      "liquidity_score": 97178,
+      "rank": 317
+    },
+    {
+      "symbol_id": "SENTUSDT",
+      "binance_symbol": "SENTUSDT",
+      "gate_symbol": "SENT_USDT",
+      "binance_quote_volume_24h": 2969269.54648,
+      "gate_quote_volume_24h": 97106,
+      "liquidity_score": 97106,
+      "rank": 318
+    },
+    {
+      "symbol_id": "CVCUSDT",
+      "binance_symbol": "CVCUSDT",
+      "gate_symbol": "CVC_USDT",
+      "binance_quote_volume_24h": 7584073.85675,
+      "gate_quote_volume_24h": 97032,
+      "liquidity_score": 97032,
+      "rank": 319
+    },
+    {
+      "symbol_id": "ROSEUSDT",
+      "binance_symbol": "ROSEUSDT",
+      "gate_symbol": "ROSE_USDT",
+      "binance_quote_volume_24h": 4749676.81416,
+      "gate_quote_volume_24h": 92080,
+      "liquidity_score": 92080,
+      "rank": 320
+    },
+    {
+      "symbol_id": "GRASSUSDT",
+      "binance_symbol": "GRASSUSDT",
+      "gate_symbol": "GRASS_USDT",
+      "binance_quote_volume_24h": 2011376.32869,
+      "gate_quote_volume_24h": 90577,
+      "liquidity_score": 90577,
+      "rank": 321
+    },
+    {
+      "symbol_id": "MMTUSDT",
+      "binance_symbol": "MMTUSDT",
+      "gate_symbol": "MMT_USDT",
+      "binance_quote_volume_24h": 1915507.9031,
+      "gate_quote_volume_24h": 89571,
+      "liquidity_score": 89571,
+      "rank": 322
+    },
+    {
+      "symbol_id": "MINAUSDT",
+      "binance_symbol": "MINAUSDT",
+      "gate_symbol": "MINA_USDT",
+      "binance_quote_volume_24h": 2522783.78182,
+      "gate_quote_volume_24h": 87602,
+      "liquidity_score": 87602,
+      "rank": 323
+    },
+    {
+      "symbol_id": "SONICUSDT",
+      "binance_symbol": "SONICUSDT",
+      "gate_symbol": "SONIC_USDT",
+      "binance_quote_volume_24h": 2228943.65561,
+      "gate_quote_volume_24h": 85463,
+      "liquidity_score": 85463,
+      "rank": 324
+    },
+    {
+      "symbol_id": "STEEMUSDT",
+      "binance_symbol": "STEEMUSDT",
+      "gate_symbol": "STEEM_USDT",
+      "binance_quote_volume_24h": 3616143.06586,
+      "gate_quote_volume_24h": 84946,
+      "liquidity_score": 84946,
+      "rank": 325
+    },
+    {
+      "symbol_id": "GRTUSDT",
+      "binance_symbol": "GRTUSDT",
+      "gate_symbol": "GRT_USDT",
+      "binance_quote_volume_24h": 4040282.71732,
+      "gate_quote_volume_24h": 84916,
+      "liquidity_score": 84916,
+      "rank": 326
+    },
+    {
+      "symbol_id": "GRIFFAINUSDT",
+      "binance_symbol": "GRIFFAINUSDT",
+      "gate_symbol": "GRIFFAIN_USDT",
+      "binance_quote_volume_24h": 2769558.289793,
+      "gate_quote_volume_24h": 82939,
+      "liquidity_score": 82939,
+      "rank": 327
+    },
+    {
+      "symbol_id": "BIRBUSDT",
+      "binance_symbol": "BIRBUSDT",
+      "gate_symbol": "BIRB_USDT",
+      "binance_quote_volume_24h": 998118.01801,
+      "gate_quote_volume_24h": 81296,
+      "liquidity_score": 81296,
+      "rank": 328
+    },
+    {
+      "symbol_id": "FLOCKUSDT",
+      "binance_symbol": "FLOCKUSDT",
+      "gate_symbol": "FLOCK_USDT",
+      "binance_quote_volume_24h": 1417875.88535,
+      "gate_quote_volume_24h": 80567,
+      "liquidity_score": 80567,
+      "rank": 329
+    },
+    {
+      "symbol_id": "MAGICUSDT",
+      "binance_symbol": "MAGICUSDT",
+      "gate_symbol": "MAGIC_USDT",
+      "binance_quote_volume_24h": 1500074.634969,
+      "gate_quote_volume_24h": 80402,
+      "liquidity_score": 80402,
+      "rank": 330
+    },
+    {
+      "symbol_id": "MAGMAUSDT",
+      "binance_symbol": "MAGMAUSDT",
+      "gate_symbol": "MAGMA_USDT",
+      "binance_quote_volume_24h": 3378939.88152,
+      "gate_quote_volume_24h": 80220,
+      "liquidity_score": 80220,
+      "rank": 331
+    },
+    {
+      "symbol_id": "SUPERUSDT",
+      "binance_symbol": "SUPERUSDT",
+      "gate_symbol": "SUPER_USDT",
+      "binance_quote_volume_24h": 2123934.2575,
+      "gate_quote_volume_24h": 80059,
+      "liquidity_score": 80059,
+      "rank": 332
+    },
+    {
+      "symbol_id": "BANKUSDT",
+      "binance_symbol": "BANKUSDT",
+      "gate_symbol": "BANK_USDT",
+      "binance_quote_volume_24h": 1191681.97805,
+      "gate_quote_volume_24h": 79811,
+      "liquidity_score": 79811,
+      "rank": 333
+    },
+    {
+      "symbol_id": "SOMIUSDT",
+      "binance_symbol": "SOMIUSDT",
+      "gate_symbol": "SOMI_USDT",
+      "binance_quote_volume_24h": 3601334.0269,
+      "gate_quote_volume_24h": 78536,
+      "liquidity_score": 78536,
+      "rank": 334
+    },
+    {
+      "symbol_id": "1INCHUSDT",
+      "binance_symbol": "1INCHUSDT",
+      "gate_symbol": "1INCH_USDT",
+      "binance_quote_volume_24h": 2216992.379,
+      "gate_quote_volume_24h": 78481,
+      "liquidity_score": 78481,
+      "rank": 335
+    },
+    {
+      "symbol_id": "ONTUSDT",
+      "binance_symbol": "ONTUSDT",
+      "gate_symbol": "ONT_USDT",
+      "binance_quote_volume_24h": 3303633.8707,
+      "gate_quote_volume_24h": 78385,
+      "liquidity_score": 78385,
+      "rank": 336
+    },
+    {
+      "symbol_id": "FLOWUSDT",
+      "binance_symbol": "FLOWUSDT",
+      "gate_symbol": "FLOW_USDT",
+      "binance_quote_volume_24h": 1865618.441529,
+      "gate_quote_volume_24h": 78150,
+      "liquidity_score": 78150,
+      "rank": 337
+    },
+    {
+      "symbol_id": "MAVUSDT",
+      "binance_symbol": "MAVUSDT",
+      "gate_symbol": "MAV_USDT",
+      "binance_quote_volume_24h": 1056520.33428,
+      "gate_quote_volume_24h": 76425,
+      "liquidity_score": 76425,
+      "rank": 338
+    },
+    {
+      "symbol_id": "CETUSUSDT",
+      "binance_symbol": "CETUSUSDT",
+      "gate_symbol": "CETUS_USDT",
+      "binance_quote_volume_24h": 1086540.86505,
+      "gate_quote_volume_24h": 75783,
+      "liquidity_score": 75783,
+      "rank": 339
+    },
+    {
+      "symbol_id": "TAKEUSDT",
+      "binance_symbol": "TAKEUSDT",
+      "gate_symbol": "TAKE_USDT",
+      "binance_quote_volume_24h": 1883991.05436,
+      "gate_quote_volume_24h": 75489,
+      "liquidity_score": 75489,
+      "rank": 340
+    },
+    {
+      "symbol_id": "KNCUSDT",
+      "binance_symbol": "KNCUSDT",
+      "gate_symbol": "KNC_USDT",
+      "binance_quote_volume_24h": 1753754.8586,
+      "gate_quote_volume_24h": 75467,
+      "liquidity_score": 75467,
+      "rank": 341
+    },
+    {
+      "symbol_id": "SOLVUSDT",
+      "binance_symbol": "SOLVUSDT",
+      "gate_symbol": "SOLV_USDT",
+      "binance_quote_volume_24h": 2953170.204893,
+      "gate_quote_volume_24h": 74310,
+      "liquidity_score": 74310,
+      "rank": 342
+    },
+    {
+      "symbol_id": "CVXUSDT",
+      "binance_symbol": "CVXUSDT",
+      "gate_symbol": "CVX_USDT",
+      "binance_quote_volume_24h": 1193322.5315,
+      "gate_quote_volume_24h": 73906,
+      "liquidity_score": 73906,
+      "rank": 343
+    },
+    {
+      "symbol_id": "BICOUSDT",
+      "binance_symbol": "BICOUSDT",
+      "gate_symbol": "BICO_USDT",
+      "binance_quote_volume_24h": 1160473.41308,
+      "gate_quote_volume_24h": 73559,
+      "liquidity_score": 73559,
+      "rank": 344
+    },
+    {
+      "symbol_id": "VTHOUSDT",
+      "binance_symbol": "VTHOUSDT",
+      "gate_symbol": "VTHO_USDT",
+      "binance_quote_volume_24h": 1038067.1577053,
+      "gate_quote_volume_24h": 72093,
+      "liquidity_score": 72093,
+      "rank": 345
+    },
+    {
+      "symbol_id": "RPLUSDT",
+      "binance_symbol": "RPLUSDT",
+      "gate_symbol": "RPL_USDT",
+      "binance_quote_volume_24h": 708105.3535,
+      "gate_quote_volume_24h": 71122,
+      "liquidity_score": 71122,
+      "rank": 346
+    },
+    {
+      "symbol_id": "MANTAUSDT",
+      "binance_symbol": "MANTAUSDT",
+      "gate_symbol": "MANTA_USDT",
+      "binance_quote_volume_24h": 2424471.152064,
+      "gate_quote_volume_24h": 69197,
+      "liquidity_score": 69197,
+      "rank": 347
+    },
+    {
+      "symbol_id": "MAVIAUSDT",
+      "binance_symbol": "MAVIAUSDT",
+      "gate_symbol": "MAVIA_USDT",
+      "binance_quote_volume_24h": 568828.42037,
+      "gate_quote_volume_24h": 69085,
+      "liquidity_score": 69085,
+      "rank": 348
+    },
+    {
+      "symbol_id": "CUSDT",
+      "binance_symbol": "CUSDT",
+      "gate_symbol": "C_USDT",
+      "binance_quote_volume_24h": 3094774.19839,
+      "gate_quote_volume_24h": 68743,
+      "liquidity_score": 68743,
+      "rank": 349
+    },
+    {
+      "symbol_id": "TREEUSDT",
+      "binance_symbol": "TREEUSDT",
+      "gate_symbol": "TREE_USDT",
+      "binance_quote_volume_24h": 1682110.97098,
+      "gate_quote_volume_24h": 68470,
+      "liquidity_score": 68470,
+      "rank": 350
+    },
+    {
+      "symbol_id": "ARPAUSDT",
+      "binance_symbol": "ARPAUSDT",
+      "gate_symbol": "ARPA_USDT",
+      "binance_quote_volume_24h": 3044300.38159,
+      "gate_quote_volume_24h": 68315,
+      "liquidity_score": 68315,
+      "rank": 351
+    },
+    {
+      "symbol_id": "HEMIUSDT",
+      "binance_symbol": "HEMIUSDT",
+      "gate_symbol": "HEMI_USDT",
+      "binance_quote_volume_24h": 1671725.300126,
+      "gate_quote_volume_24h": 68088,
+      "liquidity_score": 68088,
+      "rank": 352
+    },
+    {
+      "symbol_id": "SOPHUSDT",
+      "binance_symbol": "SOPHUSDT",
+      "gate_symbol": "SOPH_USDT",
+      "binance_quote_volume_24h": 5061298.428433,
+      "gate_quote_volume_24h": 66886,
+      "liquidity_score": 66886,
+      "rank": 353
+    },
+    {
+      "symbol_id": "BMTUSDT",
+      "binance_symbol": "BMTUSDT",
+      "gate_symbol": "BMT_USDT",
+      "binance_quote_volume_24h": 1151689.04284,
+      "gate_quote_volume_24h": 64870,
+      "liquidity_score": 64870,
+      "rank": 354
+    },
+    {
+      "symbol_id": "COSUSDT",
+      "binance_symbol": "COSUSDT",
+      "gate_symbol": "COS_USDT",
+      "binance_quote_volume_24h": 4479509.112879,
+      "gate_quote_volume_24h": 64672,
+      "liquidity_score": 64672,
+      "rank": 355
+    },
+    {
+      "symbol_id": "COOKIEUSDT",
+      "binance_symbol": "COOKIEUSDT",
+      "gate_symbol": "COOKIE_USDT",
+      "binance_quote_volume_24h": 1806765.94653,
+      "gate_quote_volume_24h": 64479,
+      "liquidity_score": 64479,
+      "rank": 356
+    },
+    {
+      "symbol_id": "LISTAUSDT",
+      "binance_symbol": "LISTAUSDT",
+      "gate_symbol": "LISTA_USDT",
+      "binance_quote_volume_24h": 1544959.19433,
+      "gate_quote_volume_24h": 64138,
+      "liquidity_score": 64138,
+      "rank": 357
+    },
+    {
+      "symbol_id": "THEUSDT",
+      "binance_symbol": "THEUSDT",
+      "gate_symbol": "THE_USDT",
+      "binance_quote_volume_24h": 2483447.99002,
+      "gate_quote_volume_24h": 63258,
+      "liquidity_score": 63258,
+      "rank": 358
+    },
+    {
+      "symbol_id": "THETAUSDT",
+      "binance_symbol": "THETAUSDT",
+      "gate_symbol": "THETA_USDT",
+      "binance_quote_volume_24h": 3672149.7031,
+      "gate_quote_volume_24h": 63128,
+      "liquidity_score": 63128,
+      "rank": 359
+    },
+    {
+      "symbol_id": "0GUSDT",
+      "binance_symbol": "0GUSDT",
+      "gate_symbol": "0G_USDT",
+      "binance_quote_volume_24h": 4193194.8413,
+      "gate_quote_volume_24h": 62424,
+      "liquidity_score": 62424,
+      "rank": 360
+    },
+    {
+      "symbol_id": "ARKUSDT",
+      "binance_symbol": "ARKUSDT",
+      "gate_symbol": "ARK_USDT",
+      "binance_quote_volume_24h": 1206131.5273,
+      "gate_quote_volume_24h": 62060,
+      "liquidity_score": 62060,
+      "rank": 361
+    },
+    {
+      "symbol_id": "PROMPTUSDT",
+      "binance_symbol": "PROMPTUSDT",
+      "gate_symbol": "PROMPT_USDT",
+      "binance_quote_volume_24h": 547972.84453,
+      "gate_quote_volume_24h": 61902,
+      "liquidity_score": 61902,
+      "rank": 362
+    },
+    {
+      "symbol_id": "CAKEUSDT",
+      "binance_symbol": "CAKEUSDT",
+      "gate_symbol": "CAKE_USDT",
+      "binance_quote_volume_24h": 4145312.4284,
+      "gate_quote_volume_24h": 59170,
+      "liquidity_score": 59170,
+      "rank": 363
+    },
+    {
+      "symbol_id": "REZUSDT",
+      "binance_symbol": "REZUSDT",
+      "gate_symbol": "REZ_USDT",
+      "binance_quote_volume_24h": 3082143.397288,
+      "gate_quote_volume_24h": 59075,
+      "liquidity_score": 59075,
+      "rank": 364
+    },
+    {
+      "symbol_id": "TURTLEUSDT",
+      "binance_symbol": "TURTLEUSDT",
+      "gate_symbol": "TURTLE_USDT",
+      "binance_quote_volume_24h": 1239764.12126,
+      "gate_quote_volume_24h": 59001,
+      "liquidity_score": 59001,
+      "rank": 365
+    },
+    {
+      "symbol_id": "AINUSDT",
+      "binance_symbol": "AINUSDT",
+      "gate_symbol": "AIN_USDT",
+      "binance_quote_volume_24h": 1519659.72246,
+      "gate_quote_volume_24h": 58797,
+      "liquidity_score": 58797,
+      "rank": 366
+    },
+    {
+      "symbol_id": "PROMUSDT",
+      "binance_symbol": "PROMUSDT",
+      "gate_symbol": "PROM_USDT",
+      "binance_quote_volume_24h": 2748579.6512,
+      "gate_quote_volume_24h": 58779,
+      "liquidity_score": 58779,
+      "rank": 367
+    },
+    {
+      "symbol_id": "BANDUSDT",
+      "binance_symbol": "BANDUSDT",
+      "gate_symbol": "BAND_USDT",
+      "binance_quote_volume_24h": 1078232.184,
+      "gate_quote_volume_24h": 58734,
+      "liquidity_score": 58734,
+      "rank": 368
+    },
+    {
+      "symbol_id": "BROCCOLIF3BUSDT",
+      "binance_symbol": "BROCCOLIF3BUSDT",
+      "gate_symbol": "BROCCOLIF3B_USDT",
+      "binance_quote_volume_24h": 517289.266727,
+      "gate_quote_volume_24h": 58433,
+      "liquidity_score": 58433,
+      "rank": 369
+    },
+    {
+      "symbol_id": "XAIUSDT",
+      "binance_symbol": "XAIUSDT",
+      "gate_symbol": "XAI_USDT",
+      "binance_quote_volume_24h": 2038537.51361,
+      "gate_quote_volume_24h": 56987,
+      "liquidity_score": 56987,
+      "rank": 370
+    },
+    {
+      "symbol_id": "ZILUSDT",
+      "binance_symbol": "ZILUSDT",
+      "gate_symbol": "ZIL_USDT",
+      "binance_quote_volume_24h": 2042668.55466,
+      "gate_quote_volume_24h": 56794,
+      "liquidity_score": 56794,
+      "rank": 371
+    },
+    {
+      "symbol_id": "CHILLGUYUSDT",
+      "binance_symbol": "CHILLGUYUSDT",
+      "gate_symbol": "CHILLGUY_USDT",
+      "binance_quote_volume_24h": 1823115.03056,
+      "gate_quote_volume_24h": 56513,
+      "liquidity_score": 56513,
+      "rank": 372
+    },
+    {
+      "symbol_id": "SKYUSDT",
+      "binance_symbol": "SKYUSDT",
+      "gate_symbol": "SKY_USDT",
+      "binance_quote_volume_24h": 4481604.1481,
+      "gate_quote_volume_24h": 56110,
+      "liquidity_score": 56110,
+      "rank": 373
+    },
+    {
+      "symbol_id": "FLUIDUSDT",
+      "binance_symbol": "FLUIDUSDT",
+      "gate_symbol": "FLUID_USDT",
+      "binance_quote_volume_24h": 921489.1744,
+      "gate_quote_volume_24h": 55005,
+      "liquidity_score": 55005,
+      "rank": 374
+    },
+    {
+      "symbol_id": "PHAUSDT",
+      "binance_symbol": "PHAUSDT",
+      "gate_symbol": "PHA_USDT",
+      "binance_quote_volume_24h": 1581390.3995,
+      "gate_quote_volume_24h": 54919,
+      "liquidity_score": 54919,
+      "rank": 375
+    },
+    {
+      "symbol_id": "JSTUSDT",
+      "binance_symbol": "JSTUSDT",
+      "gate_symbol": "JST_USDT",
+      "binance_quote_volume_24h": 2543707.22831,
+      "gate_quote_volume_24h": 53834,
+      "liquidity_score": 53834,
+      "rank": 376
+    },
+    {
+      "symbol_id": "VANAUSDT",
+      "binance_symbol": "VANAUSDT",
+      "gate_symbol": "VANA_USDT",
+      "binance_quote_volume_24h": 1310572.0481,
+      "gate_quote_volume_24h": 53314,
+      "liquidity_score": 53314,
+      "rank": 377
+    },
+    {
+      "symbol_id": "DEXEUSDT",
+      "binance_symbol": "DEXEUSDT",
+      "gate_symbol": "DEXE_USDT",
+      "binance_quote_volume_24h": 4696795.9201,
+      "gate_quote_volume_24h": 52893,
+      "liquidity_score": 52893,
+      "rank": 378
+    },
+    {
+      "symbol_id": "SKLUSDT",
+      "binance_symbol": "SKLUSDT",
+      "gate_symbol": "SKL_USDT",
+      "binance_quote_volume_24h": 1263921.78666,
+      "gate_quote_volume_24h": 52813,
+      "liquidity_score": 52813,
+      "rank": 379
+    },
+    {
+      "symbol_id": "ARKMUSDT",
+      "binance_symbol": "ARKMUSDT",
+      "gate_symbol": "ARKM_USDT",
+      "binance_quote_volume_24h": 3221312.7281,
+      "gate_quote_volume_24h": 52738,
+      "liquidity_score": 52738,
+      "rank": 380
+    },
+    {
+      "symbol_id": "TLMUSDT",
+      "binance_symbol": "TLMUSDT",
+      "gate_symbol": "TLM_USDT",
+      "binance_quote_volume_24h": 1183988.194758,
+      "gate_quote_volume_24h": 52116,
+      "liquidity_score": 52116,
+      "rank": 381
+    },
+    {
+      "symbol_id": "ALICEUSDT",
+      "binance_symbol": "ALICEUSDT",
+      "gate_symbol": "ALICE_USDT",
+      "binance_quote_volume_24h": 1566341.77686,
+      "gate_quote_volume_24h": 52007,
+      "liquidity_score": 52007,
+      "rank": 382
+    },
+    {
+      "symbol_id": "TNSRUSDT",
+      "binance_symbol": "TNSRUSDT",
+      "gate_symbol": "TNSR_USDT",
+      "binance_quote_volume_24h": 2569916.239098,
+      "gate_quote_volume_24h": 51433,
+      "liquidity_score": 51433,
+      "rank": 383
+    },
+    {
+      "symbol_id": "MEWUSDT",
+      "binance_symbol": "MEWUSDT",
+      "gate_symbol": "MEW_USDT",
+      "binance_quote_volume_24h": 1244754.8173277,
+      "gate_quote_volume_24h": 51153,
+      "liquidity_score": 51153,
+      "rank": 384
+    },
+    {
+      "symbol_id": "IDOLUSDT",
+      "binance_symbol": "IDOLUSDT",
+      "gate_symbol": "IDOL_USDT",
+      "binance_quote_volume_24h": 2044077.46821,
+      "gate_quote_volume_24h": 50658,
+      "liquidity_score": 50658,
+      "rank": 385
+    },
+    {
+      "symbol_id": "TOWNSUSDT",
+      "binance_symbol": "TOWNSUSDT",
+      "gate_symbol": "TOWNS_USDT",
+      "binance_quote_volume_24h": 1672907.413186,
+      "gate_quote_volume_24h": 50536,
+      "liquidity_score": 50536,
+      "rank": 386
+    },
+    {
+      "symbol_id": "AGTUSDT",
+      "binance_symbol": "AGTUSDT",
+      "gate_symbol": "AGT_USDT",
+      "binance_quote_volume_24h": 1991245.380313,
+      "gate_quote_volume_24h": 50293,
+      "liquidity_score": 50293,
+      "rank": 387
+    },
+    {
+      "symbol_id": "SUSDT",
+      "binance_symbol": "SUSDT",
+      "gate_symbol": "S_USDT",
+      "binance_quote_volume_24h": 3554164.0016,
+      "gate_quote_volume_24h": 50049,
+      "liquidity_score": 50049,
+      "rank": 388
+    },
+    {
+      "symbol_id": "SAFEUSDT",
+      "binance_symbol": "SAFEUSDT",
+      "gate_symbol": "SAFE_USDT",
+      "binance_quote_volume_24h": 512416.0844,
+      "gate_quote_volume_24h": 49634,
+      "liquidity_score": 49634,
+      "rank": 389
+    },
+    {
+      "symbol_id": "ALCHUSDT",
+      "binance_symbol": "ALCHUSDT",
+      "gate_symbol": "ALCH_USDT",
+      "binance_quote_volume_24h": 1085433.08501,
+      "gate_quote_volume_24h": 49577,
+      "liquidity_score": 49577,
+      "rank": 390
+    },
+    {
+      "symbol_id": "SSVUSDT",
+      "binance_symbol": "SSVUSDT",
+      "gate_symbol": "SSV_USDT",
+      "binance_quote_volume_24h": 1070204.2085,
+      "gate_quote_volume_24h": 49478,
+      "liquidity_score": 49478,
+      "rank": 391
+    },
+    {
+      "symbol_id": "LUMIAUSDT",
+      "binance_symbol": "LUMIAUSDT",
+      "gate_symbol": "LUMIA_USDT",
+      "binance_quote_volume_24h": 2200968.661141,
+      "gate_quote_volume_24h": 49273,
+      "liquidity_score": 49273,
+      "rank": 392
+    },
+    {
+      "symbol_id": "ANKRUSDT",
+      "binance_symbol": "ANKRUSDT",
+      "gate_symbol": "ANKR_USDT",
+      "binance_quote_volume_24h": 2019757.72728,
+      "gate_quote_volume_24h": 48998,
+      "liquidity_score": 48998,
+      "rank": 393
+    },
+    {
+      "symbol_id": "IDUSDT",
+      "binance_symbol": "IDUSDT",
+      "gate_symbol": "ID_USDT",
+      "binance_quote_volume_24h": 2636303.93183,
+      "gate_quote_volume_24h": 48868,
+      "liquidity_score": 48868,
+      "rank": 394
+    },
+    {
+      "symbol_id": "AGLDUSDT",
+      "binance_symbol": "AGLDUSDT",
+      "gate_symbol": "AGLD_USDT",
+      "binance_quote_volume_24h": 1176501.1654,
+      "gate_quote_volume_24h": 48075,
+      "liquidity_score": 48075,
+      "rank": 395
+    },
+    {
+      "symbol_id": "2ZUSDT",
+      "binance_symbol": "2ZUSDT",
+      "gate_symbol": "2Z_USDT",
+      "binance_quote_volume_24h": 3289965.70481,
+      "gate_quote_volume_24h": 47691,
+      "liquidity_score": 47691,
+      "rank": 396
+    },
+    {
+      "symbol_id": "ELSAUSDT",
+      "binance_symbol": "ELSAUSDT",
+      "gate_symbol": "ELSA_USDT",
+      "binance_quote_volume_24h": 824326.77593,
+      "gate_quote_volume_24h": 47355,
+      "liquidity_score": 47355,
+      "rank": 397
+    },
+    {
+      "symbol_id": "ASTRUSDT",
+      "binance_symbol": "ASTRUSDT",
+      "gate_symbol": "ASTR_USDT",
+      "binance_quote_volume_24h": 934886.54589,
+      "gate_quote_volume_24h": 47310,
+      "liquidity_score": 47310,
+      "rank": 398
+    },
+    {
+      "symbol_id": "BELUSDT",
+      "binance_symbol": "BELUSDT",
+      "gate_symbol": "BEL_USDT",
+      "binance_quote_volume_24h": 952318.7343,
+      "gate_quote_volume_24h": 47112,
+      "liquidity_score": 47112,
+      "rank": 399
+    },
+    {
+      "symbol_id": "TOSHIUSDT",
+      "binance_symbol": "TOSHIUSDT",
+      "gate_symbol": "TOSHI_USDT",
+      "binance_quote_volume_24h": 1517770.4708889,
+      "gate_quote_volume_24h": 45735,
+      "liquidity_score": 45735,
+      "rank": 400
+    },
+    {
+      "symbol_id": "FOGOUSDT",
+      "binance_symbol": "FOGOUSDT",
+      "gate_symbol": "FOGO_USDT",
+      "binance_quote_volume_24h": 1644231.36769,
+      "gate_quote_volume_24h": 45288,
+      "liquidity_score": 45288,
+      "rank": 401
+    },
+    {
+      "symbol_id": "SPELLUSDT",
+      "binance_symbol": "SPELLUSDT",
+      "gate_symbol": "SPELL_USDT",
+      "binance_quote_volume_24h": 1283163.8250801,
+      "gate_quote_volume_24h": 44560,
+      "liquidity_score": 44560,
+      "rank": 402
+    },
+    {
+      "symbol_id": "ASRUSDT",
+      "binance_symbol": "ASRUSDT",
+      "gate_symbol": "ASR_USDT",
+      "binance_quote_volume_24h": 1438231.5519,
+      "gate_quote_volume_24h": 42948,
+      "liquidity_score": 42948,
+      "rank": 403
+    },
+    {
+      "symbol_id": "FUSDT",
+      "binance_symbol": "FUSDT",
+      "gate_symbol": "F_USDT",
+      "binance_quote_volume_24h": 1384915.134734,
+      "gate_quote_volume_24h": 42595,
+      "liquidity_score": 42595,
+      "rank": 404
+    },
+    {
+      "symbol_id": "CLANKERUSDT",
+      "binance_symbol": "CLANKERUSDT",
+      "gate_symbol": "CLANKER_USDT",
+      "binance_quote_volume_24h": 1370292.5177,
+      "gate_quote_volume_24h": 41765,
+      "liquidity_score": 41765,
+      "rank": 405
+    },
+    {
+      "symbol_id": "NXPCUSDT",
+      "binance_symbol": "NXPCUSDT",
+      "gate_symbol": "NXPC_USDT",
+      "binance_quote_volume_24h": 2848526.4908,
+      "gate_quote_volume_24h": 41641,
+      "liquidity_score": 41641,
+      "rank": 406
+    },
+    {
+      "symbol_id": "ZETAUSDT",
+      "binance_symbol": "ZETAUSDT",
+      "gate_symbol": "ZETA_USDT",
+      "binance_quote_volume_24h": 1088212.18833,
+      "gate_quote_volume_24h": 41633,
+      "liquidity_score": 41633,
+      "rank": 407
+    },
+    {
+      "symbol_id": "BATUSDT",
+      "binance_symbol": "BATUSDT",
+      "gate_symbol": "BAT_USDT",
+      "binance_quote_volume_24h": 1878067.4584,
+      "gate_quote_volume_24h": 41517,
+      "liquidity_score": 41517,
+      "rank": 408
+    },
+    {
+      "symbol_id": "BULLAUSDT",
+      "binance_symbol": "BULLAUSDT",
+      "gate_symbol": "BULLA_USDT",
+      "binance_quote_volume_24h": 2530933.123238,
+      "gate_quote_volume_24h": 41500,
+      "liquidity_score": 41500,
+      "rank": 409
+    },
+    {
+      "symbol_id": "IOTXUSDT",
+      "binance_symbol": "IOTXUSDT",
+      "gate_symbol": "IOTX_USDT",
+      "binance_quote_volume_24h": 946135.69118,
+      "gate_quote_volume_24h": 41124,
+      "liquidity_score": 41124,
+      "rank": 410
+    },
+    {
+      "symbol_id": "GMTUSDT",
+      "binance_symbol": "GMTUSDT",
+      "gate_symbol": "GMT_USDT",
+      "binance_quote_volume_24h": 3078985.31261,
+      "gate_quote_volume_24h": 40710,
+      "liquidity_score": 40710,
+      "rank": 411
+    },
+    {
+      "symbol_id": "METUSDT",
+      "binance_symbol": "METUSDT",
+      "gate_symbol": "MET_USDT",
+      "binance_quote_volume_24h": 1753791.819,
+      "gate_quote_volume_24h": 39725,
+      "liquidity_score": 39725,
+      "rank": 412
+    },
+    {
+      "symbol_id": "RSRUSDT",
+      "binance_symbol": "RSRUSDT",
+      "gate_symbol": "RSR_USDT",
+      "binance_quote_volume_24h": 2656183.332119,
+      "gate_quote_volume_24h": 39696,
+      "liquidity_score": 39696,
+      "rank": 413
+    },
+    {
+      "symbol_id": "ICXUSDT",
+      "binance_symbol": "ICXUSDT",
+      "gate_symbol": "ICX_USDT",
+      "binance_quote_volume_24h": 1573373.04407,
+      "gate_quote_volume_24h": 38812,
+      "liquidity_score": 38812,
+      "rank": 414
+    },
+    {
+      "symbol_id": "WOOUSDT",
+      "binance_symbol": "WOOUSDT",
+      "gate_symbol": "WOO_USDT",
+      "binance_quote_volume_24h": 1154160.67678,
+      "gate_quote_volume_24h": 36839,
+      "liquidity_score": 36839,
+      "rank": 415
+    },
+    {
+      "symbol_id": "ALLOUSDT",
+      "binance_symbol": "ALLOUSDT",
+      "gate_symbol": "ALLO_USDT",
+      "binance_quote_volume_24h": 2549464.76107,
+      "gate_quote_volume_24h": 36799,
+      "liquidity_score": 36799,
+      "rank": 416
+    },
+    {
+      "symbol_id": "ACEUSDT",
+      "binance_symbol": "ACEUSDT",
+      "gate_symbol": "ACE_USDT",
+      "binance_quote_volume_24h": 2201504.442496,
+      "gate_quote_volume_24h": 36278,
+      "liquidity_score": 36278,
+      "rank": 417
+    },
+    {
+      "symbol_id": "TRUSTUSDT",
+      "binance_symbol": "TRUSTUSDT",
+      "gate_symbol": "TRUST_USDT",
+      "binance_quote_volume_24h": 759599.28214,
+      "gate_quote_volume_24h": 35557,
+      "liquidity_score": 35557,
+      "rank": 418
+    },
+    {
+      "symbol_id": "GASUSDT",
+      "binance_symbol": "GASUSDT",
+      "gate_symbol": "GAS_USDT",
+      "binance_quote_volume_24h": 1203260.9795,
+      "gate_quote_volume_24h": 34702,
+      "liquidity_score": 34702,
+      "rank": 419
+    },
+    {
+      "symbol_id": "DOODUSDT",
+      "binance_symbol": "DOODUSDT",
+      "gate_symbol": "DOOD_USDT",
+      "binance_quote_volume_24h": 2252669.8485585,
+      "gate_quote_volume_24h": 34591,
+      "liquidity_score": 34591,
+      "rank": 420
+    },
+    {
+      "symbol_id": "CATIUSDT",
+      "binance_symbol": "CATIUSDT",
+      "gate_symbol": "CATI_USDT",
+      "binance_quote_volume_24h": 953423.08226,
+      "gate_quote_volume_24h": 34441,
+      "liquidity_score": 34441,
+      "rank": 421
+    },
+    {
+      "symbol_id": "ZORAUSDT",
+      "binance_symbol": "ZORAUSDT",
+      "gate_symbol": "ZORA_USDT",
+      "binance_quote_volume_24h": 2580170.79057,
+      "gate_quote_volume_24h": 33737,
+      "liquidity_score": 33737,
+      "rank": 422
+    },
+    {
+      "symbol_id": "ACHUSDT",
+      "binance_symbol": "ACHUSDT",
+      "gate_symbol": "ACH_USDT",
+      "binance_quote_volume_24h": 2199760.931123,
+      "gate_quote_volume_24h": 33720,
+      "liquidity_score": 33720,
+      "rank": 423
+    },
+    {
+      "symbol_id": "HEIUSDT",
+      "binance_symbol": "HEIUSDT",
+      "gate_symbol": "HEI_USDT",
+      "binance_quote_volume_24h": 650872.501847,
+      "gate_quote_volume_24h": 32696,
+      "liquidity_score": 32696,
+      "rank": 424
+    },
+    {
+      "symbol_id": "FIDAUSDT",
+      "binance_symbol": "FIDAUSDT",
+      "gate_symbol": "FIDA_USDT",
+      "binance_quote_volume_24h": 1177406.85026,
+      "gate_quote_volume_24h": 32070,
+      "liquidity_score": 32070,
+      "rank": 425
+    },
+    {
+      "symbol_id": "ONEUSDT",
+      "binance_symbol": "ONEUSDT",
+      "gate_symbol": "ONE_USDT",
+      "binance_quote_volume_24h": 1154761.614345,
+      "gate_quote_volume_24h": 31997,
+      "liquidity_score": 31997,
+      "rank": 426
+    },
+    {
+      "symbol_id": "FIGHTUSDT",
+      "binance_symbol": "FIGHTUSDT",
+      "gate_symbol": "FIGHT_USDT",
+      "binance_quote_volume_24h": 1282814.303898,
+      "gate_quote_volume_24h": 31852,
+      "liquidity_score": 31852,
+      "rank": 427
+    },
+    {
+      "symbol_id": "ICNTUSDT",
+      "binance_symbol": "ICNTUSDT",
+      "gate_symbol": "ICNT_USDT",
+      "binance_quote_volume_24h": 1994380.3221,
+      "gate_quote_volume_24h": 31355,
+      "liquidity_score": 31355,
+      "rank": 428
+    },
+    {
+      "symbol_id": "TUTUSDT",
+      "binance_symbol": "TUTUSDT",
+      "gate_symbol": "TUT_USDT",
+      "binance_quote_volume_24h": 1665501.54589,
+      "gate_quote_volume_24h": 30999,
+      "liquidity_score": 30999,
+      "rank": 429
+    },
+    {
+      "symbol_id": "EULUSDT",
+      "binance_symbol": "EULUSDT",
+      "gate_symbol": "EUL_USDT",
+      "binance_quote_volume_24h": 1475070.7522,
+      "gate_quote_volume_24h": 30810,
+      "liquidity_score": 30810,
+      "rank": 430
+    },
+    {
+      "symbol_id": "VANRYUSDT",
+      "binance_symbol": "VANRYUSDT",
+      "gate_symbol": "VANRY_USDT",
+      "binance_quote_volume_24h": 1083760.313999,
+      "gate_quote_volume_24h": 30431,
+      "liquidity_score": 30431,
+      "rank": 431
+    },
+    {
+      "symbol_id": "DOLOUSDT",
+      "binance_symbol": "DOLOUSDT",
+      "gate_symbol": "DOLO_USDT",
+      "binance_quote_volume_24h": 951128.17019,
+      "gate_quote_volume_24h": 30007,
+      "liquidity_score": 30007,
+      "rank": 432
+    },
+    {
+      "symbol_id": "REDUSDT",
+      "binance_symbol": "REDUSDT",
+      "gate_symbol": "RED_USDT",
+      "binance_quote_volume_24h": 2371213.2619,
+      "gate_quote_volume_24h": 29905,
+      "liquidity_score": 29905,
+      "rank": 433
+    },
+    {
+      "symbol_id": "ALPINEUSDT",
+      "binance_symbol": "ALPINEUSDT",
+      "gate_symbol": "ALPINE_USDT",
+      "binance_quote_volume_24h": 862559.239,
+      "gate_quote_volume_24h": 29433,
+      "liquidity_score": 29433,
+      "rank": 434
+    },
+    {
+      "symbol_id": "FLUXUSDT",
+      "binance_symbol": "FLUXUSDT",
+      "gate_symbol": "FLUX_USDT",
+      "binance_quote_volume_24h": 795987.90412,
+      "gate_quote_volume_24h": 28536,
+      "liquidity_score": 28536,
+      "rank": 435
+    },
+    {
+      "symbol_id": "LQTYUSDT",
+      "binance_symbol": "LQTYUSDT",
+      "gate_symbol": "LQTY_USDT",
+      "binance_quote_volume_24h": 1235411.94409,
+      "gate_quote_volume_24h": 27642,
+      "liquidity_score": 27642,
+      "rank": 436
+    },
+    {
+      "symbol_id": "SCRUSDT",
+      "binance_symbol": "SCRUSDT",
+      "gate_symbol": "SCR_USDT",
+      "binance_quote_volume_24h": 938844.16327,
+      "gate_quote_volume_24h": 27380,
+      "liquidity_score": 27380,
+      "rank": 437
+    },
+    {
+      "symbol_id": "ETHWUSDT",
+      "binance_symbol": "ETHWUSDT",
+      "gate_symbol": "ETHW_USDT",
+      "binance_quote_volume_24h": 549116.0233,
+      "gate_quote_volume_24h": 27324,
+      "liquidity_score": 27324,
+      "rank": 438
+    },
+    {
+      "symbol_id": "SYRUPUSDT",
+      "binance_symbol": "SYRUPUSDT",
+      "gate_symbol": "SYRUP_USDT",
+      "binance_quote_volume_24h": 2741465.05568,
+      "gate_quote_volume_24h": 26967,
+      "liquidity_score": 26967,
+      "rank": 439
+    },
+    {
+      "symbol_id": "INUSDT",
+      "binance_symbol": "INUSDT",
+      "gate_symbol": "IN_USDT",
+      "binance_quote_volume_24h": 1310679.60763,
+      "gate_quote_volume_24h": 26695,
+      "liquidity_score": 26695,
+      "rank": 440
+    },
+    {
+      "symbol_id": "INITUSDT",
+      "binance_symbol": "INITUSDT",
+      "gate_symbol": "INIT_USDT",
+      "binance_quote_volume_24h": 1623778.71728,
+      "gate_quote_volume_24h": 26489,
+      "liquidity_score": 26489,
+      "rank": 441
+    },
+    {
+      "symbol_id": "ERAUSDT",
+      "binance_symbol": "ERAUSDT",
+      "gate_symbol": "ERA_USDT",
+      "binance_quote_volume_24h": 1129233.9825,
+      "gate_quote_volume_24h": 26168,
+      "liquidity_score": 26168,
+      "rank": 442
+    },
+    {
+      "symbol_id": "COWUSDT",
+      "binance_symbol": "COWUSDT",
+      "gate_symbol": "COW_USDT",
+      "binance_quote_volume_24h": 1074975.7108,
+      "gate_quote_volume_24h": 26164,
+      "liquidity_score": 26164,
+      "rank": 443
+    },
+    {
+      "symbol_id": "KOMAUSDT",
+      "binance_symbol": "KOMAUSDT",
+      "gate_symbol": "KOMA_USDT",
+      "binance_quote_volume_24h": 568748.4862,
+      "gate_quote_volume_24h": 26161,
+      "liquidity_score": 26161,
+      "rank": 444
+    },
+    {
+      "symbol_id": "RVNUSDT",
+      "binance_symbol": "RVNUSDT",
+      "gate_symbol": "RVN_USDT",
+      "binance_quote_volume_24h": 1348038.7277,
+      "gate_quote_volume_24h": 25908,
+      "liquidity_score": 25908,
+      "rank": 445
+    },
+    {
+      "symbol_id": "MOCAUSDT",
+      "binance_symbol": "MOCAUSDT",
+      "gate_symbol": "MOCA_USDT",
+      "binance_quote_volume_24h": 668259.38892,
+      "gate_quote_volume_24h": 25329,
+      "liquidity_score": 25329,
+      "rank": 446
+    },
+    {
+      "symbol_id": "CELOUSDT",
+      "binance_symbol": "CELOUSDT",
+      "gate_symbol": "CELO_USDT",
+      "binance_quote_volume_24h": 2315066.630969,
+      "gate_quote_volume_24h": 25051,
+      "liquidity_score": 25051,
+      "rank": 447
+    },
+    {
+      "symbol_id": "CKBUSDT",
+      "binance_symbol": "CKBUSDT",
+      "gate_symbol": "CKB_USDT",
+      "binance_quote_volume_24h": 996399.930535,
+      "gate_quote_volume_24h": 24941,
+      "liquidity_score": 24941,
+      "rank": 448
+    },
+    {
+      "symbol_id": "TAIKOUSDT",
+      "binance_symbol": "TAIKOUSDT",
+      "gate_symbol": "TAIKO_USDT",
+      "binance_quote_volume_24h": 651157.3698,
+      "gate_quote_volume_24h": 24842,
+      "liquidity_score": 24842,
+      "rank": 449
+    },
+    {
+      "symbol_id": "ZKCUSDT",
+      "binance_symbol": "ZKCUSDT",
+      "gate_symbol": "ZKC_USDT",
+      "binance_quote_volume_24h": 878935.26267,
+      "gate_quote_volume_24h": 24137,
+      "liquidity_score": 24137,
+      "rank": 450
+    },
+    {
+      "symbol_id": "GMXUSDT",
+      "binance_symbol": "GMXUSDT",
+      "gate_symbol": "GMX_USDT",
+      "binance_quote_volume_24h": 1144414.86653,
+      "gate_quote_volume_24h": 23505,
+      "liquidity_score": 23505,
+      "rank": 451
+    },
+    {
+      "symbol_id": "STGUSDT",
+      "binance_symbol": "STGUSDT",
+      "gate_symbol": "STG_USDT",
+      "binance_quote_volume_24h": 1655259.4826,
+      "gate_quote_volume_24h": 23229,
+      "liquidity_score": 23229,
+      "rank": 452
+    },
+    {
+      "symbol_id": "AVAUSDT",
+      "binance_symbol": "AVAUSDT",
+      "gate_symbol": "AVA_USDT",
+      "binance_quote_volume_24h": 607207.95717,
+      "gate_quote_volume_24h": 22214,
+      "liquidity_score": 22214,
+      "rank": 453
+    },
+    {
+      "symbol_id": "ONGUSDT",
+      "binance_symbol": "ONGUSDT",
+      "gate_symbol": "ONG_USDT",
+      "binance_quote_volume_24h": 1197953.53092,
+      "gate_quote_volume_24h": 21932,
+      "liquidity_score": 21932,
+      "rank": 454
+    },
+    {
+      "symbol_id": "ONUSDT",
+      "binance_symbol": "ONUSDT",
+      "gate_symbol": "ON_USDT",
+      "binance_quote_volume_24h": 1370402.29138,
+      "gate_quote_volume_24h": 21326,
+      "liquidity_score": 21326,
+      "rank": 455
+    },
+    {
+      "symbol_id": "CHRUSDT",
+      "binance_symbol": "CHRUSDT",
+      "gate_symbol": "CHR_USDT",
+      "binance_quote_volume_24h": 2299237.59322,
+      "gate_quote_volume_24h": 21303,
+      "liquidity_score": 21303,
+      "rank": 456
+    },
+    {
+      "symbol_id": "MTLUSDT",
+      "binance_symbol": "MTLUSDT",
+      "gate_symbol": "MTL_USDT",
+      "binance_quote_volume_24h": 704679.8532,
+      "gate_quote_volume_24h": 21243,
+      "liquidity_score": 21243,
+      "rank": 457
+    },
+    {
+      "symbol_id": "CTSIUSDT",
+      "binance_symbol": "CTSIUSDT",
+      "gate_symbol": "CTSI_USDT",
+      "binance_quote_volume_24h": 1245772.83472,
+      "gate_quote_volume_24h": 21021,
+      "liquidity_score": 21021,
+      "rank": 458
+    },
+    {
+      "symbol_id": "BIGTIMEUSDT",
+      "binance_symbol": "BIGTIMEUSDT",
+      "gate_symbol": "BIGTIME_USDT",
+      "binance_quote_volume_24h": 1194827.06399,
+      "gate_quote_volume_24h": 20815,
+      "liquidity_score": 20815,
+      "rank": 459
+    },
+    {
+      "symbol_id": "VELODROMEUSDT",
+      "binance_symbol": "VELODROMEUSDT",
+      "gate_symbol": "VELODROME_USDT",
+      "binance_quote_volume_24h": 513311.78752,
+      "gate_quote_volume_24h": 20053,
+      "liquidity_score": 20053,
+      "rank": 460
+    },
+    {
+      "symbol_id": "CTKUSDT",
+      "binance_symbol": "CTKUSDT",
+      "gate_symbol": "CTK_USDT",
+      "binance_quote_volume_24h": 1048786.0973,
+      "gate_quote_volume_24h": 19824,
+      "liquidity_score": 19824,
+      "rank": 461
+    },
+    {
+      "symbol_id": "USUALUSDT",
+      "binance_symbol": "USUALUSDT",
+      "gate_symbol": "USUAL_USDT",
+      "binance_quote_volume_24h": 1189447.09611,
+      "gate_quote_volume_24h": 19653,
+      "liquidity_score": 19653,
+      "rank": 462
+    },
+    {
+      "symbol_id": "WAXPUSDT",
+      "binance_symbol": "WAXPUSDT",
+      "gate_symbol": "WAXP_USDT",
+      "binance_quote_volume_24h": 1041522.80765,
+      "gate_quote_volume_24h": 19526,
+      "liquidity_score": 19526,
+      "rank": 463
+    },
+    {
+      "symbol_id": "DIAUSDT",
+      "binance_symbol": "DIAUSDT",
+      "gate_symbol": "DIA_USDT",
+      "binance_quote_volume_24h": 788496.463,
+      "gate_quote_volume_24h": 19187,
+      "liquidity_score": 19187,
+      "rank": 464
+    },
+    {
+      "symbol_id": "SLPUSDT",
+      "binance_symbol": "SLPUSDT",
+      "gate_symbol": "SLP_USDT",
+      "binance_quote_volume_24h": 655668.2847342,
+      "gate_quote_volume_24h": 19161,
+      "liquidity_score": 19161,
+      "rank": 465
+    },
+    {
+      "symbol_id": "USDCUSDT",
+      "binance_symbol": "USDCUSDT",
+      "gate_symbol": "USDC_USDT",
+      "binance_quote_volume_24h": 2549902.938229,
+      "gate_quote_volume_24h": 19105,
+      "liquidity_score": 19105,
+      "rank": 466
+    },
+    {
+      "symbol_id": "SUNUSDT",
+      "binance_symbol": "SUNUSDT",
+      "gate_symbol": "SUN_USDT",
+      "binance_quote_volume_24h": 1441047.141603,
+      "gate_quote_volume_24h": 18725,
+      "liquidity_score": 18725,
+      "rank": 467
+    },
+    {
+      "symbol_id": "PROVEUSDT",
+      "binance_symbol": "PROVEUSDT",
+      "gate_symbol": "PROVE_USDT",
+      "binance_quote_volume_24h": 938500.56361,
+      "gate_quote_volume_24h": 18174,
+      "liquidity_score": 18174,
+      "rank": 468
+    },
+    {
+      "symbol_id": "WALUSDT",
+      "binance_symbol": "WALUSDT",
+      "gate_symbol": "WAL_USDT",
+      "binance_quote_volume_24h": 2357574.75043,
+      "gate_quote_volume_24h": 18056,
+      "liquidity_score": 18056,
+      "rank": 469
+    },
+    {
+      "symbol_id": "OGNUSDT",
+      "binance_symbol": "OGNUSDT",
+      "gate_symbol": "OGN_USDT",
+      "binance_quote_volume_24h": 778374.70745,
+      "gate_quote_volume_24h": 17885,
+      "liquidity_score": 17885,
+      "rank": 470
+    },
+    {
+      "symbol_id": "RIFUSDT",
+      "binance_symbol": "RIFUSDT",
+      "gate_symbol": "RIF_USDT",
+      "binance_quote_volume_24h": 3487110.32234,
+      "gate_quote_volume_24h": 17088,
+      "liquidity_score": 17088,
+      "rank": 471
+    },
+    {
+      "symbol_id": "ILVUSDT",
+      "binance_symbol": "ILVUSDT",
+      "gate_symbol": "ILV_USDT",
+      "binance_quote_volume_24h": 1254944.7275,
+      "gate_quote_volume_24h": 16627,
+      "liquidity_score": 16627,
+      "rank": 472
+    },
+    {
+      "symbol_id": "NFPUSDT",
+      "binance_symbol": "NFPUSDT",
+      "gate_symbol": "NFP_USDT",
+      "binance_quote_volume_24h": 2294308.035396,
+      "gate_quote_volume_24h": 16277,
+      "liquidity_score": 16277,
+      "rank": 473
+    },
+    {
+      "symbol_id": "ALLUSDT",
+      "binance_symbol": "ALLUSDT",
+      "gate_symbol": "ALL_USDT",
+      "binance_quote_volume_24h": 1181864.0777,
+      "gate_quote_volume_24h": 16144,
+      "liquidity_score": 16144,
+      "rank": 474
+    },
+    {
+      "symbol_id": "NEWTUSDT",
+      "binance_symbol": "NEWTUSDT",
+      "gate_symbol": "NEWT_USDT",
+      "binance_quote_volume_24h": 1285351.0194,
+      "gate_quote_volume_24h": 14063,
+      "liquidity_score": 14063,
+      "rank": 475
+    },
+    {
+      "symbol_id": "QTUMUSDT",
+      "binance_symbol": "QTUMUSDT",
+      "gate_symbol": "QTUM_USDT",
+      "binance_quote_volume_24h": 1857619.62,
+      "gate_quote_volume_24h": 13873,
+      "liquidity_score": 13873,
+      "rank": 476
+    },
+    {
+      "symbol_id": "SFPUSDT",
+      "binance_symbol": "SFPUSDT",
+      "gate_symbol": "SFP_USDT",
+      "binance_quote_volume_24h": 804730.9101,
+      "gate_quote_volume_24h": 13712,
+      "liquidity_score": 13712,
+      "rank": 477
+    },
+    {
+      "symbol_id": "KMNOUSDT",
+      "binance_symbol": "KMNOUSDT",
+      "gate_symbol": "KMNO_USDT",
+      "binance_quote_volume_24h": 1697922.63005,
+      "gate_quote_volume_24h": 13331,
+      "liquidity_score": 13331,
+      "rank": 478
+    },
+    {
+      "symbol_id": "HAEDALUSDT",
+      "binance_symbol": "HAEDALUSDT",
+      "gate_symbol": "HAEDAL_USDT",
+      "binance_quote_volume_24h": 645415.10878,
+      "gate_quote_volume_24h": 12999,
+      "liquidity_score": 12999,
+      "rank": 479
+    },
+    {
+      "symbol_id": "RLCUSDT",
+      "binance_symbol": "RLCUSDT",
+      "gate_symbol": "RLC_USDT",
+      "binance_quote_volume_24h": 750148.8969,
+      "gate_quote_volume_24h": 12689,
+      "liquidity_score": 12689,
+      "rank": 480
+    },
+    {
+      "symbol_id": "UMAUSDT",
+      "binance_symbol": "UMAUSDT",
+      "gate_symbol": "UMA_USDT",
+      "binance_quote_volume_24h": 1052198.1437,
+      "gate_quote_volume_24h": 12633,
+      "liquidity_score": 12633,
+      "rank": 481
+    },
+    {
+      "symbol_id": "ACUUSDT",
+      "binance_symbol": "ACUUSDT",
+      "gate_symbol": "ACU_USDT",
+      "binance_quote_volume_24h": 1433878.75674,
+      "gate_quote_volume_24h": 12486,
+      "liquidity_score": 12486,
+      "rank": 482
+    },
+    {
+      "symbol_id": "EPICUSDT",
+      "binance_symbol": "EPICUSDT",
+      "gate_symbol": "EPIC_USDT",
+      "binance_quote_volume_24h": 1363428.03365,
+      "gate_quote_volume_24h": 11958,
+      "liquidity_score": 11958,
+      "rank": 483
+    },
+    {
+      "symbol_id": "PUNDIXUSDT",
+      "binance_symbol": "PUNDIXUSDT",
+      "gate_symbol": "PUNDIX_USDT",
+      "binance_quote_volume_24h": 774457.0034,
+      "gate_quote_volume_24h": 11732,
+      "liquidity_score": 11732,
+      "rank": 484
+    },
+    {
+      "symbol_id": "C98USDT",
+      "binance_symbol": "C98USDT",
+      "gate_symbol": "C98_USDT",
+      "binance_quote_volume_24h": 1143251.69204,
+      "gate_quote_volume_24h": 11714,
+      "liquidity_score": 11714,
+      "rank": 485
+    },
+    {
+      "symbol_id": "SCRTUSDT",
+      "binance_symbol": "SCRTUSDT",
+      "gate_symbol": "SCRT_USDT",
+      "binance_quote_volume_24h": 974379.15118,
+      "gate_quote_volume_24h": 11271,
+      "liquidity_score": 11271,
+      "rank": 486
+    },
+    {
+      "symbol_id": "LSKUSDT",
+      "binance_symbol": "LSKUSDT",
+      "gate_symbol": "LSK_USDT",
+      "binance_quote_volume_24h": 1732278.0364,
+      "gate_quote_volume_24h": 10947,
+      "liquidity_score": 10947,
+      "rank": 487
+    },
+    {
+      "symbol_id": "BEAMXUSDT",
+      "binance_symbol": "BEAMXUSDT",
+      "gate_symbol": "BEAMX_USDT",
+      "binance_quote_volume_24h": 1067025.761174,
+      "gate_quote_volume_24h": 10469,
+      "liquidity_score": 10469,
+      "rank": 488
+    },
+    {
+      "symbol_id": "POWRUSDT",
+      "binance_symbol": "POWRUSDT",
+      "gate_symbol": "POWR_USDT",
+      "binance_quote_volume_24h": 1805103.73231,
+      "gate_quote_volume_24h": 9849,
+      "liquidity_score": 9849,
+      "rank": 489
+    },
+    {
+      "symbol_id": "IOSTUSDT",
+      "binance_symbol": "IOSTUSDT",
+      "gate_symbol": "IOST_USDT",
+      "binance_quote_volume_24h": 1318984.04787,
+      "gate_quote_volume_24h": 8943,
+      "liquidity_score": 8943,
+      "rank": 490
+    },
+    {
+      "symbol_id": "JOEUSDT",
+      "binance_symbol": "JOEUSDT",
+      "gate_symbol": "JOE_USDT",
+      "binance_quote_volume_24h": 752766.11169,
+      "gate_quote_volume_24h": 8784,
+      "liquidity_score": 8784,
+      "rank": 491
+    },
+    {
+      "symbol_id": "COTIUSDT",
+      "binance_symbol": "COTIUSDT",
+      "gate_symbol": "COTI_USDT",
+      "binance_quote_volume_24h": 1417526.42196,
+      "gate_quote_volume_24h": 6374,
+      "liquidity_score": 6374,
+      "rank": 492
+    },
+    {
+      "symbol_id": "CELRUSDT",
+      "binance_symbol": "CELRUSDT",
+      "gate_symbol": "CELR_USDT",
+      "binance_quote_volume_24h": 656772.42503,
+      "gate_quote_volume_24h": 3703,
+      "liquidity_score": 3703,
+      "rank": 493
+    },
+    {
+      "symbol_id": "TUSDT",
+      "binance_symbol": "TUSDT",
+      "gate_symbol": "T_USDT",
+      "binance_quote_volume_24h": 1179816.271891,
+      "gate_quote_volume_24h": 2549,
+      "liquidity_score": 2549,
+      "rank": 494
+    }
+  ]
+}

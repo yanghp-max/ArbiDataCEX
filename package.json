@@ -1,0 +1,25 @@
+{
+  "name": "cex-cex-collector",
+  "version": "1.0.0",
+  "description": "CEX-CEX spread collector (Binance + Gate) with Redis Stream output",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node collector/index.js",
+    "dev": "node --watch collector/index.js",
+    "build:symbols": "node collector/scripts/build-symbol-config.js",
+    "sync:start": "node collector/sync/index.js",
+    "sync:once": "node collector/sync/run-once.js"
+  },
+  "dependencies": {
+    "axios": "^1.7.9",
+    "dotenv": "^16.4.5",
+    "mysql2": "^3.11.3",
+    "p-limit": "^4.0.0",
+    "redis": "^4.7.0",
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
