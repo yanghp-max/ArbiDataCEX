@@ -123,11 +123,15 @@ class RedisSyncService {
       );
     }
 
-    if (config.sync.trimById && lastSyncId !== '-' && lastSyncId !== initialStartId) {
-      trimmed = await this.trimById(symbol, lastSyncId);
-      console.log(`[Sync][${symbol}] trimmed=${trimmed} byId=${lastSyncId}`);
-    } else {
-      console.log(`[Sync][${symbol}] skip trim, lastSyncId=${lastSyncId}, initialStartId=${initialStartId}`);
+    if (config.sync.trimById) {
+      // 即使本轮没有新增同步，也按 currentStartId 裁剪，避免历史已同步数据长期滞留在 Redis。
+      const trimAnchorId = lastSyncId !== '-' ? lastSyncId : currentStartId;
+      if (trimAnchorId && trimAnchorId !== '-') {
+        trimmed = await this.trimById(symbol, trimAnchorId);
+        console.log(`[Sync][${symbol}] trimmed=${trimmed} byId=${trimAnchorId}`);
+      } else {
+        console.log(`[Sync][${symbol}] skip trim, no valid anchor id`);
+      }
     }
     return { synced, trimmed };
   }
