@@ -60,6 +60,7 @@ class RedisSyncService {
       const symbols = targetSymbols && targetSymbols.length
         ? targetSymbols
         : await this.discoverSymbols();
+      console.log('[Sync] target symbols:', symbols.join(', '));
       if (!symbols.length) return { synced: 0, trimmed: 0 };
 
       const beforeTime = Date.now() - config.sync.syncBeforeMs;
@@ -86,9 +87,15 @@ class RedisSyncService {
     let trimmed = 0;
     let currentStartId = '-';
     let lastSyncId = '-';
+    const streamKey = `price:stream:${symbol}`;
+    const xlen = await this.redis.client.xLen(streamKey).catch(() => 0);
+    console.log(`[Sync][${symbol}] stream=${streamKey} xlen=${xlen}`);
     const status = await mysqlService.getSyncStatus(symbol);
     if (status?.last_sync_id) currentStartId = status.last_sync_id;
     const initialStartId = currentStartId;
+    console.log(
+      `[Sync][${symbol}] startId=${currentStartId}, beforeTime=${beforeTime}-0, batchSize=${config.sync.batchSize}`
+    );
 
     while (true) {
       const records = await this.xrange(
@@ -96,6 +103,9 @@ class RedisSyncService {
         currentStartId,
         `${beforeTime}-0`,
         config.sync.batchSize
+      );
+      console.log(
+        `[Sync][${symbol}] xrange start=${currentStartId} end=${beforeTime}-0 got=${records.length}`
       );
       const newRecords = records.filter((r) => r.id !== currentStartId);
       if (!newRecords.length) break;
@@ -108,10 +118,16 @@ class RedisSyncService {
       synced += inserted;
       lastSyncId = lastRecordId;
       currentStartId = lastRecordId;
+      console.log(
+        `[Sync][${symbol}] inserted=${inserted}, lastRecordId=${lastRecordId}, syncedTotal=${synced}`
+      );
     }
 
     if (config.sync.trimById && lastSyncId !== '-' && lastSyncId !== initialStartId) {
       trimmed = await this.trimById(symbol, lastSyncId);
+      console.log(`[Sync][${symbol}] trimmed=${trimmed} byId=${lastSyncId}`);
+    } else {
+      console.log(`[Sync][${symbol}] skip trim, lastSyncId=${lastSyncId}, initialStartId=${initialStartId}`);
     }
     return { synced, trimmed };
   }
