@@ -150,10 +150,6 @@ async function main() {
     await collector.start();
     if (config.sync.enabled) {
       await syncService.initialize();
-      const first = await syncService.runOnce();
-      console.log(
-        `[Collector] sync bootstrapped synced=${first.synced}, trimmed=${first.trimmed}`
-      );
       syncService.start();
     }
   } catch (error) {

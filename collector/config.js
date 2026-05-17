@@ -43,6 +43,7 @@ export const config = {
   sync: {
     enabled: process.env.SYNC_ENABLED === 'true',
     intervalMs: parseInt(process.env.SYNC_INTERVAL_MS || '300000', 10),
+    initialDelayMs: parseInt(process.env.SYNC_INITIAL_DELAY_MS || '5000', 10),
     trimById: process.env.SYNC_TRIM_BY_ID !== 'false',
     maxAgeMs: parseInt(process.env.REDIS_MAX_AGE_MS || '3600000', 10),
     syncBeforeMs: parseInt(process.env.SYNC_BEFORE_MS || '300000', 10),

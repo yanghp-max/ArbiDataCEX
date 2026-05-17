@@ -10,6 +10,7 @@ class RedisSyncService {
   constructor() {
     this.redis = new RedisClient(config.redis);
     this.timer = null;
+    this.initialTimer = null;
     this.running = false;
     this.syncing = false;
     this.stats = {
@@ -123,15 +124,17 @@ class RedisSyncService {
       );
     }
 
-    if (config.sync.trimById) {
-      // 即使本轮没有新增同步，也按 currentStartId 裁剪，避免历史已同步数据长期滞留在 Redis。
-      const trimAnchorId = lastSyncId !== '-' ? lastSyncId : currentStartId;
-      if (trimAnchorId && trimAnchorId !== '-') {
-        trimmed = await this.trimById(symbol, trimAnchorId);
-        console.log(`[Sync][${symbol}] trimmed=${trimmed} byId=${trimAnchorId}`);
-      } else {
-        console.log(`[Sync][${symbol}] skip trim, no valid anchor id`);
-      }
+    if (
+      config.sync.trimById &&
+      lastSyncId !== '-' &&
+      lastSyncId !== initialStartId
+    ) {
+      trimmed = await this.trimById(symbol, lastSyncId);
+      console.log(`[Sync][${symbol}] trimmed=${trimmed} byId=${lastSyncId}`);
+    } else {
+      console.log(
+        `[Sync][${symbol}] skip trim, lastSyncId=${lastSyncId}, initialStartId=${initialStartId}`
+      );
     }
     return { synced, trimmed };
   }
@@ -148,11 +151,24 @@ class RedisSyncService {
       }
     }, config.sync.intervalMs);
     console.log(`[Sync] started interval=${config.sync.intervalMs}ms`);
+
+    // 首次同步延迟执行，避免系统刚启动时采集数据尚未进入 Redis。
+    this.initialTimer = setTimeout(async () => {
+      try {
+        const result = await this.runOnce();
+        console.log(`[Sync] initial run synced=${result.synced}, trimmed=${result.trimmed}`);
+      } catch (error) {
+        console.error('[Sync] initial run failed:', error.message);
+      }
+    }, config.sync.initialDelayMs);
+    console.log(`[Sync] initial run delay=${config.sync.initialDelayMs}ms`);
   }
 
   stop() {
     if (this.timer) clearInterval(this.timer);
     this.timer = null;
+    if (this.initialTimer) clearTimeout(this.initialTimer);
+    this.initialTimer = null;
     this.running = false;
   }
 
