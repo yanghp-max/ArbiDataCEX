@@ -11,6 +11,25 @@ class MySQLService {
   }
 
   async connect() {
+    // Step 1: connect without selecting database, create DB if missing.
+    const adminPool = mysql.createPool({
+      host: config.mysql.host,
+      port: config.mysql.port,
+      user: config.mysql.user,
+      password: config.mysql.password,
+      connectionLimit: 2,
+      waitForConnections: true,
+      queueLimit: 0
+    });
+    try {
+      await adminPool.execute(
+        `CREATE DATABASE IF NOT EXISTS \`${config.mysql.database}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`
+      );
+    } finally {
+      await adminPool.end();
+    }
+
+    // Step 2: reconnect with target database and initialize tables.
     this.pool = mysql.createPool({
       host: config.mysql.host,
       port: config.mysql.port,
@@ -27,7 +46,9 @@ class MySQLService {
     conn.release();
     this.isConnected = true;
     await this.ensureTables();
-    console.log(`[MySQLService] connected ${config.mysql.host}:${config.mysql.port}/${config.mysql.database}`);
+    console.log(
+      `[MySQLService] connected ${config.mysql.host}:${config.mysql.port}/${config.mysql.database}`
+    );
   }
 
   async ensureTables() {
