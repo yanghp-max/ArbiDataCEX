@@ -11,6 +11,7 @@ import { RedisClient } from './redis/redis-client.js';
 import { PriceStreamWriter } from './redis/price-stream-writer.js';
 import { BinanceAdapter, GateAdapter } from './cex/index.js';
 import fs from 'node:fs/promises';
+import syncService from './sync/redis-sync-service.js';
 
 class Collector {
   constructor() {
@@ -137,6 +138,7 @@ async function main() {
 
   const shutdown = async (sig) => {
     console.log(`[${sig}] stopping...`);
+    await syncService.shutdown().catch(() => {});
     await collector.stop();
     process.exit(0);
   };
@@ -146,6 +148,14 @@ async function main() {
   try {
     await collector.initialize();
     await collector.start();
+    if (config.sync.enabled) {
+      await syncService.initialize();
+      const first = await syncService.runOnce();
+      console.log(
+        `[Collector] sync bootstrapped synced=${first.synced}, trimmed=${first.trimmed}`
+      );
+      syncService.start();
+    }
   } catch (error) {
     console.error('[Collector] fatal:', error);
     process.exit(1);
