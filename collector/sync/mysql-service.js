@@ -115,12 +115,26 @@ class MySQLService {
     );
   }
 
+  async ensureSyncStatusRows(symbols) {
+    if (!symbols || !symbols.length) return 0;
+    const uniqueSymbols = [...new Set(symbols.map((s) => String(s).trim()).filter(Boolean))];
+    if (!uniqueSymbols.length) return 0;
+
+    const placeholders = uniqueSymbols.map(() => '(?, NULL, NULL, 0)').join(', ');
+    const sql = `
+      INSERT IGNORE INTO sync_status (symbol, last_sync_id, last_sync_time, records_synced)
+      VALUES ${placeholders}
+    `;
+    const [result] = await this.pool.execute(sql, uniqueSymbols);
+    return result.affectedRows || 0;
+  }
+
   async batchInsertPrices(records) {
     if (!records.length) return 0;
     const values = records.map((r) => [
       r.symbol,
       r.timestamp ? Number(r.timestamp) : Date.now(),
-      new Date(Number(r.timestamp || Date.now())),
+      resolveDisplayDatetime(r),
       r.cex_a_source || null,
       r.cex_b_source || null,
       toNum(r.cex_a_bid),
@@ -170,6 +184,26 @@ function toNum(v) {
   if (v === null || v === undefined || v === '') return null;
   const n = Number(v);
   return Number.isFinite(n) ? n : null;
+}
+
+function resolveDisplayDatetime(record) {
+  // 优先使用写入 Redis 时已格式化好的北京时间字符串，避免受运行环境时区影响。
+  if (typeof record?.datetime === 'string' && record.datetime.trim()) {
+    return record.datetime.trim();
+  }
+  return toBeijingDatetimeString(Number(record?.timestamp || Date.now()));
+}
+
+function toBeijingDatetimeString(timestampMs) {
+  const date = new Date(Number(timestampMs) + 8 * 60 * 60 * 1000);
+  const yyyy = date.getUTCFullYear();
+  const mm = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(date.getUTCDate()).padStart(2, '0');
+  const hh = String(date.getUTCHours()).padStart(2, '0');
+  const mi = String(date.getUTCMinutes()).padStart(2, '0');
+  const ss = String(date.getUTCSeconds()).padStart(2, '0');
+  const ms = String(date.getUTCMilliseconds()).padStart(3, '0');
+  return `${yyyy}-${mm}-${dd} ${hh}:${mi}:${ss}.${ms}`;
 }
 
 const mysqlService = new MySQLService();

@@ -62,6 +62,10 @@ class RedisSyncService {
         : await this.discoverSymbols();
       console.log('[Sync] target symbols:', symbols.join(', '));
       if (!symbols.length) return { synced: 0, trimmed: 0 };
+      const ensured = await mysqlService.ensureSyncStatusRows(symbols);
+      if (ensured > 0) {
+        console.log(`[Sync] initialized sync_status rows: +${ensured}`);
+      }
 
       const beforeTime = Date.now() - config.sync.syncBeforeMs;
       const limit = pLimit(config.sync.concurrency);
@@ -107,6 +111,17 @@ class RedisSyncService {
       console.log(
         `[Sync][${symbol}] xrange start=${currentStartId} end=${beforeTime}-0 got=${records.length}`
       );
+      if (!records.length && currentStartId === '-' && xlen > 0) {
+        const [earliestRows, latestRows] = await Promise.all([
+          this.redis.client.xRange(streamKey, '-', '+', { COUNT: 1 }).catch(() => []),
+          this.redis.client.xRevRange(streamKey, '+', '-', { COUNT: 1 }).catch(() => [])
+        ]);
+        const earliestId = earliestRows?.[0]?.id || '-';
+        const latestId = latestRows?.[0]?.id || '-';
+        console.log(
+          `[Sync][${symbol}] no-match-window earliestId=${earliestId} latestId=${latestId} beforeTime=${beforeTime}-0`
+        );
+      }
       const newRecords = records.filter((r) => r.id !== currentStartId);
       if (!newRecords.length) break;
 
