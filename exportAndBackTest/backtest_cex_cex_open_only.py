@@ -185,6 +185,7 @@ def simulate_open_only(df: pd.DataFrame, symbol: str, cfg: BacktestConfig, curre
     blocked_by_funding = 0
     blocked_by_rate_limit = 0
     blocked_by_position = 0
+    blocked_by_spread_filter = 0  # 新增统计：因价差不符硬性条件而被过滤的次数
     evaluated_points = 0
     
     profit_total = 0.0
@@ -224,6 +225,15 @@ def simulate_open_only(df: pd.DataFrame, symbol: str, cfg: BacktestConfig, curre
         else:
             direction = "+a-b"
 
+        # 确定本次开仓使用的扣费/滑点后实际可用价差
+        adj_spread = row["spread_ab_adj"] if direction == "-a+b" else row["spread_ba_adj"]
+
+        # ─── 硬性限制条件：扣费后净价差必须在 [0.0%, 10.0%] 区间内 ───
+        # 排除因交易所插针、宕机维护、数据污染产生的负价差或超大畸形异常价差
+        if not (0.0 <= adj_spread <= 10.0):
+            blocked_by_spread_filter += 1
+            continue
+
         if direction == "-a+b":
             if net_pos_usd >= 0 and (net_pos_usd + cfg.order_usd) > cfg.max_position_usd:
                 blocked_by_position += 1
@@ -231,7 +241,6 @@ def simulate_open_only(df: pd.DataFrame, symbol: str, cfg: BacktestConfig, curre
             
             orders_side_ab += 1
             net_pos_usd += cfg.order_usd  
-            adj_spread = row["spread_ab_adj"]
         else:
             if net_pos_usd <= 0 and (abs(net_pos_usd) + cfg.order_usd) > cfg.max_position_usd:
                 blocked_by_position += 1
@@ -239,7 +248,6 @@ def simulate_open_only(df: pd.DataFrame, symbol: str, cfg: BacktestConfig, curre
                 
             orders_side_ba += 1
             net_pos_usd -= cfg.order_usd  
-            adj_spread = row["spread_ba_adj"]
 
         max_seen_position_usd = max(max_seen_position_usd, abs(net_pos_usd))
 
@@ -263,6 +271,7 @@ def simulate_open_only(df: pd.DataFrame, symbol: str, cfg: BacktestConfig, curre
         "blocked_by_funding": blocked_by_funding,
         "blocked_by_rate_limit": blocked_by_rate_limit,
         "blocked_by_position": blocked_by_position,
+        "blocked_by_spread_filter": blocked_by_spread_filter,
         "evaluated_points": evaluated_points,
     }
     return summary
@@ -354,20 +363,16 @@ def main():
     ]
 
     ctx = multiprocessing.get_context("spawn")
-    
-    # 引入主进程总体完工计数器
     completed_count = 0
 
     with ctx.Pool(processes=TARGET_WORKERS, maxtasksperchild=2) as pool:
         try:
             for res_list in pool.imap_unordered(process_single_file, tasks):
                 if not res_list:
-                    # 即使某个文件读取完全失败没结果，我们也将它视作一个任务阶段的结束
                     completed_count += 1
                     print(f"[PROGRESS] ▓▓ 任务进度: {completed_count}/{total_files_count} | 某个文件执行失败跳过")
                     continue
                 
-                # 累加完工数量并写入硬盘
                 completed_count += 1
                 current_symbol = res_list[0]['symbol']
                 
@@ -378,7 +383,6 @@ def main():
                 is_first_write = not os.path.exists(summary_path)
                 df_chunk.to_csv(summary_path, mode='a', index=False, header=is_first_write)
                 
-                # ─── 核心修改：追加完工日志，实时输出已跑完几个币种 ───
                 print(
                     f"[PROGRESS] ▓▓ 任务进度: {completed_count}/{total_files_count} | "
                     f"💾 刚刚成功写入: {current_symbol}"
