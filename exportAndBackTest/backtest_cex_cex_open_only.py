@@ -11,6 +11,7 @@ import pandas as pd
 
 # 固定滚动窗口（分钟）
 WINDOW_MIN_LIST_FIXED = [10, 30, 60, 180, 360, 720]
+DEFAULT_Z_OPEN_LIST_STR = "0,1,2,3,4"
 
 
 @dataclass
@@ -28,6 +29,8 @@ class BacktestConfig:
     slippage_bps_total: float
     symbols: Optional[List[str]]
     z_open_list: List[float]
+    z_open_ab_list: List[float]
+    z_open_ba_list: List[float]
     window_min_list: List[int]
 
 
@@ -43,8 +46,18 @@ def parse_args() -> BacktestConfig:
     parser.add_argument("--z_open", type=float, default=2.0)
     parser.add_argument(
         "--z_open_list",
-        default="",
+        default=DEFAULT_Z_OPEN_LIST_STR,
         help="Comma separated z_open values, e.g. 1.2,1.5,2.0. If set, overrides default list."
+    )
+    parser.add_argument(
+        "--z_open_ab_list",
+        default=None,
+        help="Comma separated z_open thresholds for -a+b direction. Default inherits --z_open_list."
+    )
+    parser.add_argument(
+        "--z_open_ba_list",
+        default=None,
+        help="Comma separated z_open thresholds for +a-b direction. Default inherits --z_open_list."
     )
     parser.add_argument("--order_usd", type=float, default=100.0)
     parser.add_argument("--max_position_usd", type=float, default=2000.0)
@@ -65,10 +78,15 @@ def parse_args() -> BacktestConfig:
     args = parser.parse_args()
 
     symbols = [s.strip() for s in args.symbols.split(",") if s.strip()] or None
-    if args.z_open_list.strip():
-        z_open_list = [float(x.strip()) for x in args.z_open_list.split(",") if x.strip()]
+    z_open_list = [float(x.strip()) for x in args.z_open_list.split(",") if x.strip()]
+    if args.z_open_ab_list and args.z_open_ab_list.strip():
+        z_open_ab_list = [float(x.strip()) for x in args.z_open_ab_list.split(",") if x.strip()]
     else:
-        z_open_list = [0.0, 1.0, 2.0, 3.0, 4.0]
+        z_open_ab_list = list(z_open_list)
+    if args.z_open_ba_list and args.z_open_ba_list.strip():
+        z_open_ba_list = [float(x.strip()) for x in args.z_open_ba_list.split(",") if x.strip()]
+    else:
+        z_open_ba_list = list(z_open_list)
         
     window_min_list = list(WINDOW_MIN_LIST_FIXED)
     return BacktestConfig(
@@ -85,6 +103,8 @@ def parse_args() -> BacktestConfig:
         slippage_bps_total=args.slippage_bps_total,
         symbols=symbols,
         z_open_list=z_open_list,
+        z_open_ab_list=z_open_ab_list,
+        z_open_ba_list=z_open_ba_list,
         window_min_list=window_min_list,
     )
 
@@ -138,6 +158,16 @@ def ensure_spreads(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def resolve_price_cols(df: pd.DataFrame) -> Tuple[str, str, str, str]:
+    a_bid_col = pick_col(df, ["cex_a_bid", "binance_bid"])
+    a_ask_col = pick_col(df, ["cex_a_ask", "binance_ask"])
+    b_bid_col = pick_col(df, ["cex_b_bid", "gate_bid"])
+    b_ask_col = pick_col(df, ["cex_b_ask", "gate_ask"])
+    if not all([a_bid_col, a_ask_col, b_bid_col, b_ask_col]):
+        raise ValueError("Missing bid/ask columns for A(Binance) and B(Gate).")
+    return a_bid_col, a_ask_col, b_bid_col, b_ask_col
+
+
 def compute_signal_features(df: pd.DataFrame, cfg: BacktestConfig, current_window_min: int) -> pd.DataFrame:
     out = df.copy()
 
@@ -170,9 +200,16 @@ def compute_signal_features(df: pd.DataFrame, cfg: BacktestConfig, current_windo
     return out.reset_index(drop=False)
 
 
-def simulate_open_only(df: pd.DataFrame, symbol: str, cfg: BacktestConfig, current_z_open: float) -> Dict:
+def simulate_open_only(
+    df: pd.DataFrame,
+    symbol: str,
+    cfg: BacktestConfig,
+    current_z_open_ab: float,
+    current_z_open_ba: float,
+) -> Dict:
     funding_a_col = pick_col(df, ["binance_funding_rate"])
     funding_b_col = pick_col(df, ["gate_funding_rate"])
+    a_bid_col, a_ask_col, b_bid_col, b_ask_col = resolve_price_cols(df)
 
     net_pos_usd = 0.0  
     max_seen_position_usd = 0.0 
@@ -189,6 +226,7 @@ def simulate_open_only(df: pd.DataFrame, symbol: str, cfg: BacktestConfig, curre
     evaluated_points = 0
     
     profit_total = 0.0
+    open_profit_total = 0.0
     total_adj_spread_pct = 0.0
 
     for _, row in df.iterrows():
@@ -213,8 +251,8 @@ def simulate_open_only(df: pd.DataFrame, symbol: str, cfg: BacktestConfig, curre
             blocked_by_funding += 1
             continue
 
-        can_open_ab = row["z_ab"] >= current_z_open
-        can_open_ba = row["z_ba"] >= current_z_open
+        can_open_ab = row["z_ab"] >= current_z_open_ab
+        can_open_ba = row["z_ba"] >= current_z_open_ba
         if not can_open_ab and not can_open_ba:
             continue
 
@@ -255,7 +293,19 @@ def simulate_open_only(df: pd.DataFrame, symbol: str, cfg: BacktestConfig, curre
         trade_id += 1
         last_order_ts = ts
         profit_total += expected_edge_usd
+        open_profit_total += expected_edge_usd
         total_adj_spread_pct += adj_spread
+
+    # 回测结束后按最后时刻价差将净仓一次性平掉（方向无关，统一用最后时刻扣费后净价差估算）
+    close_profit_total = 0.0
+    if len(df) > 0 and abs(net_pos_usd) > 1e-9:
+        last = df.iloc[-1]
+        spread_ab_close = float(last["spread_ab_adj"])
+        spread_ba_close = float(last["spread_ba_adj"])
+        close_spread_used = spread_ab_close if net_pos_usd > 0 else spread_ba_close
+        close_profit_total = abs(net_pos_usd) * close_spread_used / 100.0
+        profit_total += close_profit_total
+        net_pos_usd = 0.0
 
     summary = {
         "symbol": symbol,
@@ -266,6 +316,8 @@ def simulate_open_only(df: pd.DataFrame, symbol: str, cfg: BacktestConfig, curre
         "final_net_position_usd": net_pos_usd,          
         "max_seen_position_usd": max_seen_position_usd,  
         "max_orders_capacity": int(cfg.max_position_usd // cfg.order_usd),
+        "open_profit_usd_total": open_profit_total,
+        "close_profit_usd_total": close_profit_total,
         "profit_usd_total": profit_total,
         "avg_adj_spread_pct": float(total_adj_spread_pct / trade_id) if trade_id > 0 else 0.0,
         "blocked_by_funding": blocked_by_funding,
@@ -308,19 +360,25 @@ def process_single_file(file_info: tuple) -> list:
     for window_min_value in cfg.window_min_list:
         features = compute_signal_features(raw_data, cfg, current_window_min=window_min_value)
 
-        for z_open_value in cfg.z_open_list:
-            try:
-                summary = simulate_open_only(
-                    features, 
-                    symbol, 
-                    cfg, 
-                    current_z_open=z_open_value
-                )
-                summary["window_min"] = window_min_value
-                summary["z_open"] = z_open_value
-                file_summaries.append(summary)
-            except Exception as exc:
-                print(f"[ERROR] 策略出错 {symbol} w={window_min_value}, z={z_open_value}: {exc}")
+        for z_open_ab_value in cfg.z_open_ab_list:
+            for z_open_ba_value in cfg.z_open_ba_list:
+                try:
+                    summary = simulate_open_only(
+                        features,
+                        symbol,
+                        cfg,
+                        current_z_open_ab=z_open_ab_value,
+                        current_z_open_ba=z_open_ba_value,
+                    )
+                    summary["window_min"] = window_min_value
+                    summary["z_open_ab"] = z_open_ab_value
+                    summary["z_open_ba"] = z_open_ba_value
+                    file_summaries.append(summary)
+                except Exception as exc:
+                    print(
+                        f"[ERROR] 策略出错 {symbol} w={window_min_value}, "
+                        f"z_ab={z_open_ab_value}, z_ba={z_open_ba_value}: {exc}"
+                    )
                 
     print(f"[SUCCESS] 完成处理: {symbol}，生成组合记录 {len(file_summaries)} 条")
     
@@ -345,7 +403,8 @@ def main():
     print(
         f"[START] AWS c7i.2xlarge 内存防护追加版系统启动 | 锁定核心数: {TARGET_WORKERS}\n"
         f"数据读取目录: {cfg.data_dir} | 结果输出目录: {cfg.output_dir}\n"
-        f"待扫描文件数: {total_files_count} | 参数复杂度: {len(cfg.window_min_list)} 窗口 × {len(cfg.z_open_list)} 阈值"
+        f"待扫描文件数: {total_files_count} | 参数复杂度: {len(cfg.window_min_list)} 窗口 × "
+        f"{len(cfg.z_open_ab_list)}(z_ab阈值) × {len(cfg.z_open_ba_list)}(z_ba阈值)"
     )
 
     tasks = [(f, cfg, i, total_files_count) for i, f in enumerate(files, 1)]
@@ -357,9 +416,10 @@ def main():
         os.remove(summary_path)
 
     cols_order = [
-        "symbol", "window_min", "z_open", "orders", 
+        "symbol", "window_min", "z_open_ab", "z_open_ba", "orders",
         "orders_side_ab", "orders_side_ba", 
-        "profit_usd_total", "max_seen_position_usd", "final_net_position_usd"
+        "open_profit_usd_total", "close_profit_usd_total", "profit_usd_total",
+        "max_seen_position_usd", "final_net_position_usd"
     ]
 
     ctx = multiprocessing.get_context("spawn")

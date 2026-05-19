@@ -14,7 +14,7 @@
 - 统计核心：`中位数 (median) + MAD`
 - 扫描维度：
   - 多窗口（代码写死）
-  - 多 `z_open`（默认扫描 `0,1,2,3,4`，也可参数传入列表）
+  - 双阈值扫描：`z_open_ab_list × z_open_ba_list`
 
 ---
 
@@ -65,9 +65,10 @@
 - `mad_ab`：`median(|spread_ab_adj - median_ab|)`
 - `mad_ba`：`median(|spread_ba_adj - median_ba|)`
 
-防止分母为 0：
+分母异常处理：
 
-- `mad_ab/mad_ba` 若为 0 或空，回填 `1e-6`
+- `mad_ab/mad_ba` 若为 0 或空，`z` 会变成空值（`NaN`）
+- 这类点在回测循环中会直接跳过，不参与开仓判断
 
 ---
 
@@ -80,12 +81,12 @@
 
 ## 6. 开仓判定与风控
 
-### 6.1 基础开仓条件
+### 6.1 基础开仓条件（双 zscore / 双阈值）
 
 - `-a+b` 可开：
-  - `z_ab >= z_open`
+  - `z_ab >= z_open_ab`
 - `+a-b` 可开：
-  - `z_ba >= z_open`
+  - `z_ba >= z_open_ba`
 
 ### 6.2 方向选择
 
@@ -109,37 +110,51 @@
 
 仓位达到上限后，该币种本轮不再加仓。
 
+### 6.5 回测末尾强制平仓
+
+- 回测遍历结束后，如果净仓 `net_pos_usd != 0`，会按最后一条行情执行强平估算：
+  - `net_pos_usd > 0`：使用最后时刻 `spread_ab_adj`
+  - `net_pos_usd < 0`：使用最后时刻 `spread_ba_adj`
+- 强平利润记为：
+  - `close_profit_usd_total = abs(net_pos_usd) * close_spread_used / 100`
+- 总利润更新为：
+  - `profit_usd_total = open_profit_usd_total + close_profit_usd_total`
+- 强平后汇总中的：
+  - `final_net_position_usd = 0.0`
+
 ---
 
-## 7. 扫描流程（窗口 x z_open）
+## 7. 扫描流程（窗口 x 双阈值）
 
 外层循环：窗口列表  
-内层循环：`z_open_list`  
+中层循环：`z_open_ab_list`  
+内层循环：`z_open_ba_list`  
 最内层：逐币种文件
 
 即会执行：
 
 1. 某个窗口（如 30m）
-2. 某个 `z_open`（如 2.0）
-3. 对所有币种 CSV 跑一遍
+2. 某个 `z_open_ab`（如 2.0）
+3. 某个 `z_open_ba`（如 3.0）
+4. 对所有币种 CSV 跑一遍
 
 ---
 
 ## 8. 输出结果
 
-每个 `window + z_open + symbol` 会输出：
+每个 `window + z_open_ab + z_open_ba + symbol` 会输出：
 
 - 订单明细：
-  - `{symbol}_w{window}m_z{z}_open_only_orders.csv`
+  - 汇总文件（多进程模式）：写入 `summary_open_only.csv`
 - 信号明细：
-  - `{symbol}_w{window}m_z{z}_signals.csv`
+  - 汇总字段包含双阈值，不再使用单 `z_open`
 
 全局汇总：
 
 - `summary_open_only.csv`
-  - 粒度：`window_min + z_open + symbol`
+  - 粒度：`window_min + z_open_ab + z_open_ba + symbol`
 - `z_open_comparison.csv`
-  - 聚合维度：`window_min + z_open`
+  - 聚合维度：`window_min + z_open_ab + z_open_ba`
   - 指标：`total_orders`, `total_profit_usd`, `avg_profit_per_symbol`, `avg_orders_per_symbol`
 
 利润字段说明：
@@ -153,8 +168,8 @@
 
 - `--data_dir`：输入目录
 - `--output_dir`：输出目录
-- `--z_open`：单个阈值
-- `--z_open_list`：多个阈值（优先于 `--z_open`，默认值为 `0,1,2,3,4`）
+- `--z_open_ab_list`：`-a+b` 方向阈值列表
+- `--z_open_ba_list`：`+a-b` 方向阈值列表
 - `--symbols`：指定币种子集
 - `--order_usd`：单笔金额（默认 100）
 - `--max_position_usd`：单币最大仓位（默认 2000）
@@ -170,5 +185,5 @@
 - 使用滚动窗口（时间窗口）做稳健统计
 - 不做平仓逻辑，纯开仓信号评估
 - 成本前置到 spread，更贴近可执行空间
-- 支持批量参数扫描，便于选 `window` 与 `z_open` 组合
+- 支持批量参数扫描，便于选 `window` 与双阈值组合
 
