@@ -1,14 +1,15 @@
 import argparse
 import glob
 import os
+import gc  # 导入垃圾回收模块，用于释放 c7i.2xlarge 的 16GiB 内存
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Tuple
+from concurrent.futures import ProcessPoolExecutor  # 导入多进程核心库
 
 import numpy as np
 import pandas as pd
 
 # 固定滚动窗口（分钟）
-# 需要调整时，直接改这个列表即可。
 WINDOW_MIN_LIST_FIXED = [10, 30, 60, 180, 360, 720]
 
 
@@ -30,20 +31,9 @@ class BacktestConfig:
     window_min_list: List[int]
 
 
-def parse_window_token_to_min(token: str) -> int:
-    t = token.strip().lower()
-    if not t:
-        raise ValueError("empty window token")
-    if t.endswith("m"):
-        return int(t[:-1])
-    if t.endswith("h"):
-        return int(float(t[:-1]) * 60)
-    return int(t)
-
-
 def parse_args() -> BacktestConfig:
     parser = argparse.ArgumentParser(
-        description="CEX-CEX open-only backtest (Binance=A, Gate=B)"
+        description="CEX-CEX open-only backtest (Binance=A, Gate=B) - Optimized for c7i.2xlarge"
     )
     parser.add_argument("--data_dir", default="./data/meta_data")
     parser.add_argument("--output_dir", default="./data/output_open_only")
@@ -53,7 +43,7 @@ def parse_args() -> BacktestConfig:
     parser.add_argument(
         "--z_open_list",
         default="",
-        help="Comma separated z_open values, e.g. 1.2,1.5,2.0. If set, overrides --z_open."
+        help="Comma separated z_open values, e.g. 1.2,1.5,2.0. If set, overrides default list."
     )
     parser.add_argument("--order_usd", type=float, default=100.0)
     parser.add_argument("--max_position_usd", type=float, default=2000.0)
@@ -77,8 +67,8 @@ def parse_args() -> BacktestConfig:
     if args.z_open_list.strip():
         z_open_list = [float(x.strip()) for x in args.z_open_list.split(",") if x.strip()]
     else:
-        # 默认扫描 z_open = 0,1,2,3,4
         z_open_list = [0.0, 1.0, 2.0, 3.0, 4.0]
+        
     window_min_list = list(WINDOW_MIN_LIST_FIXED)
     return BacktestConfig(
         data_dir=args.data_dir,
@@ -121,18 +111,10 @@ def load_symbol_csv(path: str) -> pd.DataFrame:
     df = df.sort_values("timestamp").reset_index(drop=True)
 
     numeric_candidates = [
-        "spread_ab",
-        "spread_ba",
-        "cex_a_bid",
-        "cex_a_ask",
-        "cex_b_bid",
-        "cex_b_ask",
-        "binance_bid",
-        "binance_ask",
-        "gate_bid",
-        "gate_ask",
-        "binance_funding_rate",
-        "gate_funding_rate",
+        "spread_ab", "spread_ba",
+        "cex_a_bid", "cex_a_ask", "cex_b_bid", "cex_b_ask",
+        "binance_bid", "binance_ask", "gate_bid", "gate_ask",
+        "binance_funding_rate", "gate_funding_rate",
     ]
     to_numeric(df, numeric_candidates)
     return df
@@ -150,23 +132,19 @@ def ensure_spreads(df: pd.DataFrame) -> pd.DataFrame:
     if not all([a_bid_col, a_ask_col, b_bid_col, b_ask_col]):
         raise ValueError("Missing spread columns and cannot infer bid/ask columns.")
 
-    # A = Binance, B = Gate
-    # spread_ab: -a+b => short A, long B
-    # spread_ba: +a-b => long A, short B
     df["spread_ab"] = (df[a_bid_col] - df[b_ask_col]) / df[b_ask_col] * 100.0
     df["spread_ba"] = (df[b_bid_col] - df[a_ask_col]) / df[a_ask_col] * 100.0
     return df
 
 
-def compute_signal_features(df: pd.DataFrame, cfg: BacktestConfig) -> pd.DataFrame:
+def compute_signal_features(df: pd.DataFrame, cfg: BacktestConfig, current_window_min: int) -> pd.DataFrame:
     out = df.copy()
 
     total_cost_pct = (cfg.fee_bps_total + cfg.slippage_bps_total) / 100.0
-    # Spread is in percent units, so subtract percent points directly.
     out["spread_ab_adj"] = out["spread_ab"] - total_cost_pct
     out["spread_ba_adj"] = out["spread_ba"] - total_cost_pct
 
-    win = f"{cfg.window_min}min"
+    win = f"{current_window_min}min"
     out["dt"] = pd.to_datetime(out["timestamp"], unit="ms")
     out = out.set_index("dt")
 
@@ -174,48 +152,51 @@ def compute_signal_features(df: pd.DataFrame, cfg: BacktestConfig) -> pd.DataFra
     out["median_ba"] = out["spread_ba_adj"].rolling(win, min_periods=cfg.min_periods).median()
 
     out["mad_ab"] = (
-        (out["spread_ab_adj"] - out["median_ab"])
-        .abs()
-        .rolling(win, min_periods=cfg.min_periods)
-        .median()
+        (out["spread_ab_adj"] - out["median_ab"]).abs()
+        .rolling(win, min_periods=cfg.min_periods).median()
     )
     out["mad_ba"] = (
-        (out["spread_ba_adj"] - out["median_ba"])
-        .abs()
-        .rolling(win, min_periods=cfg.min_periods)
-        .median()
+        (out["spread_ba_adj"] - out["median_ba"]).abs()
+        .rolling(win, min_periods=cfg.min_periods).median()
     )
 
-    out["mad_ab"] = out["mad_ab"].replace(0, np.nan).fillna(1e-6)
-    out["mad_ba"] = out["mad_ba"].replace(0, np.nan).fillna(1e-6)
+    # 如果 MAD 为 0，不准确，直接替换为 NaN。后续仿真直接跳过
+    out["mad_ab"] = out["mad_ab"].replace(0, np.nan)
+    out["mad_ba"] = out["mad_ba"].replace(0, np.nan)
 
     out["z_ab"] = (out["spread_ab_adj"] - out["median_ab"]) / out["mad_ab"]
     out["z_ba"] = (out["spread_ba_adj"] - out["median_ba"]) / out["mad_ba"]
 
-    out["z_ab"] = out["z_ab"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
-    out["z_ba"] = out["z_ba"].replace([np.inf, -np.inf], np.nan).fillna(0.0)
-
     return out.reset_index(drop=False)
 
 
-def simulate_open_only(df: pd.DataFrame, symbol: str, cfg: BacktestConfig) -> Tuple[pd.DataFrame, Dict]:
+def simulate_open_only(df: pd.DataFrame, symbol: str, cfg: BacktestConfig, current_z_open: float) -> Dict:
     funding_a_col = pick_col(df, ["binance_funding_rate"])
     funding_b_col = pick_col(df, ["gate_funding_rate"])
 
     pos_usd = 0.0
     last_order_ts = -10**18
     trade_id = 0
+    
+    # 每次调用该参数节点时，计数器会彻底重置清零
+    orders_side_ab = 0  
+    orders_side_ba = 0  
 
     blocked_by_funding = 0
     blocked_by_rate_limit = 0
     blocked_by_position = 0
     evaluated_points = 0
-
-    orders = []
+    
+    profit_total = 0.0
+    total_adj_spread_pct = 0.0
 
     for _, row in df.iterrows():
         ts = int(row["timestamp"])
         evaluated_points += 1
+
+        # 若 z_score 为 NaN (对应 MAD 为 0 或历史点数不够)，不准确，直接跳过
+        if pd.isna(row["z_ab"]) or pd.isna(row["z_ba"]):
+            continue
 
         if pos_usd + cfg.order_usd > cfg.max_position_usd:
             blocked_by_position += 1
@@ -235,14 +216,11 @@ def simulate_open_only(df: pd.DataFrame, symbol: str, cfg: BacktestConfig) -> Tu
             blocked_by_funding += 1
             continue
 
-        # 仅按 z_open 判断开仓，不再要求 spread > 0
-        can_open_ab = row["z_ab"] >= cfg.z_open
-        can_open_ba = row["z_ba"] >= cfg.z_open
+        can_open_ab = row["z_ab"] >= current_z_open
+        can_open_ba = row["z_ba"] >= current_z_open
         if not can_open_ab and not can_open_ba:
             continue
 
-        # -a+b: short Binance(A), long Gate(B)
-        # +a-b: long Binance(A), short Gate(B)
         if can_open_ab and can_open_ba:
             direction = "-a+b" if row["z_ab"] >= row["z_ba"] else "+a-b"
         elif can_open_ab:
@@ -250,117 +228,38 @@ def simulate_open_only(df: pd.DataFrame, symbol: str, cfg: BacktestConfig) -> Tu
         else:
             direction = "+a-b"
 
-        adj_spread = row["spread_ab_adj"] if direction == "-a+b" else row["spread_ba_adj"]
-        z_value = row["z_ab"] if direction == "-a+b" else row["z_ba"]
+        # 统计独立方向
+        if direction == "-a+b":
+            orders_side_ab += 1
+            adj_spread = row["spread_ab_adj"]
+        else:
+            orders_side_ba += 1
+            adj_spread = row["spread_ba_adj"]
+
         expected_edge_usd = cfg.order_usd * adj_spread / 100.0
 
         trade_id += 1
         pos_usd += cfg.order_usd
         last_order_ts = ts
-        orders.append(
-            {
-                "trade_id": trade_id,
-                "symbol": symbol,
-                "timestamp": ts,
-                "datetime": pd.to_datetime(ts, unit="ms"),
-                "direction": direction,
-                "order_usd": cfg.order_usd,
-                "position_after_usd": pos_usd,
-                "spread_ab": row["spread_ab"],
-                "spread_ba": row["spread_ba"],
-                "spread_ab_adj": row["spread_ab_adj"],
-                "spread_ba_adj": row["spread_ba_adj"],
-                "z_ab": row["z_ab"],
-                "z_ba": row["z_ba"],
-                "chosen_z": z_value,
-                "chosen_adj_spread_pct": adj_spread,
-                "profit_usd": expected_edge_usd,
-                "binance_funding_rate": funding_a,
-                "gate_funding_rate": funding_b,
-            }
-        )
+        
+        profit_total += expected_edge_usd
+        total_adj_spread_pct += adj_spread
 
-    orders_df = pd.DataFrame(orders)
-    profit_total = float(orders_df["profit_usd"].sum()) if not orders_df.empty else 0.0
     summary = {
         "symbol": symbol,
         "rows": len(df),
-        "orders": len(orders_df),
+        "orders": trade_id,
+        "orders_side_ab": orders_side_ab,
+        "orders_side_ba": orders_side_ba,
         "final_position_usd": pos_usd,
         "max_orders_capacity": int(cfg.max_position_usd // cfg.order_usd),
         "profit_usd_total": profit_total,
-        "avg_adj_spread_pct": float(orders_df["chosen_adj_spread_pct"].mean()) if not orders_df.empty else 0.0,
+        "avg_adj_spread_pct": float(total_adj_spread_pct / trade_id) if trade_id > 0 else 0.0,
         "blocked_by_funding": blocked_by_funding,
         "blocked_by_rate_limit": blocked_by_rate_limit,
         "blocked_by_position": blocked_by_position,
         "evaluated_points": evaluated_points,
     }
-    return orders_df, summary
-
-
-def run_one_file(path: str, cfg: BacktestConfig) -> Dict:
-    symbol = os.path.splitext(os.path.basename(path))[0]
-    raw = load_symbol_csv(path)
-    raw = ensure_spreads(raw)
-    features = compute_signal_features(raw, cfg)
-    orders_df, summary = simulate_open_only(features, symbol, cfg)
-
-    os.makedirs(cfg.output_dir, exist_ok=True)
-    detail_out = os.path.join(cfg.output_dir, f"{symbol}_open_only_orders.csv")
-    signal_out = os.path.join(cfg.output_dir, f"{symbol}_signals.csv")
-    orders_df.to_csv(detail_out, index=False)
-    features.to_csv(signal_out, index=False)
-    summary["orders_file"] = detail_out
-    summary["signals_file"] = signal_out
-    return summary
-
-
-def run_one_file_for_z(
-    path: str,
-    cfg: BacktestConfig,
-    z_open_value: float,
-    window_min_value: int,
-) -> Dict:
-    symbol = os.path.splitext(os.path.basename(path))[0]
-    raw = load_symbol_csv(path)
-    raw = ensure_spreads(raw)
-    features = compute_signal_features(raw, cfg)
-
-    cfg_for_z = BacktestConfig(
-        data_dir=cfg.data_dir,
-        output_dir=cfg.output_dir,
-        window_min=window_min_value,
-        min_periods=cfg.min_periods,
-        z_open=z_open_value,
-        order_usd=cfg.order_usd,
-        max_position_usd=cfg.max_position_usd,
-        cooldown_ms=cfg.cooldown_ms,
-        funding_min=cfg.funding_min,
-        fee_bps_total=cfg.fee_bps_total,
-        slippage_bps_total=cfg.slippage_bps_total,
-        symbols=cfg.symbols,
-        z_open_list=cfg.z_open_list,
-        window_min_list=cfg.window_min_list,
-    )
-    orders_df, summary = simulate_open_only(features, symbol, cfg_for_z)
-
-    os.makedirs(cfg.output_dir, exist_ok=True)
-    z_tag = str(z_open_value).replace(".", "_")
-    w_tag = f"{window_min_value}m"
-    detail_out = os.path.join(
-        cfg.output_dir,
-        f"{symbol}_w{w_tag}_z{z_tag}_open_only_orders.csv",
-    )
-    signal_out = os.path.join(
-        cfg.output_dir,
-        f"{symbol}_w{w_tag}_z{z_tag}_signals.csv",
-    )
-    orders_df.to_csv(detail_out, index=False)
-    features.to_csv(signal_out, index=False)
-    summary["z_open"] = z_open_value
-    summary["window_min"] = window_min_value
-    summary["orders_file"] = detail_out
-    summary["signals_file"] = signal_out
     return summary
 
 
@@ -378,6 +277,51 @@ def pick_input_files(cfg: BacktestConfig) -> List[str]:
     return picked
 
 
+def process_single_file(file_info: tuple) -> list:
+    """
+    单个核心并行的执行体：单独加载、计算单币种的全部窗口和Z轴组合
+    """
+    path, cfg, file_idx, total_files = file_info
+    symbol = os.path.splitext(os.path.basename(path))[0]
+    file_summaries = []
+    
+    print(f"[PROCESS] 进程分配成功: [{file_idx}/{total_files}] 正在算 {symbol}")
+    
+    try:
+        raw_data = load_symbol_csv(path)
+        raw_data = ensure_spreads(raw_data)
+    except Exception as exc:
+        print(f"[ERROR] 读取文件失败 {symbol}: {exc}")
+        return []
+
+    for window_min_value in cfg.window_min_list:
+        features = compute_signal_features(raw_data, cfg, current_window_min=window_min_value)
+
+        for z_open_value in cfg.z_open_list:
+            try:
+                summary = simulate_open_only(
+                    features, 
+                    symbol, 
+                    cfg, 
+                    current_z_open=z_open_value
+                )
+                summary["window_min"] = window_min_value
+                summary["z_open"] = z_open_value
+                file_summaries.append(summary)
+            except Exception as exc:
+                print(f"[ERROR] 组合计算出错 {symbol} w={window_min_value}, z={z_open_value}: {exc}")
+                
+    print(f"[SUCCESS] 完成处理: {symbol}，生成组合记录 {len(file_summaries)} 条")
+    
+    # 显式清理，降低 c7i 实例 16GiB 内存被爆掉的概率
+    del raw_data
+    if 'features' in locals():
+        del features
+    gc.collect() 
+    
+    return file_summaries
+
+
 def main():
     cfg = parse_args()
     files = pick_input_files(cfg)
@@ -385,70 +329,42 @@ def main():
         print(f"[ERROR] no csv files found in {cfg.data_dir} with symbols={cfg.symbols}")
         return
 
-    all_summaries = []
+    # 完美压榨 c7i.2xlarge 的 8 个 vCPU
+    TARGET_WORKERS = 8 
+    
     print(
-        f"[START] files={len(files)} window_list={cfg.window_min_list} z_open_list={cfg.z_open_list} "
-        f"order_usd={cfg.order_usd} max_pos={cfg.max_position_usd}"
+        f"[START] AWS c7i.2xlarge 专属多进程回测启动 | 锁定并行核心数: {TARGET_WORKERS}\n"
+        f"待处理币种文件数: {len(files)} | 参数广度: {len(cfg.window_min_list)} 窗口 × {len(cfg.z_open_list)} 阈值"
     )
 
-    for w_idx, window_min_value in enumerate(cfg.window_min_list, 1):
-        print(
-            f"\n[WINDOW-SCAN] ({w_idx}/{len(cfg.window_min_list)}) "
-            f"window={window_min_value}min"
-        )
-        for z_idx, z_open_value in enumerate(cfg.z_open_list, 1):
-            print(f"[Z-SCAN] ({z_idx}/{len(cfg.z_open_list)}) z_open={z_open_value}")
-            z_summaries = []
-            for i, f in enumerate(files, 1):
-                try:
-                    summary = run_one_file_for_z(
-                        f,
-                        cfg,
-                        z_open_value=z_open_value,
-                        window_min_value=window_min_value,
-                    )
-                    z_summaries.append(summary)
-                    all_summaries.append(summary)
-                    print(
-                        f"[{i}/{len(files)}] {summary['symbol']}: orders={summary['orders']}, "
-                        f"final_pos={summary['final_position_usd']:.2f}U, "
-                        f"profit={summary['profit_usd_total']:.4f}U"
-                    )
-                except Exception as exc:
-                    print(f"[{i}/{len(files)}] FAILED {f}: {exc}")
-
-            if z_summaries:
-                z_df = pd.DataFrame(z_summaries)
-                z_total_orders = int(z_df["orders"].sum())
-                z_total_profit = float(z_df["profit_usd_total"].sum())
-                print(
-                    f"[Z-SCAN] window={window_min_value}min z_open={z_open_value} "
-                    f"total_orders={z_total_orders}, total_profit={z_total_profit:.4f}U"
-                )
+    tasks = [(f, cfg, i, len(files)) for i, f in enumerate(files, 1)]
+    all_summaries = []
+    
+    # 启动多进程池
+    with ProcessPoolExecutor(max_workers=TARGET_WORKERS) as executor:
+        results = executor.map(process_single_file, tasks)
+        for res_list in results:
+            all_summaries.extend(res_list)
 
     summary_df = pd.DataFrame(all_summaries)
     os.makedirs(cfg.output_dir, exist_ok=True)
     summary_path = os.path.join(cfg.output_dir, "summary_open_only.csv")
-    summary_df.to_csv(summary_path, index=False)
-
+    
     if not summary_df.empty:
-        compare_df = (
-            summary_df.groupby(["window_min", "z_open"], as_index=False)
-            .agg(
-                symbols=("symbol", "count"),
-                total_orders=("orders", "sum"),
-                total_profit_usd=("profit_usd_total", "sum"),
-                avg_profit_per_symbol=("profit_usd_total", "mean"),
-                avg_orders_per_symbol=("orders", "mean"),
-            )
-            .sort_values(["window_min", "z_open"])
-        )
-        compare_path = os.path.join(cfg.output_dir, "z_open_comparison.csv")
-        compare_df.to_csv(compare_path, index=False)
-        print(f"[DONE] summary={summary_path}")
-        print(f"[DONE] z comparison={compare_path}")
+        # 重排字段，把总数和分方向数放在最直观的前排
+        cols_order = [
+            "symbol", "window_min", "z_open", "orders", 
+            "orders_side_ab", "orders_side_ba", 
+            "profit_usd_total", "final_position_usd", "avg_adj_spread_pct"
+        ]
+        remaining_cols = [c for c in summary_df.columns if c not in cols_order]
+        summary_df = summary_df[cols_order + remaining_cols]
+        
+        summary_df.to_csv(summary_path, index=False)
+        print(f"\n[DONE] c7i.2xlarge 8核全开并行计算完毕！合并结果已合并至: {summary_path}")
+        print(f"最终生成参数表现报告总数: {len(summary_df)} 条")
     else:
-        print(f"[DONE] summary={summary_path} (empty)")
+        print("[DONE] 回测运行完毕，但未生成任何有效记录。")
 
 
 if __name__ == "__main__":
