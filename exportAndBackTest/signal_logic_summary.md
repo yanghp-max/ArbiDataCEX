@@ -6,8 +6,8 @@
 
 - 交易所映射：`A = Binance`，`B = Gate`
 - 两个方向：
-  - `-a+b`：对应 `spread_ab`
-  - `+a-b`：对应 `spread_ba`
+  - `-a+b`：对应 `spread_ab`  => (a_bid - b_ask) / b_ask * 100
+  - `+a-b`：对应 `spread_ba`  => (b_bid - a_ask) / a_ask * 100
 
 ## 2. 成本处理后的价差
 
@@ -17,7 +17,7 @@
 - `spread_ba_adj = spread_ba - total_cost_pct`
 
 其中：
-
+<!-- 手续费 -->
 - `total_cost_pct = (fee_bps_total + slippage_bps_total) / 100`
 - 默认手续费双边万4、滑点双边万4，总计万8（0.08%）
 
@@ -75,7 +75,11 @@
 - funding 为空（任一边 `NaN`）不下单
 - funding 小于阈值（默认 `< -0.1`）不下单
 - 1 秒频率限制（`cooldown_ms=1000`）
-- 仓位上限限制（单方向净仓绝对值不超过 `max_position_usd`）
+- 仓位上限限制（数量维度）：
+  - 每次开仓数量由 `order_usd / 当前 Binance 价格` 换算
+  - 每次开仓前动态计算 `max_position_qty = max_position_usd / 当前 Binance 价格`
+  - 同向加仓后若超过 `max_position_qty`，不拦截，改为把本次 `order_qty` 截断到“剩余可用仓位”
+  - 截断后会做数量凑整；若截断后数量接近 0，则该次信号跳过
 - 价差硬过滤：`adj_spread` 必须在 `[0, 10]` 区间
 
 ## 8. 参数扫描维度（与信号直接相关）
@@ -88,65 +92,54 @@
 
 组合数 = `窗口数 × ab阈值个数 × ba阈值个数`。
 
-## 9. 回测末尾强平逻辑（补充）
+## 9. 下单流程（数量模型）
 
-信号用于开仓后，脚本在回测末尾会做一次强平估算：
+每个时间点在通过信号与过滤条件后，下单流程如下：
 
-- 若 `final_net_position_usd > 0`，用最后一条的 `spread_ab_adj` 估算强平
-- 若 `final_net_position_usd < 0`，用最后一条的 `spread_ba_adj` 估算强平
+1. 判定方向（`-a+b` 或 `+a-b`）。
+2. 用 Binance 实时价格把 `order_usd` 换算为本次开仓数量：
+   - `-a+b`：`order_qty = order_usd / a_bid`
+   - `+a-b`：`order_qty = order_usd / a_ask`
+   - 该 `order_qty` 作为双边统一数量（Binance 与 Gate 两腿使用同一个数量）
+3. 同步计算动态最大仓位数量（max_position_usd = 20000U）：
+   - `max_position_qty = max_position_usd / 当前 Binance 价格`
+4. 执行同向加仓限制（超限截断），net_pos_qty（当前净仓）：
+   - `-a+b` 方向：若 `net_pos_qty >= 0` 且 `net_pos_qty + order_qty > max_position_qty`，则 
+   - `order_qty = max_position_qty - net_pos_qty`
+   - `+a-b` 方向：若 `net_pos_qty <= 0` 且 `abs(net_pos_qty) + order_qty > max_position_qty`，则
+     - `order_qty = max_position_qty - abs(net_pos_qty)`
+   - 截断后执行凑整；若 `order_qty` 接近 0，则跳过本次信号
+5. 通过后更新净仓：
+   - `-a+b`：`net_pos_qty += order_qty`
+   - `+a-b`：`net_pos_qty -= order_qty`
 
-强平利润：
+> 注意：这里只是“回测成交估算”，并未引入交易所最小下单量/步长取整。
 
-- `close_profit_usd_total = abs(final_net_position_usd_before_close) * close_spread_used / 100`
+## 10. PnL 计算流程
 
-最终总利润：
+### 10.1 开仓阶段 PnL（逐单累加）
+
+- 每笔开仓名义金额（实际花了多少U）：`executed_notional_usd = order_qty * 当前 Binance 价格`
+- 每笔收益估算：
+  - `trade_pnl_usd = executed_notional_usd * adj_spread(扣完成本的价差) / 100`
+- 开仓累计收益：
+  - `open_profit_usd_total = Σ(trade_pnl_usd)`
+
+### 10.2 回测末尾强平 PnL
+
+- 若 `net_pos_qty != 0`，在最后一条行情执行一次强平估算。
+- 先确定强平使用的净价差：
+  - `net_pos_qty > 0` -> 用 `spread_ab_adj`
+  - `net_pos_qty < 0` -> 用 `spread_ba_adj`
+- 再把剩余数量换算为名义 U（最后时刻 Binance 参考价格）：
+  - `close_notional_usd = abs(net_pos_qty_before_close) * close_ref_price`
+- 强平收益：
+  - `close_profit_usd_total = close_notional_usd * close_spread_used / 100`
+
+### 10.3 最终总收益
 
 - `profit_usd_total = open_profit_usd_total + close_profit_usd_total`
 
 强平后汇总里的净仓位会置为：
 
-- `final_net_position_usd = 0`
-
-### 9.1 强平相关字段解释
-
-- `net_pos_usd`
-  - 含义：当前净仓（美元名义）。
-  - 方向：
-    - `> 0` 表示净多 `-a+b` 方向仓位更多
-    - `< 0` 表示净多 `+a-b` 方向仓位更多
-  - 单位：`USDT`
-
-- `spread_ab_adj`
-  - 含义：`-a+b` 方向的扣成本后净价差（已经减去双边手续费+滑点）。
-  - 单位：百分比点（`%`）
-
-- `spread_ba_adj`
-  - 含义：`+a-b` 方向的扣成本后净价差。
-  - 单位：百分比点（`%`）
-
-- `close_spread_used`
-  - 含义：强平时实际采用的末尾净价差。
-  - 选择规则：
-    - `net_pos_usd > 0` 用最后一条 `spread_ab_adj`
-    - `net_pos_usd < 0` 用最后一条 `spread_ba_adj`
-  - 单位：百分比点（`%`）
-
-- `close_profit_usd_total`
-  - 含义：末尾强平贡献的利润汇总。
-  - 公式：
-    - `close_profit_usd_total = abs(net_pos_usd_before_close) * close_spread_used / 100`
-  - 单位：`USDT`
-
-- `open_profit_usd_total`
-  - 含义：开仓阶段累计利润（按每次开仓时净价差估算）。
-  - 单位：`USDT`
-
-- `profit_usd_total`
-  - 含义：最终总利润。
-  - 公式：
-    - `profit_usd_total = open_profit_usd_total + close_profit_usd_total`
-  - 单位：`USDT`
-
-- `final_net_position_usd`
-  - 含义：回测结束后的净仓位。
-  - 在当前实现里，强平执行后固定置为 `0`。
+- `final_net_position_qty = 0`

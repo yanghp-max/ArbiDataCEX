@@ -211,8 +211,12 @@ def simulate_open_only(
     funding_b_col = pick_col(df, ["gate_funding_rate"])
     a_bid_col, a_ask_col, b_bid_col, b_ask_col = resolve_price_cols(df)
 
-    net_pos_usd = 0.0  
-    max_seen_position_usd = 0.0 
+    # 使用“币数量”作为仓位单位：
+    # - 每次开仓的数量 = order_usd / 触发时 Binance 对应方向价格
+    # - 最大仓位数量 = max_position_usd / 触发时 Binance 对应方向价格（每次开仓前动态计算）
+    # signed 规则：-a+b 增加仓位，+a-b 减少仓位
+    net_pos_qty = 0.0
+    max_seen_position_qty = 0.0
     
     last_order_ts = -10**18
     trade_id = 0
@@ -222,12 +226,17 @@ def simulate_open_only(
     blocked_by_funding = 0
     blocked_by_rate_limit = 0
     blocked_by_position = 0
+    clipped_by_position = 0
     blocked_by_spread_filter = 0  # 新增统计：因价差不符硬性条件而被过滤的次数
     evaluated_points = 0
     
     profit_total = 0.0
     open_profit_total = 0.0
     total_adj_spread_pct = 0.0
+
+    def normalize_qty(qty: float) -> float:
+        # 回测里做统一凑整，避免浮点误差导致仓位边界抖动
+        return float(np.round(qty, 12))
 
     for _, row in df.iterrows():
         ts = int(row["timestamp"])
@@ -273,39 +282,89 @@ def simulate_open_only(
             continue
 
         if direction == "-a+b":
-            if net_pos_usd >= 0 and (net_pos_usd + cfg.order_usd) > cfg.max_position_usd:
+            # Binance 空单按 bid 估算可成交价格，用该价格把 U 换算成币数量
+            binance_price = float(row[a_bid_col])
+            if not np.isfinite(binance_price) or binance_price <= 0:
+                continue
+
+            order_qty = cfg.order_usd / binance_price
+            max_position_qty = cfg.max_position_usd / binance_price
+
+            # 同向加仓若超限，不拦截，截断到可用剩余仓位
+            if net_pos_qty >= 0 and (net_pos_qty + order_qty) > max_position_qty:
+                remaining_qty = max_position_qty - net_pos_qty
+                order_qty = normalize_qty(max(0.0, remaining_qty))
+                clipped_by_position += 1
+            else:
+                order_qty = normalize_qty(order_qty)
+            if order_qty <= 1e-12:
                 blocked_by_position += 1
                 continue
             
+            # 本回测将 order_qty 视为双边统一下单数量（Binance 与 Gate 同数量）
             orders_side_ab += 1
-            net_pos_usd += cfg.order_usd  
+            net_pos_qty = normalize_qty(net_pos_qty + order_qty)
+            executed_notional_usd = order_qty * binance_price
         else:
-            if net_pos_usd <= 0 and (abs(net_pos_usd) + cfg.order_usd) > cfg.max_position_usd:
+            # Binance 多单按 ask 估算可成交价格，用该价格把 U 换算成币数量
+            binance_price = float(row[a_ask_col])
+            if not np.isfinite(binance_price) or binance_price <= 0:
+                continue
+
+            order_qty = cfg.order_usd / binance_price
+            max_position_qty = cfg.max_position_usd / binance_price
+
+            # 同向加仓若超限，不拦截，截断到可用剩余仓位
+            if net_pos_qty <= 0 and (abs(net_pos_qty) + order_qty) > max_position_qty:
+                remaining_qty = max_position_qty - abs(net_pos_qty)
+                order_qty = normalize_qty(max(0.0, remaining_qty))
+                clipped_by_position += 1
+            else:
+                order_qty = normalize_qty(order_qty)
+            if order_qty <= 1e-12:
                 blocked_by_position += 1
                 continue
                 
+            # 本回测将 order_qty 视为双边统一下单数量（Binance 与 Gate 同数量）
             orders_side_ba += 1
-            net_pos_usd -= cfg.order_usd  
+            net_pos_qty = normalize_qty(net_pos_qty - order_qty)
+            executed_notional_usd = order_qty * binance_price
 
-        max_seen_position_usd = max(max_seen_position_usd, abs(net_pos_usd))
+        max_seen_position_qty = max(max_seen_position_qty, abs(net_pos_qty))
 
-        expected_edge_usd = cfg.order_usd * adj_spread / 100.0
+        expected_edge_usd = executed_notional_usd * adj_spread / 100.0
         trade_id += 1
         last_order_ts = ts
         profit_total += expected_edge_usd
         open_profit_total += expected_edge_usd
         total_adj_spread_pct += adj_spread
 
-    # 回测结束后按最后时刻价差将净仓一次性平掉（方向无关，统一用最后时刻扣费后净价差估算）
+    # 回测结束后按最后时刻价差将净仓一次性平掉
+    # 仓位已是“币数量”，先用最后时刻 Binance 中间价换算成名义 U，再乘以净价差
     close_profit_total = 0.0
-    if len(df) > 0 and abs(net_pos_usd) > 1e-9:
+    if len(df) > 0 and abs(net_pos_qty) > 1e-12:
         last = df.iloc[-1]
         spread_ab_close = float(last["spread_ab_adj"])
         spread_ba_close = float(last["spread_ba_adj"])
-        close_spread_used = spread_ab_close if net_pos_usd > 0 else spread_ba_close
-        close_profit_total = abs(net_pos_usd) * close_spread_used / 100.0
+        close_spread_used = spread_ab_close if net_pos_qty > 0 else spread_ba_close
+
+        last_a_bid = float(last[a_bid_col])
+        last_a_ask = float(last[a_ask_col])
+        if np.isfinite(last_a_bid) and np.isfinite(last_a_ask) and last_a_bid > 0 and last_a_ask > 0:
+            close_ref_price = (last_a_bid + last_a_ask) / 2.0
+        elif np.isfinite(last_a_bid) and last_a_bid > 0:
+            close_ref_price = last_a_bid
+        elif np.isfinite(last_a_ask) and last_a_ask > 0:
+            close_ref_price = last_a_ask
+        else:
+            close_ref_price = np.nan
+
+        if np.isfinite(close_ref_price) and close_ref_price > 0:
+            close_notional_usd = abs(net_pos_qty) * close_ref_price
+            close_profit_total = close_notional_usd * close_spread_used / 100.0
+
         profit_total += close_profit_total
-        net_pos_usd = 0.0
+        net_pos_qty = 0.0
 
     summary = {
         "symbol": symbol,
@@ -313,8 +372,8 @@ def simulate_open_only(
         "orders": trade_id,
         "orders_side_ab": orders_side_ab,
         "orders_side_ba": orders_side_ba,
-        "final_net_position_usd": net_pos_usd,          
-        "max_seen_position_usd": max_seen_position_usd,  
+        "final_net_position_qty": net_pos_qty,
+        "max_seen_position_qty": max_seen_position_qty,
         "max_orders_capacity": int(cfg.max_position_usd // cfg.order_usd),
         "open_profit_usd_total": open_profit_total,
         "close_profit_usd_total": close_profit_total,
@@ -323,6 +382,7 @@ def simulate_open_only(
         "blocked_by_funding": blocked_by_funding,
         "blocked_by_rate_limit": blocked_by_rate_limit,
         "blocked_by_position": blocked_by_position,
+        "clipped_by_position": clipped_by_position,
         "blocked_by_spread_filter": blocked_by_spread_filter,
         "evaluated_points": evaluated_points,
     }
@@ -419,7 +479,7 @@ def main():
         "symbol", "window_min", "z_open_ab", "z_open_ba", "orders",
         "orders_side_ab", "orders_side_ba", 
         "open_profit_usd_total", "close_profit_usd_total", "profit_usd_total",
-        "max_seen_position_usd", "final_net_position_usd"
+        "max_seen_position_qty", "final_net_position_qty"
     ]
 
     ctx = multiprocessing.get_context("spawn")

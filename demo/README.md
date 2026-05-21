@@ -25,18 +25,40 @@ npm run demo:fetch-min-qty -- --symbols '["BTCUSDT","ETHUSDT"]' --output demo/mi
     "BTCUSDT": {
       "binance": {
         "minQty": 0.001,
-        "stepSize": 0.001
+        "stepSize": 0.001,
+        "priceRef": {
+          "collectedAt": "2026-05-21T09:43:22.479Z",
+          "bid": 102345.1,
+          "ask": 102345.2,
+          "mid": 102345.15
+        }
       },
       "gate": {
         "minQty": 1,
         "stepSize": 1,
         "quantoMultiplier": 0.0001,
-        "minBaseQty": 0.0001
+        "minBaseQty": 0.0001,
+        "priceRef": {
+          "collectedAt": "2026-05-21T09:43:22.479Z",
+          "bid": 102344.8,
+          "ask": 102345.4,
+          "mid": 102345.1,
+          "last": 102345
+        }
       }
     }
   }
 }
 ```
+
+`priceRef` 是执行脚本时抓到的行情参考快照，便于你快速评估最小下单量对应的大概名义价值。
+
+字段说明（中文）：
+
+- `minQty`：最小下单数量，下单时数量不能小于该值。
+- `stepSize`：下单数量步长（精度），数量必须按该步长递增。
+- `quantoMultiplier`：Gate 合约乘数，表示 1 张合约对应多少基础币数量。
+- `minBaseQty`：折算后的最小基础币数量，计算方式为 `minQty * quantoMultiplier`。
 
 ## 2) 启动套利 demo（默认 dry-run）
 

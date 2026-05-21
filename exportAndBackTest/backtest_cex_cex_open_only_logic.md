@@ -105,22 +105,30 @@
 ### 6.4 下单频率与仓位上限
 
 - 每秒最多 1 单（`cooldown_ms=1000`）
-- 每单 `100U`（`order_usd=100`）
-- 单币种最大仓位 `2000U`（`max_position_usd=2000`）
+- 每次触发开仓时，先用 **Binance 实时价格** 把 `order_usd`（默认 100）换算成币数量：
+  - `-a+b` 方向使用 Binance `bid`
+  - `+a-b` 方向使用 Binance `ask`
+  - 换算出的数量作为双边统一下单数量（Binance 与 Gate 两腿同数量）
+- 单币种最大仓位限制也改为“数量维度”：每次开仓前按 Binance 实时价格计算
+  - `max_position_qty = max_position_usd / 当前 Binance 价格`
+  - 若同向加仓后超出该数量上限，则**不拦截**，而是把本次下单数量截断为“剩余可用仓位”
+  - 截断后会做数量凑整（统一小数位处理），若截断后数量≈0，则本次才会被跳过
 
-仓位达到上限后，该币种本轮不再加仓。
+仓位达到上限后，后续同向单会被持续截断；当可用剩余仓位趋近于 0 时，该方向本次信号会被跳过。
 
 ### 6.5 回测末尾强制平仓
 
-- 回测遍历结束后，如果净仓 `net_pos_usd != 0`，会按最后一条行情执行强平估算：
-  - `net_pos_usd > 0`：使用最后时刻 `spread_ab_adj`
-  - `net_pos_usd < 0`：使用最后时刻 `spread_ba_adj`
+- 回测遍历结束后，如果净仓 `net_pos_qty != 0`，会按最后一条行情执行强平估算：
+  - `net_pos_qty > 0`：使用最后时刻 `spread_ab_adj`
+  - `net_pos_qty < 0`：使用最后时刻 `spread_ba_adj`
+- 强平前会先用最后时刻 Binance 参考价格（优先中间价）把数量换算成名义 U：
+  - `close_notional_usd = abs(net_pos_qty) * close_ref_price`
 - 强平利润记为：
-  - `close_profit_usd_total = abs(net_pos_usd) * close_spread_used / 100`
+  - `close_profit_usd_total = close_notional_usd * close_spread_used / 100`
 - 总利润更新为：
   - `profit_usd_total = open_profit_usd_total + close_profit_usd_total`
 - 强平后汇总中的：
-  - `final_net_position_usd = 0.0`
+  - `final_net_position_qty = 0.0`
 
 ---
 
@@ -159,7 +167,7 @@
 
 利润字段说明：
 
-- 逐单利润：`profit_usd = order_usd * chosen_adj_spread_pct / 100`
+- 逐单利润：`profit_usd = executed_notional_usd * chosen_adj_spread_pct / 100`
 - 汇总利润：`profit_usd_total = Σ(profit_usd)`
 
 ---

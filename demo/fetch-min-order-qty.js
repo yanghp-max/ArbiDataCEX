@@ -86,6 +86,16 @@ async function fetchGateContracts() {
   return resp.data;
 }
 
+async function fetchBinanceBookTickers() {
+  const resp = await axios.get(`${BINANCE_REST}/fapi/v1/ticker/bookTicker`, { timeout: 15000 });
+  return resp.data;
+}
+
+async function fetchGateTickers() {
+  const resp = await axios.get(`${GATE_REST}/futures/usdt/tickers`, { timeout: 15000 });
+  return resp.data;
+}
+
 function buildBinanceMap(exchangeInfo) {
   const map = new Map();
   for (const s of exchangeInfo.symbols || []) {
@@ -103,20 +113,61 @@ function buildGateMap(contracts) {
   return map;
 }
 
+function buildBinanceTickerMap(bookTickers) {
+  const map = new Map();
+  for (const t of bookTickers || []) {
+    const symbol = String(t.symbol || '');
+    if (!symbol) continue;
+    const bid = Number(t.bidPrice);
+    const ask = Number(t.askPrice);
+    map.set(symbol, {
+      bid: Number.isFinite(bid) ? bid : null,
+      ask: Number.isFinite(ask) ? ask : null,
+      mid: Number.isFinite(bid) && Number.isFinite(ask) ? (bid + ask) / 2 : null
+    });
+  }
+  return map;
+}
+
+function buildGateTickerMap(tickers) {
+  const map = new Map();
+  for (const t of tickers || []) {
+    const contract = String(t.contract || '');
+    if (!contract) continue;
+    const bid = Number(t.highest_bid);
+    const ask = Number(t.lowest_ask);
+    const last = Number(t.last);
+    map.set(contract, {
+      bid: Number.isFinite(bid) ? bid : null,
+      ask: Number.isFinite(ask) ? ask : null,
+      last: Number.isFinite(last) ? last : null,
+      mid: Number.isFinite(bid) && Number.isFinite(ask) ? (bid + ask) / 2 : null
+    });
+  }
+  return map;
+}
+
 async function main() {
   const args = parseArgs(process.argv);
-  const [binanceInfo, gateContracts] = await Promise.all([
+  const [binanceInfo, gateContracts, binanceBookTickers, gateTickers] = await Promise.all([
     fetchBinanceExchangeInfo(),
-    fetchGateContracts()
+    fetchGateContracts(),
+    fetchBinanceBookTickers(),
+    fetchGateTickers()
   ]);
 
   const binanceMap = buildBinanceMap(binanceInfo);
   const gateMap = buildGateMap(gateContracts);
+  const binanceTickerMap = buildBinanceTickerMap(binanceBookTickers);
+  const gateTickerMap = buildGateTickerMap(gateTickers);
+  const priceCollectedAt = new Date().toISOString();
   const result = {
     generatedAt: new Date().toISOString(),
     source: {
       binance: `${BINANCE_REST}/fapi/v1/exchangeInfo`,
-      gate: `${GATE_REST}/futures/usdt/contracts`
+      gate: `${GATE_REST}/futures/usdt/contracts`,
+      binanceTicker: `${BINANCE_REST}/fapi/v1/ticker/bookTicker`,
+      gateTicker: `${GATE_REST}/futures/usdt/tickers`
     },
     symbols: {}
   };
@@ -145,6 +196,8 @@ async function main() {
     const gateMinContracts = Number(g.order_size_min);
     const gateOrderSizeRound = Number(g.order_size_round || 0);
     const gateQuantoMultiplier = Number(g.quanto_multiplier || 0);
+    const bTicker = binanceTickerMap.get(upper) || null;
+    const gTicker = gateTickerMap.get(gateContract) || null;
 
     if (!Number.isFinite(minQty) || !Number.isFinite(stepSize)) {
       throw new Error(`invalid Binance minQty/stepSize for ${upper}`);
@@ -157,7 +210,13 @@ async function main() {
       binance: {
         symbol: upper,
         minQty,
-        stepSize
+        stepSize,
+        priceRef: {
+          collectedAt: priceCollectedAt,
+          bid: bTicker?.bid ?? null,
+          ask: bTicker?.ask ?? null,
+          mid: bTicker?.mid ?? null
+        }
       },
       gate: {
         symbol: gateContract,
@@ -169,7 +228,14 @@ async function main() {
           : null,
         minBaseQty: Number.isFinite(gateQuantoMultiplier) && gateQuantoMultiplier > 0
           ? gateMinContracts * gateQuantoMultiplier
-          : null
+          : null,
+        priceRef: {
+          collectedAt: priceCollectedAt,
+          bid: gTicker?.bid ?? null,
+          ask: gTicker?.ask ?? null,
+          mid: gTicker?.mid ?? null,
+          last: gTicker?.last ?? null
+        }
       }
     };
   }
