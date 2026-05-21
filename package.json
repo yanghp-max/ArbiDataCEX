@@ -9,7 +9,9 @@
     "dev": "node --watch collector/index.js",
     "build:symbols": "node collector/scripts/build-symbol-config.js",
     "sync:start": "node collector/sync/index.js",
-    "sync:once": "node collector/sync/run-once.js"
+    "sync:once": "node collector/sync/run-once.js",
+    "demo:fetch-min-qty": "node demo/fetch-min-order-qty.js",
+    "demo:arb": "node demo/run-cex-cex-arb-demo.js"
   },
   "dependencies": {
     "axios": "^1.7.9",
