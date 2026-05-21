@@ -25,10 +25,10 @@
 
 对每个窗口（默认 `10m, 30m, 1h, 3h, 6h, 12h`）：
 
-- `median_ab`：`spread_ab_adj` 的滚动中位数
-- `median_ba`：`spread_ba_adj` 的滚动中位数
-- `mad_ab`：`median(|spread_ab_adj - median_ab|)`
-- `mad_ba`：`median(|spread_ba_adj - median_ba|)`
+- `median_ab`：`spread_ab`（原始价差，不扣手续费/滑点）的滚动中位数
+- `median_ba`：`spread_ba`（原始价差，不扣手续费/滑点）的滚动中位数
+- `mad_ab`：`median(|spread_ab - median_ab|)`
+- `mad_ba`：`median(|spread_ba - median_ba|)`
 
 异常处理：
 
@@ -76,10 +76,16 @@
 - funding 小于阈值（默认 `< -0.1`）不下单
 - 1 秒频率限制（`cooldown_ms=1000`）
 - 仓位上限限制（数量维度）：
-  - 每次开仓数量由 `order_usd / 当前 Binance 价格` 换算
-  - 每次开仓前动态计算 `max_position_qty = max_position_usd / 当前 Binance 价格`
-  - 同向加仓后若超过 `max_position_qty`，不拦截，改为把本次 `order_qty` 截断到“剩余可用仓位”
-  - 截断后会做数量凑整；若截断后数量接近 0，则该次信号跳过
+  - 每次开仓先用 A 腿价格把 `order_usd` 换算成 `qty`
+  - `-a+b`：`qty = order_usd / a_bid`
+  - `+a-b`：`qty = order_usd / a_ask`
+  - 最大持仓也用 A 腿价格转成数量：
+    - `-a+b`：`max_position_qty = max_position_usd / a_bid`
+    - `+a-b`：`max_position_qty = max_position_usd / a_ask`
+  - 若更新后 A/B 任一腿数量绝对值会超 `max_position_qty`，不直接拦截：
+    - 先把本次 `qty` 截断到“当前可用剩余仓位”
+    - 再做数量凑整
+    - 只有截断后 `qty` 接近 0，才跳过该次信号
 - 价差硬过滤：`adj_spread` 必须在 `[0, 10]` 区间
 
 ## 8. 参数扫描维度（与信号直接相关）
@@ -97,49 +103,59 @@
 每个时间点在通过信号与过滤条件后，下单流程如下：
 
 1. 判定方向（`-a+b` 或 `+a-b`）。
-2. 用 Binance 实时价格把 `order_usd` 换算为本次开仓数量：
-   - `-a+b`：`order_qty = order_usd / a_bid`
-   - `+a-b`：`order_qty = order_usd / a_ask`
-   - 该 `order_qty` 作为双边统一数量（Binance 与 Gate 两腿使用同一个数量）
-3. 同步计算动态最大仓位数量（max_position_usd = 20000U）：
-   - `max_position_qty = max_position_usd / 当前 Binance 价格`
-4. 执行同向加仓限制（超限截断），net_pos_qty（当前净仓）：
-   - `-a+b` 方向：若 `net_pos_qty >= 0` 且 `net_pos_qty + order_qty > max_position_qty`，则 
-   - `order_qty = max_position_qty - net_pos_qty`
-   - `+a-b` 方向：若 `net_pos_qty <= 0` 且 `abs(net_pos_qty) + order_qty > max_position_qty`，则
-     - `order_qty = max_position_qty - abs(net_pos_qty)`
-   - 截断后执行凑整；若 `order_qty` 接近 0，则跳过本次信号
-5. 通过后更新净仓：
-   - `-a+b`：`net_pos_qty += order_qty`
-   - `+a-b`：`net_pos_qty -= order_qty`
-
-> 注意：这里只是“回测成交估算”，并未引入交易所最小下单量/步长取整。
+2. 用 A 腿价格换算数量：
+   - `-a+b`：`qty = order_usd / a_bid`
+   - `+a-b`：`qty = order_usd / a_ask`
+3. 按同一 `qty` 执行分腿数量仓位更新：
+   - `-a+b`：`A_qty -= qty`，`B_qty += qty`
+   - `+a-b`：`A_qty += qty`，`B_qty -= qty`
+4. 每次开仓前按 A 腿价格计算 `max_position_qty`；若超限则将本次 `qty` 截断到可用上限并凑整，仅当截断后 `qty` 接近 0 才跳过。
 
 ## 10. PnL 计算流程
 
 ### 10.1 开仓阶段 PnL（逐单累加）
 
-- 每笔开仓名义金额（实际花了多少U）：`executed_notional_usd = order_qty * 当前 Binance 价格`
-- 每笔收益估算：
-  - `trade_pnl_usd = executed_notional_usd * adj_spread(扣完成本的价差) / 100`
-- 开仓累计收益：
+- 先按 A 腿价格换算统一数量：
+  - `-a+b`：`qty = order_usd / a_bid`
+  - `+a-b`：`qty = order_usd / a_ask`
+- 每笔毛收益（直接按两腿价格计算，和强平口径一致）：
+  - `-a+b`（A 开空、B 开多）：
+    - `gross = qty * a_bid - qty * b_ask`
+  - `+a-b`（A 开多、B 开空）：
+    - `gross = qty * b_bid - qty * a_ask`
+- 分腿成交额（用于手续费）：
+  - `-a+b`：`a_leg_value = qty * a_bid`，`b_leg_value = qty * b_ask`
+  - `+a-b`：`a_leg_value = qty * a_ask`，`b_leg_value = qty * b_bid`
+- 每笔成本（双边分别计费，合计万8）：
+  - `fee_cost = abs(a_leg_value) * 0.0004 + abs(b_leg_value) * 0.0004`
+- 每笔净收益：
+  - `trade_pnl_usd = gross - fee_cost`
+- 开仓累计：
   - `open_profit_usd_total = Σ(trade_pnl_usd)`
 
 ### 10.2 回测末尾强平 PnL
 
-- 若 `net_pos_qty != 0`，在最后一条行情执行一次强平估算。
-- 先确定强平使用的净价差：
-  - `net_pos_qty > 0` -> 用 `spread_ab_adj`
-  - `net_pos_qty < 0` -> 用 `spread_ba_adj`
-- 再把剩余数量换算为名义 U（最后时刻 Binance 参考价格）：
-  - `close_notional_usd = abs(net_pos_qty_before_close) * close_ref_price`
-- 强平收益：
-  - `close_profit_usd_total = close_notional_usd * close_spread_used / 100`
+- 若最后 `A/B` 分腿数量仓位不为 0，执行强平估算。
+- 强平数量：
+  - `close_qty = min(abs(a_pos_qty), abs(b_pos_qty))`
+- 强平收益按两腿价格直接算（你指定口径：`qty*price - qty*price`）：
+  - 关闭 `-a+b`（`a_pos_qty < 0`）：
+    - `gross_close = close_qty * b_bid - close_qty * a_ask`
+  - 关闭 `+a-b`（`a_pos_qty > 0`）：
+    - `gross_close = close_qty * a_bid - close_qty * b_ask`
+- 强平分腿成交额（用于手续费）：
+  - 关闭 `-a+b`：`a_close_leg = close_qty * a_ask`，`b_close_leg = close_qty * b_bid`
+  - 关闭 `+a-b`：`a_close_leg = close_qty * a_bid`，`b_close_leg = close_qty * b_ask`
+- 强平成本（双边分别计费，合计万8）：
+  - `close_fee = abs(a_close_leg) * 0.0004 + abs(b_close_leg) * 0.0004`
+- 强平净收益：
+  - `close_profit_usd_total = gross_close - close_fee`
 
 ### 10.3 最终总收益
 
 - `profit_usd_total = open_profit_usd_total + close_profit_usd_total`
 
-强平后汇总里的净仓位会置为：
+强平后汇总里的分腿数量仓位会置为：
 
-- `final_net_position_qty = 0`
+- `final_a_position_qty = 0`
+- `final_b_position_qty = 0`
