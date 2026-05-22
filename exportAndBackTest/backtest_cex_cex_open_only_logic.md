@@ -76,8 +76,8 @@
 
 ### 5.1 标准化偏离（z）
 
-- `z_ab = (spread_ab - median_ab) / mad_ab`
-- `z_ba = (spread_ba - median_ba) / mad_ba`
+- `z_ab = (spread_ab_adj - median_ab) / mad_ab`
+- `z_ba = (spread_ba_adj - median_ba) / mad_ba`
 
 ## 6. 开仓判定与风控
 
@@ -118,20 +118,32 @@
     - 对截断结果做统一凑整
     - 仅当截断后 `qty` 接近 0 时，才跳过本次信号
 
-### 6.5 回测末尾强制平仓
+### 6.5 回测末尾强平/回滚（3 种口径）
 
-- 回测遍历结束后，如果分腿数量仓位不为 0，会按最后一条行情执行强平估算。
-- 强平数量：
-  - `close_qty = min(abs(a_pos_qty), abs(b_pos_qty))`
-- 强平利润按两腿价格直接计算（`qty*price - qty*price`）：
-  - 若 `a_pos_qty < 0`（关闭 `-a+b`）：`gross_close = close_qty*b_bid - close_qty*a_ask`
-  - 若 `a_pos_qty > 0`（关闭 `+a-b`）：`gross_close = close_qty*a_bid - close_qty*b_ask`
-- 再减强平成本（双边分别计费，合计万8）：
-  - `close_fee = abs(A腿成交额) * 0.0004 + abs(B腿成交额) * 0.0004`
-  - `close_profit_usd_total = gross_close - close_fee`
-- 总利润更新为：
-  - `profit_usd_total = open_profit_usd_total + close_profit_usd_total`
-- 强平后汇总中的：
+- 回测遍历结束后，如果分腿数量仓位不为 0，会计算 `close_qty = min(abs(a_pos_qty), abs(b_pos_qty))`。
+- 当前脚本并行输出 3 种末尾处理口径：
+
+1. `last_tick`（最后一条记录反向平仓）
+   - 若 `a_pos_qty < 0`（关闭 `-a+b`）：A 用 `a_ask`，B 用 `b_bid`
+   - 若 `a_pos_qty > 0`（关闭 `+a-b`）：A 用 `a_bid`，B 用 `b_ask`
+   - `close_profit_last_tick = gross_close - close_fee`
+
+2. `rollback_unopened_fifo`（未平仓回滚，FIFO）
+   - 用 FIFO 持仓簿把未对冲剩余仓位对应的开仓净收益扣回
+   - `close_profit_rollback_unopened_fifo = - Σ(remaining_open_net_pnl_fifo)`
+
+3. `rollback_unopened_lifo`（未平仓回滚，LIFO）
+   - 用 LIFO 持仓簿做同样回滚
+   - `close_profit_rollback_unopened_lifo = - Σ(remaining_open_net_pnl_lifo)`
+
+- 主汇总口径默认使用 `last_tick`：
+  - `close_profit_usd_total = close_profit_last_tick`
+  - `profit_usd_total = open_profit_usd_total + close_profit_last_tick`
+- 同时输出对比字段：
+  - `profit_usd_total_last_tick`
+  - `profit_usd_total_rollback_unopened_fifo`
+  - `profit_usd_total_rollback_unopened_lifo`
+- 末尾处理完成后：
   - `final_a_position_qty = 0.0`
   - `final_b_position_qty = 0.0`
 
@@ -173,7 +185,17 @@
 利润字段说明：
 
 - 逐单利润：`profit_usd = 毛收益(a_qty*价格 - b_qty*价格) - 双边手续费(每腿万4)`
-- 汇总利润：`profit_usd_total = Σ(profit_usd)`
+- 开仓累计：`open_profit_usd_total = Σ(open_trade_pnl)`
+- 末尾口径对比：
+  - `close_profit_last_tick`
+  - `close_profit_rollback_unopened_fifo`
+  - `close_profit_rollback_unopened_lifo`
+- 对应总收益：
+  - `profit_usd_total_last_tick`
+  - `profit_usd_total_rollback_unopened_fifo`
+  - `profit_usd_total_rollback_unopened_lifo`
+- 兼容字段：
+  - `close_profit_usd_total` 与 `profit_usd_total` 默认等于 `last_tick` 口径
 
 ---
 

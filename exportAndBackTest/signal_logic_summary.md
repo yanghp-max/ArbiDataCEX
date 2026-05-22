@@ -133,27 +133,33 @@
 - 开仓累计：
   - `open_profit_usd_total = Σ(trade_pnl_usd)`
 
-### 10.2 回测末尾强平 PnL
+### 10.2 回测末尾强平 / 回滚 PnL（3 口径）
 
-- 若最后 `A/B` 分腿数量仓位不为 0，执行强平估算。
-- 强平数量：
+- 若最后 `A/B` 分腿数量仓位不为 0，先取：
   - `close_qty = min(abs(a_pos_qty), abs(b_pos_qty))`
-- 强平收益按两腿价格直接算（你指定口径：`qty*price - qty*price`）：
-  - 关闭 `-a+b`（`a_pos_qty < 0`）：
-    - `gross_close = close_qty * b_bid - close_qty * a_ask`
-  - 关闭 `+a-b`（`a_pos_qty > 0`）：
-    - `gross_close = close_qty * a_bid - close_qty * b_ask`
-- 强平分腿成交额（用于手续费）：
-  - 关闭 `-a+b`：`a_close_leg = close_qty * a_ask`，`b_close_leg = close_qty * b_bid`
-  - 关闭 `+a-b`：`a_close_leg = close_qty * a_bid`，`b_close_leg = close_qty * b_ask`
-- 强平成本（双边分别计费，合计万8）：
-  - `close_fee = abs(a_close_leg) * 0.0004 + abs(b_close_leg) * 0.0004`
-- 强平净收益：
-  - `close_profit_usd_total = gross_close - close_fee`
+- 脚本并行输出 3 种末尾处理口径：
+
+1. `last_tick`
+   - `-a+b` 剩余：A 用 `a_ask`，B 用 `b_bid`
+   - `+a-b` 剩余：A 用 `a_bid`，B 用 `b_ask`
+   - `close_profit_last_tick = gross_close - close_fee`
+
+2. `rollback_unopened_fifo`
+   - 按 FIFO 持仓簿，扣回未对冲剩余仓位对应的开仓净收益：
+   - `close_profit_rollback_unopened_fifo = - Σ(remaining_open_net_pnl_fifo)`
+
+3. `rollback_unopened_lifo`
+   - 按 LIFO 持仓簿，扣回未对冲剩余仓位对应的开仓净收益：
+   - `close_profit_rollback_unopened_lifo = - Σ(remaining_open_net_pnl_lifo)`
 
 ### 10.3 最终总收益
 
-- `profit_usd_total = open_profit_usd_total + close_profit_usd_total`
+- `profit_usd_total_last_tick = open_profit_usd_total + close_profit_last_tick`
+- `profit_usd_total_rollback_unopened_fifo = open_profit_usd_total + close_profit_rollback_unopened_fifo`
+- `profit_usd_total_rollback_unopened_lifo = open_profit_usd_total + close_profit_rollback_unopened_lifo`
+- 兼容字段默认等于 `last_tick`：
+  - `close_profit_usd_total = close_profit_last_tick`
+  - `profit_usd_total = profit_usd_total_last_tick`
 
 强平后汇总里的分腿数量仓位会置为：
 

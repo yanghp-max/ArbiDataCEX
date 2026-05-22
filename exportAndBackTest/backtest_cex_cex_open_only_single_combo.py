@@ -21,7 +21,6 @@ DEFAULT_COOLDOWN_MS = 1000  # 下单冷却时间（毫秒）
 DEFAULT_FUNDING_MIN = -0.1  # 资金费率下限，任一侧低于该值则禁止开仓
 DEFAULT_FEE_BPS_TOTAL = 4.0  # 双边总手续费（bps）
 DEFAULT_SLIPPAGE_BPS_TOTAL = 4.0  # 双边总滑点（bps）
-DEFAULT_CLOSE_TWAP_MIN = 5  # 末尾 TWAP 强平取样窗口（分钟）
 DEFAULT_SYMBOLS = "SKYAIUSDT"  # 逗号分隔币种；空字符串表示全量
 
 
@@ -38,7 +37,6 @@ class SingleRunConfig:
     funding_min: float
     fee_bps_total: float
     slippage_bps_total: float
-    close_twap_min: int
     symbols: Optional[List[str]]
 
 
@@ -57,7 +55,6 @@ def parse_args() -> SingleRunConfig:
     parser.add_argument("--funding_min", type=float, default=DEFAULT_FUNDING_MIN)
     parser.add_argument("--fee_bps_total", type=float, default=DEFAULT_FEE_BPS_TOTAL)
     parser.add_argument("--slippage_bps_total", type=float, default=DEFAULT_SLIPPAGE_BPS_TOTAL)
-    parser.add_argument("--close_twap_min", type=int, default=DEFAULT_CLOSE_TWAP_MIN)
     parser.add_argument(
         "--symbols",
         default=DEFAULT_SYMBOLS,
@@ -78,7 +75,6 @@ def parse_args() -> SingleRunConfig:
         funding_min=args.funding_min,
         fee_bps_total=args.fee_bps_total,
         slippage_bps_total=args.slippage_bps_total,
-        close_twap_min=args.close_twap_min,
         symbols=symbols,
     )
 
@@ -206,6 +202,10 @@ def simulate_single_combo(df: pd.DataFrame, symbol: str, cfg: SingleRunConfig) -
     fee_rate_per_leg = fee_rate_total / 2.0
     total_adj_spread_pct = 0.0
     trade_rows: List[Dict] = []
+    # 两套剩余持仓分层（FIFO / LIFO），用于计算两种未平仓回滚口径
+    # 每层结构: {"direction": "+a-b"/"-a+b", "qty": float, "a_px": float, "b_px": float}
+    open_lots_fifo: List[Dict] = []
+    open_lots_lifo: List[Dict] = []
 
     def normalize_qty(qty: float) -> float:
         return float(np.round(qty, 12))
@@ -233,6 +233,34 @@ def simulate_single_combo(df: pd.DataFrame, symbol: str, cfg: SingleRunConfig) -
             gross_close = close_qty * a_px_close - close_qty * b_px_close
         fee_close = abs(close_qty * a_px_close) * fee_rate_per_leg + abs(close_qty * b_px_close) * fee_rate_per_leg
         return gross_close, fee_close, gross_close - fee_close
+
+    def add_open_lot(book: List[Dict], direction: str, qty: float, a_px: float, b_px: float, mode: str) -> None:
+        """
+        把新开仓按指定模式（FIFO/LIFO）与反向剩余仓位对冲，保留“当前未对冲持仓层”。
+        """
+        remaining = qty
+        while remaining > 1e-12 and book:
+            idx = 0 if mode == "fifo" else -1
+            head = book[idx]
+            if head["direction"] == direction:
+                break
+            consume = min(remaining, head["qty"])
+            head["qty"] -= consume
+            remaining -= consume
+            if head["qty"] <= 1e-12:
+                if mode == "fifo":
+                    book.pop(0)
+                else:
+                    book.pop()
+        if remaining > 1e-12:
+            book.append(
+                {
+                    "direction": direction,
+                    "qty": remaining,
+                    "a_px": float(a_px),
+                    "b_px": float(b_px),
+                }
+            )
 
     if len(df) > 0:
         first_ts = int(df.iloc[0]["timestamp"])
@@ -332,6 +360,8 @@ def simulate_single_combo(df: pd.DataFrame, symbol: str, cfg: SingleRunConfig) -
 
         if first_open_ts is None:
             first_open_ts = ts
+        add_open_lot(open_lots_fifo, direction, qty, a_px, b_px, mode="fifo")
+        add_open_lot(open_lots_lifo, direction, qty, a_px, b_px, mode="lifo")
         trade_id += 1
         last_order_ts = ts
         open_profit_total += trade_profit
@@ -365,112 +395,148 @@ def simulate_single_combo(df: pd.DataFrame, symbol: str, cfg: SingleRunConfig) -
             }
         )
 
-    close_profit_twap = 0.0
-    close_profit_avg_since_open = 0.0
+    close_profit_last_tick = 0.0
+    close_profit_rollback_unopened_fifo = 0.0
+    close_profit_rollback_unopened_lifo = 0.0
     if len(df) > 0 and (abs(a_pos_qty) > 1e-12 or abs(b_pos_qty) > 1e-12):
         close_qty = min(abs(a_pos_qty), abs(b_pos_qty))
         if close_qty > 1e-12:
             last = df.iloc[-1]
             end_ts = int(last["timestamp"])
-            twap_start_ts = end_ts - int(cfg.close_twap_min) * 60 * 1000
-            twap_df = df[df["timestamp"] >= twap_start_ts]
-            if len(twap_df) == 0:
-                twap_df = df.tail(1)
-            since_open_df = df[df["timestamp"] >= first_open_ts] if first_open_ts is not None else df.tail(1)
-            if len(since_open_df) == 0:
-                since_open_df = df.tail(1)
 
             if a_pos_qty < 0:
                 side = "-a+b"
-                a_series_twap = pd.to_numeric(twap_df[a_ask_col], errors="coerce")
-                b_series_twap = pd.to_numeric(twap_df[b_bid_col], errors="coerce")
-                a_series_avg = pd.to_numeric(since_open_df[a_ask_col], errors="coerce")
-                b_series_avg = pd.to_numeric(since_open_df[b_bid_col], errors="coerce")
+                # last tick 反向平仓价格：A 回补用 ask，B 平多用 bid
+                a_last_tick_px = float(last[a_ask_col])
+                b_last_tick_px = float(last[b_bid_col])
             else:
                 side = "+a-b"
-                a_series_twap = pd.to_numeric(twap_df[a_bid_col], errors="coerce")
-                b_series_twap = pd.to_numeric(twap_df[b_ask_col], errors="coerce")
-                a_series_avg = pd.to_numeric(since_open_df[a_bid_col], errors="coerce")
-                b_series_avg = pd.to_numeric(since_open_df[b_ask_col], errors="coerce")
+                # last tick 反向平仓价格：A 平多用 bid，B 回补用 ask
+                a_last_tick_px = float(last[a_bid_col])
+                b_last_tick_px = float(last[b_ask_col])
 
-            a_series_twap = a_series_twap[np.isfinite(a_series_twap) & (a_series_twap > 0)]
-            b_series_twap = b_series_twap[np.isfinite(b_series_twap) & (b_series_twap > 0)]
-            a_series_avg = a_series_avg[np.isfinite(a_series_avg) & (a_series_avg > 0)]
-            b_series_avg = b_series_avg[np.isfinite(b_series_avg) & (b_series_avg > 0)]
+            # 口径1：last_tick 强平（最后一条记录反向平仓）
+            gross_last, fee_last, close_profit_last_tick = calc_close_profit(
+                close_qty, a_last_tick_px, b_last_tick_px, side
+            )
+            trade_id += 1
+            trade_rows.append(
+                {
+                    "symbol": symbol,
+                    "trade_index": trade_id,
+                    "action": "FORCE_CLOSE",
+                    "direction": side,
+                    "timestamp": end_ts,
+                    "datetime": pd.to_datetime(end_ts, unit="ms"),
+                    "a_price_used": a_last_tick_px,
+                    "b_price_used": b_last_tick_px,
+                    "qty": close_qty,
+                    "a_pos_qty": 0.0,
+                    "b_pos_qty": 0.0,
+                    "gross_pnl": gross_last,
+                    "fee_cost": fee_last,
+                    "net_pnl": close_profit_last_tick,
+                    "cum_pnl": open_profit_total + close_profit_last_tick,
+                    "z_ab": np.nan,
+                    "z_ba": np.nan,
+                    "spread_ab": np.nan,
+                    "spread_ba": np.nan,
+                    "spread_ab_adj": np.nan,
+                    "spread_ba_adj": np.nan,
+                    "close_mode": "last_tick",
+                }
+            )
 
-            if len(a_series_twap) > 0 and len(b_series_twap) > 0:
-                a_close_px_twap = float(a_series_twap.mean())
-                b_close_px_twap = float(b_series_twap.mean())
-                gross_twap, fee_twap, close_profit_twap = calc_close_profit(
-                    close_qty, a_close_px_twap, b_close_px_twap, side
-                )
-                trade_id += 1
-                trade_rows.append(
-                    {
-                        "symbol": symbol,
-                        "trade_index": trade_id,
-                        "action": "FORCE_CLOSE",
-                        "direction": side,
-                        "timestamp": end_ts,
-                        "datetime": pd.to_datetime(end_ts, unit="ms"),
-                        "a_price_used": a_close_px_twap,
-                        "b_price_used": b_close_px_twap,
-                        "qty": close_qty,
-                        "a_pos_qty": 0.0,
-                        "b_pos_qty": 0.0,
-                        "gross_pnl": gross_twap,
-                        "fee_cost": fee_twap,
-                        "net_pnl": close_profit_twap,
-                        "cum_pnl": open_profit_total + close_profit_twap,
-                        "z_ab": np.nan,
-                        "z_ba": np.nan,
-                        "spread_ab": np.nan,
-                        "spread_ba": np.nan,
-                        "spread_ab_adj": np.nan,
-                        "spread_ba_adj": np.nan,
-                        "close_mode": "twap",
-                    }
-                )
+            # 口径2：rollback 未平回滚（FIFO）
+            lots_for_side_fifo = [lot for lot in open_lots_fifo if lot["direction"] == side and lot["qty"] > 1e-12]
+            rollback_amount_fifo = 0.0
+            for lot in lots_for_side_fifo:
+                q = float(lot["qty"])
+                a_open = float(lot["a_px"])
+                b_open = float(lot["b_px"])
+                if side == "-a+b":
+                    gross_open = q * a_open - q * b_open
+                else:
+                    gross_open = q * b_open - q * a_open
+                fee_open = abs(q * a_open) * fee_rate_per_leg + abs(q * b_open) * fee_rate_per_leg
+                rollback_amount_fifo += (gross_open - fee_open)
+            close_profit_rollback_unopened_fifo = -rollback_amount_fifo
+            trade_id += 1
+            trade_rows.append(
+                {
+                    "symbol": symbol,
+                    "trade_index": trade_id,
+                    "action": "FORCE_CLOSE",
+                    "direction": side,
+                    "timestamp": end_ts,
+                    "datetime": pd.to_datetime(end_ts, unit="ms"),
+                    "a_price_used": np.nan,
+                    "b_price_used": np.nan,
+                    "qty": close_qty,
+                    "a_pos_qty": 0.0,
+                    "b_pos_qty": 0.0,
+                    "gross_pnl": np.nan,
+                    "fee_cost": np.nan,
+                    "net_pnl": close_profit_rollback_unopened_fifo,
+                    "cum_pnl": open_profit_total + close_profit_rollback_unopened_fifo,
+                    "z_ab": np.nan,
+                    "z_ba": np.nan,
+                    "spread_ab": np.nan,
+                    "spread_ba": np.nan,
+                    "spread_ab_adj": np.nan,
+                    "spread_ba_adj": np.nan,
+                    "close_mode": "rollback_unopened_fifo",
+                }
+            )
 
-            if len(a_series_avg) > 0 and len(b_series_avg) > 0:
-                a_close_px_avg = float(a_series_avg.mean())
-                b_close_px_avg = float(b_series_avg.mean())
-                gross_avg, fee_avg, close_profit_avg_since_open = calc_close_profit(
-                    close_qty, a_close_px_avg, b_close_px_avg, side
-                )
-                trade_id += 1
-                trade_rows.append(
-                    {
-                        "symbol": symbol,
-                        "trade_index": trade_id,
-                        "action": "FORCE_CLOSE",
-                        "direction": side,
-                        "timestamp": end_ts,
-                        "datetime": pd.to_datetime(end_ts, unit="ms"),
-                        "a_price_used": a_close_px_avg,
-                        "b_price_used": b_close_px_avg,
-                        "qty": close_qty,
-                        "a_pos_qty": 0.0,
-                        "b_pos_qty": 0.0,
-                        "gross_pnl": gross_avg,
-                        "fee_cost": fee_avg,
-                        "net_pnl": close_profit_avg_since_open,
-                        "cum_pnl": open_profit_total + close_profit_avg_since_open,
-                        "z_ab": np.nan,
-                        "z_ba": np.nan,
-                        "spread_ab": np.nan,
-                        "spread_ba": np.nan,
-                        "spread_ab_adj": np.nan,
-                        "spread_ba_adj": np.nan,
-                        "close_mode": "avg_since_open",
-                    }
-                )
+            # 口径3：rollback 未平回滚（LIFO）
+            rollback_amount_lifo = 0.0
+            lots_for_side_lifo = [lot for lot in open_lots_lifo if lot["direction"] == side and lot["qty"] > 1e-12]
+            for lot in lots_for_side_lifo:
+                q = float(lot["qty"])
+                a_open = float(lot["a_px"])
+                b_open = float(lot["b_px"])
+                if side == "-a+b":
+                    gross_open = q * a_open - q * b_open
+                else:
+                    gross_open = q * b_open - q * a_open
+                fee_open = abs(q * a_open) * fee_rate_per_leg + abs(q * b_open) * fee_rate_per_leg
+                rollback_amount_lifo += (gross_open - fee_open)
+            close_profit_rollback_unopened_lifo = -rollback_amount_lifo
+            trade_id += 1
+            trade_rows.append(
+                {
+                    "symbol": symbol,
+                    "trade_index": trade_id,
+                    "action": "FORCE_CLOSE",
+                    "direction": side,
+                    "timestamp": end_ts,
+                    "datetime": pd.to_datetime(end_ts, unit="ms"),
+                    "a_price_used": np.nan,
+                    "b_price_used": np.nan,
+                    "qty": close_qty,
+                    "a_pos_qty": 0.0,
+                    "b_pos_qty": 0.0,
+                    "gross_pnl": np.nan,
+                    "fee_cost": np.nan,
+                    "net_pnl": close_profit_rollback_unopened_lifo,
+                    "cum_pnl": open_profit_total + close_profit_rollback_unopened_lifo,
+                    "z_ab": np.nan,
+                    "z_ba": np.nan,
+                    "spread_ab": np.nan,
+                    "spread_ba": np.nan,
+                    "spread_ab_adj": np.nan,
+                    "spread_ba_adj": np.nan,
+                    "close_mode": "rollback_unopened_lifo",
+                }
+            )
 
             a_pos_qty = 0.0
             b_pos_qty = 0.0
 
-    profit_total_twap = open_profit_total + close_profit_twap
-    profit_total_avg_since_open = open_profit_total + close_profit_avg_since_open
+    profit_total_last_tick = open_profit_total + close_profit_last_tick
+    profit_total_rollback_unopened_fifo = open_profit_total + close_profit_rollback_unopened_fifo
+    profit_total_rollback_unopened_lifo = open_profit_total + close_profit_rollback_unopened_lifo
     summary = {
         "symbol": symbol,
         "window_min": cfg.window_min,
@@ -481,12 +547,14 @@ def simulate_single_combo(df: pd.DataFrame, symbol: str, cfg: SingleRunConfig) -
         "orders_side_ab": orders_side_ab,
         "orders_side_ba": orders_side_ba,
         "open_profit_usd_total": open_profit_total,
-        "close_profit_usd_total": close_profit_twap,
-        "profit_usd_total": profit_total_twap,
-        "close_profit_twap": close_profit_twap,
-        "close_profit_avg_since_open": close_profit_avg_since_open,
-        "profit_usd_total_twap": profit_total_twap,
-        "profit_usd_total_avg_since_open": profit_total_avg_since_open,
+        "close_profit_usd_total": close_profit_last_tick,
+        "profit_usd_total": profit_total_last_tick,
+        "close_profit_last_tick": close_profit_last_tick,
+        "close_profit_rollback_unopened_fifo": close_profit_rollback_unopened_fifo,
+        "close_profit_rollback_unopened_lifo": close_profit_rollback_unopened_lifo,
+        "profit_usd_total_last_tick": profit_total_last_tick,
+        "profit_usd_total_rollback_unopened_fifo": profit_total_rollback_unopened_fifo,
+        "profit_usd_total_rollback_unopened_lifo": profit_total_rollback_unopened_lifo,
         "max_seen_position_qty": max_seen_position_qty,
         "final_a_position_qty": a_pos_qty,
         "final_b_position_qty": b_pos_qty,
@@ -522,7 +590,8 @@ def main() -> None:
 
     print(
         f"[START] Single-combo backtest: window={cfg.window_min}, "
-        f"z_ab={cfg.z_open_ab}, z_ba={cfg.z_open_ba}, close_modes=twap+avg_since_open"
+        f"z_ab={cfg.z_open_ab}, z_ba={cfg.z_open_ba}, "
+        f"close_modes=last_tick+rollback_unopened_fifo+rollback_unopened_lifo"
     )
     for i, path in enumerate(files, 1):
         symbol = os.path.splitext(os.path.basename(path))[0]

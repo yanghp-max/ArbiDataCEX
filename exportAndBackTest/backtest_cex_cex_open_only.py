@@ -27,7 +27,6 @@ class BacktestConfig:
     funding_min: float
     fee_bps_total: float
     slippage_bps_total: float
-    close_twap_min: int
     symbols: Optional[List[str]]
     z_open_list: List[float]
     z_open_ab_list: List[float]
@@ -72,12 +71,6 @@ def parse_args() -> BacktestConfig:
     parser.add_argument("--fee_bps_total", type=float, default=4.0)
     parser.add_argument("--slippage_bps_total", type=float, default=4.0)
     parser.add_argument(
-        "--close_twap_min",
-        type=int,
-        default=5,
-        help="TWAP 强平窗口（分钟），默认 5 分钟。"
-    )
-    parser.add_argument(
         "--symbols",
         default="",
         help="Comma separated symbols, e.g. BTCUSDT,ETHUSDT. Empty means all csv files."
@@ -108,7 +101,6 @@ def parse_args() -> BacktestConfig:
         funding_min=args.funding_min,
         fee_bps_total=args.fee_bps_total,
         slippage_bps_total=args.slippage_bps_total,
-        close_twap_min=args.close_twap_min,
         symbols=symbols,
         z_open_list=z_open_list,
         z_open_ab_list=z_open_ab_list,
@@ -228,7 +220,6 @@ def simulate_open_only(
     max_seen_position_qty = 0.0
     
     last_order_ts = -10**18
-    first_open_ts: Optional[int] = None
     trade_id = 0
     orders_side_ab = 0  
     orders_side_ba = 0  
@@ -245,6 +236,10 @@ def simulate_open_only(
     fee_rate_total = (cfg.fee_bps_total + cfg.slippage_bps_total) / 10000.0  # 默认万8
     fee_rate_per_leg = fee_rate_total / 2.0
     total_adj_spread_pct = 0.0
+    # 两套未对冲持仓分层（FIFO / LIFO）用于回滚口径
+    # 每层结构: {"direction": "+a-b"/"-a+b", "qty": float, "a_px": float, "b_px": float}
+    open_lots_fifo: List[Dict] = []
+    open_lots_lifo: List[Dict] = []
 
     def normalize_qty(qty: float) -> float:
         return float(np.round(qty, 12))
@@ -260,6 +255,31 @@ def simulate_open_only(
             gross_close = close_qty * a_px_close - close_qty * b_px_close
         close_fee = (abs(close_qty * a_px_close) * fee_rate_per_leg) + (abs(close_qty * b_px_close) * fee_rate_per_leg)
         return gross_close - close_fee
+
+    def add_open_lot(book: List[Dict], direction: str, qty: float, a_px: float, b_px: float, mode: str) -> None:
+        remaining = qty
+        while remaining > 1e-12 and book:
+            idx = 0 if mode == "fifo" else -1
+            head = book[idx]
+            if head["direction"] == direction:
+                break
+            consume = min(remaining, head["qty"])
+            head["qty"] -= consume
+            remaining -= consume
+            if head["qty"] <= 1e-12:
+                if mode == "fifo":
+                    book.pop(0)
+                else:
+                    book.pop()
+        if remaining > 1e-12:
+            book.append(
+                {
+                    "direction": direction,
+                    "qty": remaining,
+                    "a_px": float(a_px),
+                    "b_px": float(b_px),
+                }
+            )
 
     def interval_for_leg(pos: float, delta_sign: int, limit: float) -> Tuple[float, float]:
         if delta_sign == 1:
@@ -380,74 +400,80 @@ def simulate_open_only(
             b_pos_qty -= qty
 
         max_seen_position_qty = max(max_seen_position_qty, abs(a_pos_qty), abs(b_pos_qty))
-        if first_open_ts is None:
-            first_open_ts = ts
+        add_open_lot(open_lots_fifo, direction, qty, a_px, b_px, mode="fifo")
+        add_open_lot(open_lots_lifo, direction, qty, a_px, b_px, mode="lifo")
         trade_id += 1
         last_order_ts = ts
         profit_total += trade_profit
         open_profit_total += trade_profit
         total_adj_spread_pct += adj_spread
 
-    # 回测结束后输出两种强平口径：
-    # 1) 最后 close_twap_min 分钟 TWAP
-    # 2) 自首次开仓以来均值(avg since open)
-    close_profit_twap = 0.0
-    close_profit_avg_since_open = 0.0
+    # 回测结束后三种强平/回滚口径：
+    # 1) last_tick
+    # 2) rollback_unopened_fifo
+    # 3) rollback_unopened_lifo
+    close_profit_last_tick = 0.0
+    close_profit_rollback_unopened_fifo = 0.0
+    close_profit_rollback_unopened_lifo = 0.0
     if len(df) > 0 and (abs(a_pos_qty) > 1e-12 or abs(b_pos_qty) > 1e-12):
         last = df.iloc[-1]
         close_qty = min(abs(a_pos_qty), abs(b_pos_qty))
         if close_qty > 1e-12:
-            end_ts = int(last["timestamp"])
-            twap_start_ts = end_ts - int(cfg.close_twap_min) * 60 * 1000
-            twap_df = df[df["timestamp"] >= twap_start_ts]
-            if len(twap_df) == 0:
-                twap_df = df.tail(1)
-            since_open_df = df[df["timestamp"] >= first_open_ts] if first_open_ts is not None else df.tail(1)
-            if len(since_open_df) == 0:
-                since_open_df = df.tail(1)
-
             if a_pos_qty < 0:
-                # 关闭 -a+b：A 回补买入(ask)，B 平多卖出(bid)
-                a_twap = pd.to_numeric(twap_df[a_ask_col], errors="coerce")
-                b_twap = pd.to_numeric(twap_df[b_bid_col], errors="coerce")
-                a_twap = a_twap[np.isfinite(a_twap) & (a_twap > 0)]
-                b_twap = b_twap[np.isfinite(b_twap) & (b_twap > 0)]
-                if len(a_twap) > 0 and len(b_twap) > 0:
-                    close_profit_twap = calc_close_profit(close_qty, float(a_twap.mean()), float(b_twap.mean()), "-a+b")
-
-                a_avg = pd.to_numeric(since_open_df[a_ask_col], errors="coerce")
-                b_avg = pd.to_numeric(since_open_df[b_bid_col], errors="coerce")
-                a_avg = a_avg[np.isfinite(a_avg) & (a_avg > 0)]
-                b_avg = b_avg[np.isfinite(b_avg) & (b_avg > 0)]
-                if len(a_avg) > 0 and len(b_avg) > 0:
-                    close_profit_avg_since_open = calc_close_profit(
-                        close_qty, float(a_avg.mean()), float(b_avg.mean()), "-a+b"
-                    )
+                side = "-a+b"
+                # last tick 反向平仓价格：A 回补 ask，B 平多 bid
+                a_last_tick_px = float(last[a_ask_col])
+                b_last_tick_px = float(last[b_bid_col])
             elif a_pos_qty > 0:
-                # 关闭 +a-b：A 平多卖出(bid)，B 回补买入(ask)
-                a_twap = pd.to_numeric(twap_df[a_bid_col], errors="coerce")
-                b_twap = pd.to_numeric(twap_df[b_ask_col], errors="coerce")
-                a_twap = a_twap[np.isfinite(a_twap) & (a_twap > 0)]
-                b_twap = b_twap[np.isfinite(b_twap) & (b_twap > 0)]
-                if len(a_twap) > 0 and len(b_twap) > 0:
-                    close_profit_twap = calc_close_profit(close_qty, float(a_twap.mean()), float(b_twap.mean()), "+a-b")
+                side = "+a-b"
+                # last tick 反向平仓价格：A 平多 bid，B 回补 ask
+                a_last_tick_px = float(last[a_bid_col])
+                b_last_tick_px = float(last[b_ask_col])
+            else:
+                side = ""
+                a_last_tick_px = np.nan
+                b_last_tick_px = np.nan
 
-                a_avg = pd.to_numeric(since_open_df[a_bid_col], errors="coerce")
-                b_avg = pd.to_numeric(since_open_df[b_ask_col], errors="coerce")
-                a_avg = a_avg[np.isfinite(a_avg) & (a_avg > 0)]
-                b_avg = b_avg[np.isfinite(b_avg) & (b_avg > 0)]
-                if len(a_avg) > 0 and len(b_avg) > 0:
-                    close_profit_avg_since_open = calc_close_profit(
-                        close_qty, float(a_avg.mean()), float(b_avg.mean()), "+a-b"
-                    )
+            close_profit_last_tick = calc_close_profit(close_qty, a_last_tick_px, b_last_tick_px, side)
 
-        # 主汇总字段默认使用 TWAP 口径
-        profit_total += close_profit_twap
+            # rollback FIFO
+            lots_for_side_fifo = [lot for lot in open_lots_fifo if lot["direction"] == side and lot["qty"] > 1e-12]
+            rollback_amount_fifo = 0.0
+            for lot in lots_for_side_fifo:
+                q = float(lot["qty"])
+                a_open = float(lot["a_px"])
+                b_open = float(lot["b_px"])
+                if side == "-a+b":
+                    gross_open = q * a_open - q * b_open
+                else:
+                    gross_open = q * b_open - q * a_open
+                fee_open = abs(q * a_open) * fee_rate_per_leg + abs(q * b_open) * fee_rate_per_leg
+                rollback_amount_fifo += (gross_open - fee_open)
+            close_profit_rollback_unopened_fifo = -rollback_amount_fifo
+
+            # rollback LIFO
+            lots_for_side_lifo = [lot for lot in open_lots_lifo if lot["direction"] == side and lot["qty"] > 1e-12]
+            rollback_amount_lifo = 0.0
+            for lot in lots_for_side_lifo:
+                q = float(lot["qty"])
+                a_open = float(lot["a_px"])
+                b_open = float(lot["b_px"])
+                if side == "-a+b":
+                    gross_open = q * a_open - q * b_open
+                else:
+                    gross_open = q * b_open - q * a_open
+                fee_open = abs(q * a_open) * fee_rate_per_leg + abs(q * b_open) * fee_rate_per_leg
+                rollback_amount_lifo += (gross_open - fee_open)
+            close_profit_rollback_unopened_lifo = -rollback_amount_lifo
+
+        # 主汇总字段默认使用 last_tick 口径
+        profit_total += close_profit_last_tick
         a_pos_qty = 0.0
         b_pos_qty = 0.0
 
-    profit_total_twap = open_profit_total + close_profit_twap
-    profit_total_avg_since_open = open_profit_total + close_profit_avg_since_open
+    profit_total_last_tick = open_profit_total + close_profit_last_tick
+    profit_total_rollback_unopened_fifo = open_profit_total + close_profit_rollback_unopened_fifo
+    profit_total_rollback_unopened_lifo = open_profit_total + close_profit_rollback_unopened_lifo
 
     summary = {
         "symbol": symbol,
@@ -460,12 +486,14 @@ def simulate_open_only(
         "max_seen_position_qty": max_seen_position_qty,
         "max_orders_capacity": int(cfg.max_position_usd // cfg.order_usd),
         "open_profit_usd_total": open_profit_total,
-        "close_profit_usd_total": close_profit_twap,
-        "profit_usd_total": profit_total_twap,
-        "close_profit_twap": close_profit_twap,
-        "close_profit_avg_since_open": close_profit_avg_since_open,
-        "profit_usd_total_twap": profit_total_twap,
-        "profit_usd_total_avg_since_open": profit_total_avg_since_open,
+        "close_profit_usd_total": close_profit_last_tick,
+        "profit_usd_total": profit_total_last_tick,
+        "close_profit_last_tick": close_profit_last_tick,
+        "close_profit_rollback_unopened_fifo": close_profit_rollback_unopened_fifo,
+        "close_profit_rollback_unopened_lifo": close_profit_rollback_unopened_lifo,
+        "profit_usd_total_last_tick": profit_total_last_tick,
+        "profit_usd_total_rollback_unopened_fifo": profit_total_rollback_unopened_fifo,
+        "profit_usd_total_rollback_unopened_lifo": profit_total_rollback_unopened_lifo,
         "avg_adj_spread_pct": float(total_adj_spread_pct / trade_id) if trade_id > 0 else 0.0,
         "blocked_by_funding": blocked_by_funding,
         "blocked_by_rate_limit": blocked_by_rate_limit,
@@ -568,8 +596,10 @@ def main():
         "orders_side_ab", "orders_side_ba", 
         "open_profit_usd_total",
         "close_profit_usd_total", "profit_usd_total",
-        "close_profit_twap", "close_profit_avg_since_open",
-        "profit_usd_total_twap", "profit_usd_total_avg_since_open",
+        "close_profit_last_tick",
+        "close_profit_rollback_unopened_fifo", "close_profit_rollback_unopened_lifo",
+        "profit_usd_total_last_tick",
+        "profit_usd_total_rollback_unopened_fifo", "profit_usd_total_rollback_unopened_lifo",
         "max_seen_position_qty", "final_a_position_qty", "final_b_position_qty"
     ]
 
