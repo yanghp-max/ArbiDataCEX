@@ -1,0 +1,4 @@
+symbol,trade_index,action,direction,timestamp,datetime,a_price_used,b_price_used,qty,a_pos_before,b_pos_before,a_pos_after,b_pos_after,gross_pnl,fee_cost,net_pnl,cum_pnl,z_ab,z_ba,spread_ab,spread_ba,spread_ab_adj,spread_ba_adj,close_mode
+BTCUSDT,101,OPEN,-a+b,1779163205123,2026-05-22 20:00:05.123,68520.5,68505.2,0.001459,-0.004377,0.004377,-0.005836,0.005836,0.02232,0.07999,-0.05767,12.3845,3.42,1.08,0.041,0.015,-0.039,-0.065,
+BTCUSDT,102,FORCE_CLOSE,-a+b,1779166799000,2026-05-22 20:59:59.000,68540.8,68548.9,0.005836,-0.005836,0.005836,0.0,0.0,0.04727,0.31977,-0.27250,12.1120,,,,,,,twap
+BTCUSDT,103,FORCE_CLOSE,-a+b,1779166799000,2026-05-22 20:59:59.000,68535.3,68560.1,0.005836,-0.005836,0.005836,0.0,0.0,0.14480,0.31980,-0.17500,12.2095,,,,,,,avg_since_open

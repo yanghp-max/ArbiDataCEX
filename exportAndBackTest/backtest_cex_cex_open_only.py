@@ -27,6 +27,7 @@ class BacktestConfig:
     funding_min: float
     fee_bps_total: float
     slippage_bps_total: float
+    close_twap_min: int
     symbols: Optional[List[str]]
     z_open_list: List[float]
     z_open_ab_list: List[float]
@@ -71,6 +72,12 @@ def parse_args() -> BacktestConfig:
     parser.add_argument("--fee_bps_total", type=float, default=4.0)
     parser.add_argument("--slippage_bps_total", type=float, default=4.0)
     parser.add_argument(
+        "--close_twap_min",
+        type=int,
+        default=5,
+        help="TWAP 强平窗口（分钟），默认 5 分钟。"
+    )
+    parser.add_argument(
         "--symbols",
         default="",
         help="Comma separated symbols, e.g. BTCUSDT,ETHUSDT. Empty means all csv files."
@@ -101,6 +108,7 @@ def parse_args() -> BacktestConfig:
         funding_min=args.funding_min,
         fee_bps_total=args.fee_bps_total,
         slippage_bps_total=args.slippage_bps_total,
+        close_twap_min=args.close_twap_min,
         symbols=symbols,
         z_open_list=z_open_list,
         z_open_ab_list=z_open_ab_list,
@@ -220,6 +228,7 @@ def simulate_open_only(
     max_seen_position_qty = 0.0
     
     last_order_ts = -10**18
+    first_open_ts: Optional[int] = None
     trade_id = 0
     orders_side_ab = 0  
     orders_side_ba = 0  
@@ -239,6 +248,18 @@ def simulate_open_only(
 
     def normalize_qty(qty: float) -> float:
         return float(np.round(qty, 12))
+
+    def calc_close_profit(close_qty: float, a_px_close: float, b_px_close: float, side: str) -> float:
+        if close_qty <= 1e-12:
+            return 0.0
+        if not np.isfinite(a_px_close) or not np.isfinite(b_px_close) or a_px_close <= 0 or b_px_close <= 0:
+            return 0.0
+        if side == "-a+b":
+            gross_close = close_qty * b_px_close - close_qty * a_px_close
+        else:
+            gross_close = close_qty * a_px_close - close_qty * b_px_close
+        close_fee = (abs(close_qty * a_px_close) * fee_rate_per_leg) + (abs(close_qty * b_px_close) * fee_rate_per_leg)
+        return gross_close - close_fee
 
     def interval_for_leg(pos: float, delta_sign: int, limit: float) -> Tuple[float, float]:
         if delta_sign == 1:
@@ -359,42 +380,74 @@ def simulate_open_only(
             b_pos_qty -= qty
 
         max_seen_position_qty = max(max_seen_position_qty, abs(a_pos_qty), abs(b_pos_qty))
+        if first_open_ts is None:
+            first_open_ts = ts
         trade_id += 1
         last_order_ts = ts
         profit_total += trade_profit
         open_profit_total += trade_profit
         total_adj_spread_pct += adj_spread
 
-    # 回测结束后按最后时刻价差将净仓一次性平掉
-    close_profit_total = 0.0
+    # 回测结束后输出两种强平口径：
+    # 1) 最后 close_twap_min 分钟 TWAP
+    # 2) 自首次开仓以来均值(avg since open)
+    close_profit_twap = 0.0
+    close_profit_avg_since_open = 0.0
     if len(df) > 0 and (abs(a_pos_qty) > 1e-12 or abs(b_pos_qty) > 1e-12):
         last = df.iloc[-1]
-        last_a_bid = float(last[a_bid_col])
-        last_a_ask = float(last[a_ask_col])
-        last_b_bid = float(last[b_bid_col])
-        last_b_ask = float(last[b_ask_col])
         close_qty = min(abs(a_pos_qty), abs(b_pos_qty))
         if close_qty > 1e-12:
+            end_ts = int(last["timestamp"])
+            twap_start_ts = end_ts - int(cfg.close_twap_min) * 60 * 1000
+            twap_df = df[df["timestamp"] >= twap_start_ts]
+            if len(twap_df) == 0:
+                twap_df = df.tail(1)
+            since_open_df = df[df["timestamp"] >= first_open_ts] if first_open_ts is not None else df.tail(1)
+            if len(since_open_df) == 0:
+                since_open_df = df.tail(1)
+
             if a_pos_qty < 0:
                 # 关闭 -a+b：A 回补买入(ask)，B 平多卖出(bid)
-                if np.isfinite(last_a_ask) and np.isfinite(last_b_bid) and last_a_ask > 0 and last_b_bid > 0:
-                    a_close_leg = close_qty * last_a_ask
-                    b_close_leg = close_qty * last_b_bid
-                    gross_close = b_close_leg - a_close_leg
-                    close_fee = abs(a_close_leg) * fee_rate_per_leg + abs(b_close_leg) * fee_rate_per_leg
-                    close_profit_total = gross_close - close_fee
+                a_twap = pd.to_numeric(twap_df[a_ask_col], errors="coerce")
+                b_twap = pd.to_numeric(twap_df[b_bid_col], errors="coerce")
+                a_twap = a_twap[np.isfinite(a_twap) & (a_twap > 0)]
+                b_twap = b_twap[np.isfinite(b_twap) & (b_twap > 0)]
+                if len(a_twap) > 0 and len(b_twap) > 0:
+                    close_profit_twap = calc_close_profit(close_qty, float(a_twap.mean()), float(b_twap.mean()), "-a+b")
+
+                a_avg = pd.to_numeric(since_open_df[a_ask_col], errors="coerce")
+                b_avg = pd.to_numeric(since_open_df[b_bid_col], errors="coerce")
+                a_avg = a_avg[np.isfinite(a_avg) & (a_avg > 0)]
+                b_avg = b_avg[np.isfinite(b_avg) & (b_avg > 0)]
+                if len(a_avg) > 0 and len(b_avg) > 0:
+                    close_profit_avg_since_open = calc_close_profit(
+                        close_qty, float(a_avg.mean()), float(b_avg.mean()), "-a+b"
+                    )
             elif a_pos_qty > 0:
                 # 关闭 +a-b：A 平多卖出(bid)，B 回补买入(ask)
-                if np.isfinite(last_a_bid) and np.isfinite(last_b_ask) and last_a_bid > 0 and last_b_ask > 0:
-                    a_close_leg = close_qty * last_a_bid
-                    b_close_leg = close_qty * last_b_ask
-                    gross_close = a_close_leg - b_close_leg
-                    close_fee = abs(a_close_leg) * fee_rate_per_leg + abs(b_close_leg) * fee_rate_per_leg
-                    close_profit_total = gross_close - close_fee
+                a_twap = pd.to_numeric(twap_df[a_bid_col], errors="coerce")
+                b_twap = pd.to_numeric(twap_df[b_ask_col], errors="coerce")
+                a_twap = a_twap[np.isfinite(a_twap) & (a_twap > 0)]
+                b_twap = b_twap[np.isfinite(b_twap) & (b_twap > 0)]
+                if len(a_twap) > 0 and len(b_twap) > 0:
+                    close_profit_twap = calc_close_profit(close_qty, float(a_twap.mean()), float(b_twap.mean()), "+a-b")
 
-        profit_total += close_profit_total
+                a_avg = pd.to_numeric(since_open_df[a_bid_col], errors="coerce")
+                b_avg = pd.to_numeric(since_open_df[b_ask_col], errors="coerce")
+                a_avg = a_avg[np.isfinite(a_avg) & (a_avg > 0)]
+                b_avg = b_avg[np.isfinite(b_avg) & (b_avg > 0)]
+                if len(a_avg) > 0 and len(b_avg) > 0:
+                    close_profit_avg_since_open = calc_close_profit(
+                        close_qty, float(a_avg.mean()), float(b_avg.mean()), "+a-b"
+                    )
+
+        # 主汇总字段默认使用 TWAP 口径
+        profit_total += close_profit_twap
         a_pos_qty = 0.0
         b_pos_qty = 0.0
+
+    profit_total_twap = open_profit_total + close_profit_twap
+    profit_total_avg_since_open = open_profit_total + close_profit_avg_since_open
 
     summary = {
         "symbol": symbol,
@@ -407,8 +460,12 @@ def simulate_open_only(
         "max_seen_position_qty": max_seen_position_qty,
         "max_orders_capacity": int(cfg.max_position_usd // cfg.order_usd),
         "open_profit_usd_total": open_profit_total,
-        "close_profit_usd_total": close_profit_total,
-        "profit_usd_total": profit_total,
+        "close_profit_usd_total": close_profit_twap,
+        "profit_usd_total": profit_total_twap,
+        "close_profit_twap": close_profit_twap,
+        "close_profit_avg_since_open": close_profit_avg_since_open,
+        "profit_usd_total_twap": profit_total_twap,
+        "profit_usd_total_avg_since_open": profit_total_avg_since_open,
         "avg_adj_spread_pct": float(total_adj_spread_pct / trade_id) if trade_id > 0 else 0.0,
         "blocked_by_funding": blocked_by_funding,
         "blocked_by_rate_limit": blocked_by_rate_limit,
@@ -509,7 +566,10 @@ def main():
     cols_order = [
         "symbol", "window_min", "z_open_ab", "z_open_ba", "orders",
         "orders_side_ab", "orders_side_ba", 
-        "open_profit_usd_total", "close_profit_usd_total", "profit_usd_total",
+        "open_profit_usd_total",
+        "close_profit_usd_total", "profit_usd_total",
+        "close_profit_twap", "close_profit_avg_since_open",
+        "profit_usd_total_twap", "profit_usd_total_avg_since_open",
         "max_seen_position_qty", "final_a_position_qty", "final_b_position_qty"
     ]
 
