@@ -19,7 +19,6 @@ class BacktestConfig:
     data_dir: str
     output_dir: str
     window_min: int
-    min_periods: int
     z_open: float
     order_usd: float
     max_position_usd: float
@@ -42,7 +41,6 @@ def parse_args() -> BacktestConfig:
     parser.add_argument("--output_dir", default="./data/output_open_only")
     
     parser.add_argument("--window_min", type=int, default=30)
-    parser.add_argument("--min_periods", type=int, default=30)
     parser.add_argument("--z_open", type=float, default=2.0)
     parser.add_argument(
         "--z_open_list",
@@ -93,7 +91,6 @@ def parse_args() -> BacktestConfig:
         data_dir=args.data_dir,
         output_dir=args.output_dir,
         window_min=args.window_min,
-        min_periods=args.min_periods,
         z_open=args.z_open,
         order_usd=args.order_usd,
         max_position_usd=args.max_position_usd,
@@ -180,16 +177,16 @@ def compute_signal_features(df: pd.DataFrame, cfg: BacktestConfig, current_windo
     out = out.set_index("dt")
 
     # 信号统计使用原始价差（不扣成本）
-    out["median_ab"] = out["spread_ab"].rolling(win, min_periods=cfg.min_periods).median()
-    out["median_ba"] = out["spread_ba"].rolling(win, min_periods=cfg.min_periods).median()
+    out["median_ab"] = out["spread_ab"].rolling(win, min_periods=1).median()
+    out["median_ba"] = out["spread_ba"].rolling(win, min_periods=1).median()
 
     out["mad_ab"] = (
         (out["spread_ab"] - out["median_ab"]).abs()
-        .rolling(win, min_periods=cfg.min_periods).median()
+        .rolling(win, min_periods=1).median()
     )
     out["mad_ba"] = (
         (out["spread_ba"] - out["median_ba"]).abs()
-        .rolling(win, min_periods=cfg.min_periods).median()
+        .rolling(win, min_periods=1).median()
     )
 
     out["mad_ab"] = out["mad_ab"].replace(0, np.nan)
@@ -205,6 +202,7 @@ def simulate_open_only(
     df: pd.DataFrame,
     symbol: str,
     cfg: BacktestConfig,
+    current_window_min: int,
     current_z_open_ab: float,
     current_z_open_ba: float,
 ) -> Dict:
@@ -299,9 +297,19 @@ def simulate_open_only(
             return 0.0
         return max(0.0, high)
 
+    if len(df) > 0:
+        first_ts = int(df.iloc[0]["timestamp"])
+    else:
+        first_ts = 0
+    warmup_end_ts = first_ts + int(current_window_min) * 60 * 1000
+
     for _, row in df.iterrows():
         ts = int(row["timestamp"])
         evaluated_points += 1
+
+        # 严格要求累计满当前窗口分钟数后才允许进入交易判断
+        if ts < warmup_end_ts:
+            continue
 
         if pd.isna(row["z_ab"]) or pd.isna(row["z_ba"]):
             continue
@@ -543,6 +551,7 @@ def process_single_file(file_info: tuple) -> list:
                         features,
                         symbol,
                         cfg,
+                        current_window_min=window_min_value,
                         current_z_open_ab=z_open_ab_value,
                         current_z_open_ba=z_open_ba_value,
                     )
