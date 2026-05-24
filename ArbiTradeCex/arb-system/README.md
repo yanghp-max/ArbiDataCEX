@@ -17,16 +17,18 @@ CEX-CEX 套利核心。结构对齐 ArbiTrade-1/arb-system。
 
 ```bash
 npm install
-npm run start:dry
-npm run start:dry -- --symbols BTCUSDT,ETHUSDT
-npm run start:live -- --symbols BTCUSDT
+npm run dry    # 虚拟盘（模拟下单，默认）
+npm run live   # 实盘（真实下单）
 ```
+
+交易币种从配置文件自动读取，无需命令行指定：
+- `config/symbols_config.json` → `selected_symbols`（币种白名单 + 流动性）
+- `config/min-order-qty.json` → 精度配置
+- 启动时取两者交集
 
 启动后打开 **http://localhost:3456**（端口见 `config.json` → `dashboard.port`）查看实时卡片、收集进度与成交日志。
 
-交易币种由 `loadConfig()` 自动解析：`symbols_config.json` 的 `selected_symbols` 与其中 `symbols` 元数据、`min-order-qty.json` 的精度配置取交集。
-
-**按共有币种批量生成**（推荐，与 collector 相同排序规则）：
+**按共有币种批量生成配置**（推荐，与 collector 相同排序规则）：
 
 ```bash
 npm run build:symbols-min-qty           # 全部共有币种
@@ -35,11 +37,10 @@ npm run build:symbols-min-qty -- --top 52   # 仅 top 52
 
 输出 `config/symbols_config.json` + `config/min-order-qty.json`。
 
-**仅更新 config.json 里已有 symbol 的精度**：
+**仅刷新已有币种的精度**（同样从配置文件读取币种列表）：
 
 ```bash
 npm run fetch:min-qty
-# 或 npm run fetch:min-qty -- --symbols SOLUSDT
 ```
 
 逻辑文档：`../../exportAndBackTest/cex_cex_arbitrage_demo_logic.md`

@@ -5,9 +5,9 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "start": "node strategies/cex-cex-multi-strategy.js",
-    "start:dry": "node strategies/cex-cex-multi-strategy.js",
-    "start:live": "node strategies/cex-cex-multi-strategy.js --live",
+    "dry": "node strategies/cex-cex-multi-strategy.js --dry",
+    "live": "node strategies/cex-cex-multi-strategy.js --live",
+    "start": "npm run dry",
     "fetch:min-qty": "node scripts/fetch-min-order-qty.js",
     "build:symbols-min-qty": "node scripts/build-common-min-order-qty.js"
   },

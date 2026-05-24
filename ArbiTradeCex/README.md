@@ -12,8 +12,8 @@ cp .env.template .env
 # 编辑 .env 填入 API Key
 
 npm install
-npm run start:dry    # 模拟，不下单
-npm run start:live   # 实盘（谨慎）
+npm run dry    # 虚拟盘（模拟下单）
+npm run live   # 实盘（谨慎）
 ```
 
 ## 目录
