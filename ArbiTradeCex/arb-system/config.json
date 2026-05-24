@@ -1,6 +1,6 @@
 {
   "strategy": {
-    "symbols": ["AIGENSYNSDT", "SKYAIUSDT"，"UBUSDT"],
+    "symbols": ["AIGENSYNSDT", "SKYAIUSDT", "UBUSDT"],
     "windowSeconds": 3600,
     "minDataPoints": 50,
     "zOpenAb": 2.0,
