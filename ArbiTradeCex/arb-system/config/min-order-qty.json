@@ -4,7 +4,7 @@
   "totalCommonSymbols": 3,
   "selectedSymbolsCount": 3,
   "selectedSymbols": [
-    "AIGENSYNSDT",
+    "AIGENSYNUSDT",
     "SKYAIUSDT",
     "UBUSDT"
   ],
@@ -17,9 +17,9 @@
     "gate24h": "https://api.gateio.ws/api/v4/futures/usdt/tickers"
   },
   "symbols": {
-    "AIGENSYNSDT": {
+    "AIGENSYNUSDT": {
       "binance": {
-        "symbol": "AIGENSYNSDT",
+        "symbol": "AIGENSYNUSDT",
         "minQty": 1,
         "stepSize": 1,
         "priceRef": {
