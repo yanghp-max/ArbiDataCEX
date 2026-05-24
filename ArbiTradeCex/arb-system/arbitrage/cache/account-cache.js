@@ -6,6 +6,17 @@ export class AccountCache {
     this.balanceCache = new Map();
     this.positionCache = new Map();
     this.reliable = false;
+    this.mockMode = false;
+  }
+
+  seedMock({ balanceUsdt = 10000 } = {}) {
+    const now = Date.now();
+    for (const exchange of ['binance', 'gate']) {
+      this.setBalance(exchange, { total: balanceUsdt, available: balanceUsdt, updatedAtMs: now });
+    }
+    this.positionCache.clear();
+    this.reliable = true;
+    this.mockMode = true;
   }
 
   setBalance(exchange, data) {

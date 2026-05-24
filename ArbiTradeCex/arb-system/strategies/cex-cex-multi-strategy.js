@@ -22,10 +22,18 @@ async function main() {
   const config = loadConfig();
   const tradingEnabled = args.live || process.env.TRADING_ENABLED === 'true';
 
+  if (tradingEnabled && config.strategy.useMockAccount) {
+    throw new Error('useMockAccount is dry-run only; disable it before --live');
+  }
+
   if (tradingEnabled) {
     console.warn('[strategy] LIVE trading enabled');
   } else {
     console.log('[strategy] dry-run (simulated orders). Use --live for real orders.');
+    if (config.strategy.useMockAccount) {
+      const bal = Number(config.strategy.mockBalanceUsdt) || 10000;
+      console.log(`[strategy] mock account enabled: ${bal} USDT per exchange (no API balance needed)`);
+    }
   }
 
   const mgr = await startCexCexArbitrage({

@@ -20,14 +20,25 @@ export class SharedResources {
     this.resultReporter = new ResultReporter();
     this.eventBus = eventBus;
     this.inFlightCount = 0;
+    this.useMockAccount = false;
   }
 
   async init() {
     this.cexManager = await CexManager.createDefault();
     const binance = this.cexManager.get('binance');
     const gate = this.cexManager.get('gate');
-    await this.accountCache.refreshFromAdapters(binance, gate);
-    this.accountCache.minAvailableUsdt = this.config.strategy.minAvailableUsdt;
+    const strat = this.config.strategy;
+    this.useMockAccount = Boolean(strat.useMockAccount) && !this.tradingEnabled;
+
+    if (this.useMockAccount) {
+      const balanceUsdt = Number(strat.mockBalanceUsdt) || 10000;
+      this.accountCache.seedMock({ balanceUsdt });
+      console.log(`[SharedResources] mock account: ${balanceUsdt} USDT per exchange (skip balance REST)`);
+    } else {
+      await this.accountCache.refreshFromAdapters(binance, gate);
+    }
+
+    this.accountCache.minAvailableUsdt = strat.minAvailableUsdt;
     this.reservationManager = new ReservationManager({
       accountCache: this.accountCache,
       ttlMs: this.config.strategy.reservationTtlMs
