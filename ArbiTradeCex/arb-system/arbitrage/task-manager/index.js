@@ -36,19 +36,23 @@ export class TaskManager {
     const gate = this.sharedResources.getGate();
     const adapterSymbols = strat.symbols.map((s) => binance.toAdapterSymbol(s));
 
+    const onQuoteUpdate = (symbol) => {
+      this.task.onTick(symbol).catch((e) => console.error('[tick]', symbol, e.message));
+    };
+
     binance.on('ticker', (t) => {
-      this.sharedResources.quoteAggregator.onTicker('binance', {
-        ...t,
-        symbol: t.symbol.replace('-', '')
-      });
+      const symbol = t.symbol.replace('-', '');
+      this.sharedResources.quoteAggregator.onTicker('binance', { ...t, symbol });
+      onQuoteUpdate(symbol);
     });
     gate.on('ticker', (t) => {
       this.sharedResources.quoteAggregator.onTicker('gate', t);
+      onQuoteUpdate(t.symbol.replace('-', ''));
     });
 
     await Promise.all([
       binance.subscribe(adapterSymbols, ['bookTicker']),
-      gate.subscribe(strat.symbols)
+      gate.subscribe(adapterSymbols, ['book_ticker'])
     ]);
 
     for (const sym of strat.symbols) {

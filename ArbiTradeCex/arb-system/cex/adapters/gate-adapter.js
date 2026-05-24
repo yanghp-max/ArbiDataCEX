@@ -10,12 +10,15 @@ export class GateAdapter extends BaseAdapter {
   constructor(config = {}) {
     super({
       name: 'Gate',
-      wsUrl: process.env.GATE_FX_WS_URL || 'wss://fx-ws.gateio.ws/v4/ws/usdt',
+      wsUrl: process.env.GATE_FX_WS_URL
+        || process.env.GATE_WS_URL
+        || 'wss://fx-ws.gateio.ws/v4/ws/usdt',
       restUrl: process.env.GATE_REST_URL || 'https://api.gateio.ws/api/v4',
       ...config
     });
     this.ws = null;
     this.subscribed = [];
+    this.subscribedChannels = ['book_ticker'];
   }
 
   async connect() {
@@ -31,8 +34,8 @@ export class GateAdapter extends BaseAdapter {
     await new Promise((resolve, reject) => {
       this.ws = new WebSocket(this.config.wsUrl);
       this.ws.on('open', async () => {
-        if (this.subscribed.length) {
-          await this.subscribe(this.subscribed);
+        if (this.subscribed.length > 0) {
+          await this.subscribe(this.subscribed, this.subscribedChannels);
         }
         resolve();
       });
@@ -45,16 +48,32 @@ export class GateAdapter extends BaseAdapter {
     });
   }
 
-  async subscribe(symbols) {
+  #toGateSymbols(symbols) {
+    return symbols.map((s) => {
+      const normalized = this.normalizeSymbol(s);
+      if (normalized.includes('_')) return normalized;
+      if (normalized.endsWith('USDT')) {
+        return `${normalized.slice(0, -4)}_USDT`;
+      }
+      return String(s).replace('-', '_');
+    });
+  }
+
+  async subscribe(symbols, channels = ['book_ticker']) {
     this.subscribed = [...symbols];
-    if (!this.ws) return;
-    const contracts = symbols.map((s) => this.toGateContract(s));
-    this.ws.send(JSON.stringify({
-      time: Math.floor(Date.now() / 1000),
-      channel: 'futures.book_ticker',
-      event: 'subscribe',
-      payload: contracts
-    }));
+    this.subscribedChannels = [...channels];
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+
+    const contracts = this.#toGateSymbols(symbols);
+    for (const ch of channels) {
+      this.ws.send(JSON.stringify({
+        time: Math.floor(Date.now() / 1000),
+        channel: `futures.${ch}`,
+        event: 'subscribe',
+        payload: contracts
+      }));
+      await new Promise((r) => setTimeout(r, 200));
+    }
   }
 
   #onMessage(raw) {
@@ -62,13 +81,18 @@ export class GateAdapter extends BaseAdapter {
       const msg = JSON.parse(raw.toString());
       if (msg.channel !== 'futures.book_ticker' || msg.event !== 'update') return;
       const r = msg.result || {};
-      const sym = String(r.s || r.contract || '').replace('_', '');
-      if (!sym) return;
+      const contract = String(r.s || r.contract || '');
+      if (!contract) return;
+      const bid = Number(r.b);
+      const ask = Number(r.a);
+      if (!(Number.isFinite(bid) && bid > 0 && Number.isFinite(ask) && ask > 0)) return;
+
+      const sym = contract.replaceAll('_', '');
       this.emit('ticker', {
         symbol: this.normalizeSymbol(sym),
-        bid: Number(r.b),
-        ask: Number(r.a),
-        timestamp: (r.t || Date.now() / 1000) * (r.t > 1e12 ? 1 : 1000),
+        bid,
+        ask,
+        timestamp: Number(r.t) > 1e12 ? Number(r.t) : Number(r.t) * 1000,
         localTimestamp: Date.now(),
         source: 'gate'
       });
@@ -131,7 +155,7 @@ export class GateAdapter extends BaseAdapter {
     return (rows || [])
       .filter((r) => Math.abs(Number(r.size)) > 0)
       .map((r) => {
-        const sym = String(r.contract || '').replace('_', '');
+        const sym = String(r.contract || '').replaceAll('_', '');
         const size = Number(r.size);
         const multiplier = Number(r.quanto_multiplier || 1);
         return {

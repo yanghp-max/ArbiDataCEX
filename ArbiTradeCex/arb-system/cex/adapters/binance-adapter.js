@@ -17,6 +17,7 @@ export class BinanceAdapter extends BaseAdapter {
     });
     this.ws = null;
     this.subscriptionQueue = [];
+    this.activeSubscriptions = new Set();
     this.processing = false;
   }
 
@@ -32,7 +33,13 @@ export class BinanceAdapter extends BaseAdapter {
     }
     await new Promise((resolve, reject) => {
       this.ws = new WebSocket(this.config.wsUrl);
-      this.ws.on('open', () => resolve());
+      this.ws.on('open', async () => {
+        if (this.activeSubscriptions.size > 0) {
+          this.subscriptionQueue = [...this.activeSubscriptions];
+          await this.#processQueue();
+        }
+        resolve();
+      });
       this.ws.on('message', (raw) => this.#onMessage(raw));
       this.ws.on('close', () => {
         this.connected = false;
@@ -53,28 +60,45 @@ export class BinanceAdapter extends BaseAdapter {
   }
 
   async #processQueue() {
-    if (this.processing || !this.ws) return;
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    if (this.processing) return;
     this.processing = true;
-    while (this.subscriptionQueue.length) {
-      const batch = this.subscriptionQueue.splice(0, 10);
-      this.ws.send(JSON.stringify({ method: 'SUBSCRIBE', params: batch, id: Date.now() }));
-      await new Promise((r) => setTimeout(r, 300));
+    try {
+      while (this.subscriptionQueue.length > 0) {
+        const batch = this.subscriptionQueue.splice(0, 10);
+        this.ws.send(JSON.stringify({ method: 'SUBSCRIBE', params: batch, id: Date.now() }));
+        for (const stream of batch) this.activeSubscriptions.add(stream);
+        await new Promise((r) => setTimeout(r, 300));
+      }
+    } finally {
+      this.processing = false;
+      if (this.subscriptionQueue.length > 0) {
+        await this.#processQueue();
+      }
     }
-    this.processing = false;
+  }
+
+  #parseTicker(msg) {
+    const payload = msg?.data && (msg.stream || msg.data?.s) ? msg.data : msg;
+    if (!(payload?.s && payload.b != null && payload.a != null)) return null;
+    const bid = Number(payload.b);
+    const ask = Number(payload.a);
+    if (!(Number.isFinite(bid) && bid > 0 && Number.isFinite(ask) && ask > 0)) return null;
+    return {
+      symbol: this.normalizeSymbol(payload.s),
+      bid,
+      ask,
+      timestamp: payload.E || Date.now(),
+      localTimestamp: Date.now(),
+      source: 'binance'
+    };
   }
 
   #onMessage(raw) {
     try {
       const msg = JSON.parse(raw.toString());
-      if (!(msg.s && msg.b != null && msg.a != null)) return;
-      this.emit('ticker', {
-        symbol: this.normalizeSymbol(msg.s),
-        bid: Number(msg.b),
-        ask: Number(msg.a),
-        timestamp: msg.E || Date.now(),
-        localTimestamp: Date.now(),
-        source: 'binance'
-      });
+      const ticker = this.#parseTicker(msg);
+      if (ticker) this.emit('ticker', ticker);
     } catch {
       // ignore
     }
