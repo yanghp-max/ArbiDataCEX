@@ -13,7 +13,7 @@ defineProps({
   <header class="header">
     <div>
       <h1>ArbiTradeCex</h1>
-      <p class="subtitle">CEX-CEX 实时监控 · Binance / Gate</p>
+      <p class="subtitle">CEX-CEX 实时监控 · Binance / Gate · dashboard v3</p>
     </div>
     <div class="badges">
       <span class="badge" :class="connected ? 'ok' : 'err'">{{ connected ? 'WS 已连接' : 'WS 断开' }}</span>

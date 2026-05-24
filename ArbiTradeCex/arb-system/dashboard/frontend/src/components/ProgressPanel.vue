@@ -1,12 +1,27 @@
 <script setup>
 defineProps({
   progress: { type: Object, required: true },
-  formatDuration: { type: Function, required: true }
+  pnlSummary: { type: Object, required: true },
+  formatDuration: { type: Function, required: true },
+  formatPnl: { type: Function, required: true },
+  pnlClass: { type: Function, required: true }
 });
 </script>
 
 <template>
   <section class="progress-panel">
+    <div class="pnl-banner">
+      <div class="pnl-banner-main">
+        <span class="pnl-banner-label">累计 PnL</span>
+        <strong class="pnl-banner-value" :class="pnlClass(pnlSummary.totalPnl)">
+          {{ formatPnl(pnlSummary.totalPnl) }} USDT
+        </strong>
+      </div>
+      <div class="pnl-banner-meta">
+        {{ pnlSummary.tradeCount }} 笔成交 · 赢 {{ pnlSummary.winCount }} / 亏 {{ pnlSummary.lossCount }}
+      </div>
+    </div>
+
     <div class="progress-head">
       <h2>数据收集进度</h2>
       <span class="progress-meta">

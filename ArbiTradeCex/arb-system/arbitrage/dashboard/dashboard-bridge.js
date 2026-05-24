@@ -1,8 +1,12 @@
 /**
  * Dashboard 状态桥：收集 tick / 进度 / 成交，推送给 WebSocket 客户端
  */
+import fs from 'node:fs/promises';
+import path from 'node:path';
 import { getRootDir } from '../../config/global-config.js';
 import { DashboardServer } from './dashboard-server.js';
+
+const DASHBOARD_MARKER = 'dashboard v3';
 
 export class DashboardBridge {
   constructor(options = {}) {
@@ -77,6 +81,7 @@ export class DashboardBridge {
   async start() {
     if (!this.enabled) return;
     const publicDir = `${getRootDir()}/dashboard/public`;
+    await this.#assertDashboardBuild(publicDir);
     this.server = new DashboardServer({ port: this.port, publicDir });
     this.server.onClientConnect = () => {
       this.server.broadcast({ type: 'snapshot', data: this.state });
@@ -87,6 +92,35 @@ export class DashboardBridge {
 
   async stop() {
     await this.server?.stop();
+  }
+
+  async #assertDashboardBuild(publicDir) {
+    const indexPath = path.join(publicDir, 'index.html');
+    try {
+      const html = await fs.readFile(indexPath, 'utf8');
+      if (!html.includes('/assets/index-') || !html.includes('type="module"')) {
+        throw new Error('dashboard/public is outdated; run: npm run build:dashboard');
+      }
+      if (!(await this.#bundleHasMarker(publicDir))) {
+        console.warn('[Dashboard] stale build detected; run: npm run build:dashboard');
+      }
+    } catch (err) {
+      if (err.code === 'ENOENT') {
+        throw new Error('dashboard/public missing; run: npm run build:dashboard');
+      }
+      throw err;
+    }
+  }
+
+  async #bundleHasMarker(publicDir) {
+    const assetsDir = path.join(publicDir, 'assets');
+    const files = await fs.readdir(assetsDir).catch(() => []);
+    for (const file of files) {
+      if (!file.endsWith('.js')) continue;
+      const text = await fs.readFile(path.join(assetsDir, file), 'utf8');
+      if (text.includes(DASHBOARD_MARKER) || text.includes('pnl-banner')) return true;
+    }
+    return false;
   }
 
   #pushLog(entry) {

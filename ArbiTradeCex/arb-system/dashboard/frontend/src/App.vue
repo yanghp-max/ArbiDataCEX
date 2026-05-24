@@ -38,7 +38,13 @@ const {
     :pnl-class="pnlClass"
   />
 
-  <ProgressPanel :progress="state.progress" :format-duration="formatDuration" />
+  <ProgressPanel
+    :progress="state.progress"
+    :pnl-summary="pnlSummary"
+    :format-duration="formatDuration"
+    :format-pnl="formatPnl"
+    :pnl-class="pnlClass"
+  />
 
   <section class="cards-grid">
     <SymbolCard

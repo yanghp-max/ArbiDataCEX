@@ -110,6 +110,40 @@ body {
 .pnl-symbol-row strong.neg { color: var(--err); }
 .pnl-symbol-row strong.flat { color: var(--muted); }
 
+.pnl-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #111820;
+}
+.pnl-banner-main {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.pnl-banner-label {
+  color: var(--muted);
+  font-size: 13px;
+}
+.pnl-banner-value {
+  font-size: 28px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.pnl-banner-value.pos { color: var(--ok); }
+.pnl-banner-value.neg { color: var(--err); }
+.pnl-banner-value.flat { color: var(--text); }
+.pnl-banner-meta {
+  color: var(--muted);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
 .progress-panel,
 .log-panel {
   margin: 16px 24px;
