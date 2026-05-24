@@ -1,39 +1,107 @@
 {
-  "generatedAt": "2026-05-23T00:00:00.000Z",
-  "note": "Run npm run fetch:min-qty to refresh from exchange APIs",
+  "generatedAt": "2026-05-24T15:17:14.066Z",
+  "sortRule": "liquidity_score_desc_then_symbol_asc",
+  "totalCommonSymbols": 3,
+  "selectedSymbolsCount": 3,
+  "selectedSymbols": [
+    "AIGENSYNSDT",
+    "SKYAIUSDT",
+    "UBUSDT"
+  ],
+  "source": {
+    "binance": "https://fapi.binance.com/fapi/v1/exchangeInfo",
+    "gate": "https://api.gateio.ws/api/v4/futures/usdt/contracts",
+    "binanceTicker": "https://fapi.binance.com/fapi/v1/ticker/bookTicker",
+    "gateTicker": "https://api.gateio.ws/api/v4/futures/usdt/tickers",
+    "binance24h": "https://fapi.binance.com/fapi/v1/ticker/24hr",
+    "gate24h": "https://api.gateio.ws/api/v4/futures/usdt/tickers"
+  },
   "symbols": {
-    "BTCUSDT": {
+    "AIGENSYNSDT": {
       "binance": {
-        "symbol": "BTCUSDT",
-        "minQty": 0.001,
-        "stepSize": 0.001,
-        "priceRef": null
+        "symbol": "AIGENSYNSDT",
+        "minQty": 1,
+        "stepSize": 1,
+        "priceRef": {
+          "collectedAt": "2026-05-24T15:17:14.062Z",
+          "bid": 0.03456,
+          "ask": 0.03457,
+          "mid": 0.034565
+        }
       },
       "gate": {
-        "symbol": "BTC_USDT",
+        "symbol": "AIGENSYN_USDT",
         "minQty": 1,
         "stepSize": 1,
         "quantityUnit": "contract",
-        "quantoMultiplier": 0.0001,
-        "minBaseQty": 0.0001,
-        "priceRef": null
+        "enableDecimal": false,
+        "quantoMultiplier": 100,
+        "minBaseQty": 100,
+        "priceRef": {
+          "collectedAt": "2026-05-24T15:17:14.062Z",
+          "bid": 0.03458,
+          "ask": 0.03462,
+          "mid": 0.0346,
+          "last": 0.03459
+        }
       }
     },
-    "ETHUSDT": {
+    "SKYAIUSDT": {
       "binance": {
-        "symbol": "ETHUSDT",
-        "minQty": 0.001,
-        "stepSize": 0.001,
-        "priceRef": null
+        "symbol": "SKYAIUSDT",
+        "minQty": 1,
+        "stepSize": 1,
+        "priceRef": {
+          "collectedAt": "2026-05-24T15:17:14.062Z",
+          "bid": 0.33651,
+          "ask": 0.33652,
+          "mid": 0.336515
+        }
       },
       "gate": {
-        "symbol": "ETH_USDT",
+        "symbol": "SKYAI_USDT",
         "minQty": 1,
         "stepSize": 1,
         "quantityUnit": "contract",
-        "quantoMultiplier": 0.01,
-        "minBaseQty": 0.01,
-        "priceRef": null
+        "enableDecimal": false,
+        "quantoMultiplier": 10,
+        "minBaseQty": 10,
+        "priceRef": {
+          "collectedAt": "2026-05-24T15:17:14.062Z",
+          "bid": 0.33617,
+          "ask": 0.33633,
+          "mid": 0.33625000000000005,
+          "last": 0.33618
+        }
+      }
+    },
+    "UBUSDT": {
+      "binance": {
+        "symbol": "UBUSDT",
+        "minQty": 1,
+        "stepSize": 1,
+        "priceRef": {
+          "collectedAt": "2026-05-24T15:17:14.062Z",
+          "bid": 0.15437,
+          "ask": 0.15439,
+          "mid": 0.15438000000000002
+        }
+      },
+      "gate": {
+        "symbol": "UB_USDT",
+        "minQty": 1,
+        "stepSize": 1,
+        "quantityUnit": "base",
+        "enableDecimal": true,
+        "quantoMultiplier": 1000,
+        "minBaseQty": 1,
+        "priceRef": {
+          "collectedAt": "2026-05-24T15:17:14.062Z",
+          "bid": 0.15437,
+          "ask": 0.15441,
+          "mid": 0.15439,
+          "last": 0.15421
+        }
       }
     }
   }
