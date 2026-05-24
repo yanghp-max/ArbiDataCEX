@@ -24,7 +24,11 @@ export class DashboardBridge {
       },
       symbols: {},
       trades: [],
-      logs: []
+      logs: [],
+      summary: {
+        totalPnl: 0,
+        tradeCount: 0
+      }
     };
 
     for (const sym of this.symbols) {
@@ -151,12 +155,14 @@ export class DashboardBridge {
     if (!this.enabled) return;
     this.state.trades.unshift(tradeRow);
     if (this.state.trades.length > 100) this.state.trades.length = 100;
+    this.state.summary.totalPnl = tradeRow.cumPnl ?? this.state.summary.totalPnl;
+    this.state.summary.tradeCount += 1;
     this.#broadcast();
   }
 
   recordExecutionStatus(payload) {
     if (!this.enabled) return;
-    if (payload.stage === 'TRADE_DONE') return;
+    if (payload.stage === 'TRADE_DONE' || payload.stage === 'FINAL_SKIP') return;
     this.#pushLog({
       level: payload.stage === 'RESERVE_FAILED' ? 'warn' : 'info',
       symbol: payload.symbol,

@@ -17,6 +17,9 @@
         <span class="badge" :class="connected ? 'ok' : 'err'">{{ connected ? 'WS 已连接' : 'WS 断开' }}</span>
         <span class="badge" :class="state.tradingEnabled ? 'warn' : 'muted'">{{ state.tradingEnabled ? 'LIVE' : 'DRY-RUN' }}</span>
         <span v-if="state.useMockAccount" class="badge muted">Mock 余额</span>
+        <span class="badge pnl" :class="(state.summary?.totalPnl ?? 0) >= 0 ? 'ok' : 'err'">
+          总 PnL {{ fmt(state.summary?.totalPnl, 4) }} USDT · {{ state.summary?.tradeCount ?? 0 }} 笔
+        </span>
       </div>
     </header>
 
@@ -97,7 +100,10 @@
     <section class="log-panel">
       <div class="log-head">
         <h2>交易 / 事件日志</h2>
-        <span>{{ state.trades.length }} 笔成交</span>
+        <span>
+          总 PnL {{ fmt(state.summary?.totalPnl, 4) }} USDT ·
+          {{ state.summary?.tradeCount ?? 0 }} 笔成交
+        </span>
       </div>
       <div class="log-list">
         <div v-if="combinedLogs.length === 0" class="log-empty">暂无日志，触发交易后会显示详情</div>

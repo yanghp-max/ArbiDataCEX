@@ -13,7 +13,11 @@ function emptyState() {
     },
     symbols: {},
     trades: [],
-    logs: []
+    logs: [],
+    summary: {
+      totalPnl: 0,
+      tradeCount: 0
+    }
   };
 }
 
@@ -38,7 +42,7 @@ createApp({
         message: `${t.symbol} ${t.direction} · qty ${t.qty} · pnl ${fmt(t.netPnl, 4)} USDT${t.simulated ? ' (sim)' : ''}`,
         detail: t
       }));
-      const others = state.logs || [];
+      const others = (state.logs || []).filter((log) => !String(log.message || '').includes('[FINAL_SKIP]'));
       return [...tradeLogs, ...others]
         .sort((a, b) => b.timestamp - a.timestamp)
         .slice(0, 100);

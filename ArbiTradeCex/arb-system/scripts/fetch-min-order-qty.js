@@ -36,7 +36,9 @@ function parseArgs(argv) {
     args.symbols = loadConfig().strategy.symbols || [];
   }
   if (args.symbols.length === 0) {
-    throw new Error('missing --symbols or config.strategy.symbols in config.json');
+    throw new Error(
+      'missing --symbols; ensure config/symbols_config.json selected_symbols intersects config/min-order-qty.json symbols'
+    );
   }
   return args;
 }

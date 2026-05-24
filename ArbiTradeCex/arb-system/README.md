@@ -24,7 +24,7 @@ npm run start:live -- --symbols BTCUSDT
 
 启动后打开 **http://localhost:3456**（端口见 `config.json` → `dashboard.port`）查看实时卡片、收集进度与成交日志。
 
-最小下单量/精度配置：`config/min-order-qty.json`（与 `config.json` 中 `strategy.symbols` 对应）。
+交易币种由 `loadConfig()` 自动解析：`symbols_config.json` 的 `selected_symbols` 与其中 `symbols` 元数据、`min-order-qty.json` 的精度配置取交集。
 
 **按共有币种批量生成**（推荐，与 collector 相同排序规则）：
 

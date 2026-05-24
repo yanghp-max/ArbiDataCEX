@@ -1,6 +1,5 @@
 {
   "strategy": {
-    "symbols": ["AIGENSYNUSDT", "SKYAIUSDT", "UBUSDT"],
     "windowSeconds": 3600,
     "minDataPoints": 50,
     "zOpenAb": 2.0,
@@ -19,6 +18,7 @@
     "accountCacheMaxAgeMs": 5000,
     "reservationTtlMs": 30000,
     "maxInFlightTrades": 5,
+    "symbolsConfigJson": "config/symbols_config.json",
     "minQtyJson": "config/min-order-qty.json"
   },
   "dashboard": {
