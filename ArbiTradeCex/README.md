@@ -21,6 +21,7 @@ npm run start:live   # 实盘（谨慎）
 ```
 ArbiTradeCex/
   arb-system/           # 主程序（对标 ArbiTrade-1/arb-system）
+    dashboard/public/   # 内置监控页（http://localhost:3456）
     strategies/         # 入口脚本
     arbitrage/          # 任务、执行、缓存、信号
     cex/                # Binance + Gate 适配器

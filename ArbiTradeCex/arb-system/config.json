@@ -21,6 +21,10 @@
     "maxInFlightTrades": 5,
     "minQtyJson": "config/min-order-qty.json"
   },
+  "dashboard": {
+    "enabled": true,
+    "port": 3456
+  },
   "adapters": {
     "A": { "provider": "binance" },
     "B": { "provider": "gate" }

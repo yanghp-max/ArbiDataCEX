@@ -22,6 +22,8 @@ npm run start:dry -- --symbols BTCUSDT,ETHUSDT
 npm run start:live -- --symbols BTCUSDT
 ```
 
+启动后打开 **http://localhost:3456**（端口见 `config.json` → `dashboard.port`）查看实时卡片、收集进度与成交日志。
+
 最小下单量/精度配置：`config/min-order-qty.json`（与 `config.json` 中 `strategy.symbols` 对应）。
 
 **按共有币种批量生成**（推荐，与 collector 相同排序规则）：

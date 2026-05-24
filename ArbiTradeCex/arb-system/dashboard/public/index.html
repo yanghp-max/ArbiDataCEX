@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ArbiTradeCex Monitor</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <div>
+        <h1>ArbiTradeCex</h1>
+        <p class="subtitle">CEX-CEX 实时监控 · Binance / Gate</p>
+      </div>
+      <div class="badges">
+        <span class="badge" :class="connected ? 'ok' : 'err'">{{ connected ? 'WS 已连接' : 'WS 断开' }}</span>
+        <span class="badge" :class="state.tradingEnabled ? 'warn' : 'muted'">{{ state.tradingEnabled ? 'LIVE' : 'DRY-RUN' }}</span>
+        <span v-if="state.useMockAccount" class="badge muted">Mock 余额</span>
+      </div>
+    </header>
+
+    <section class="progress-panel">
+      <div class="progress-head">
+        <h2>数据收集进度</h2>
+        <span class="progress-meta">
+          总体 {{ state.progress.overallPct }}% ·
+          窗口 {{ formatDuration(state.progress.windowSeconds) }} ·
+          最少样本 {{ state.progress.minDataPoints }}
+        </span>
+      </div>
+      <div class="progress-bar">
+        <div class="progress-fill" :style="{ width: state.progress.overallPct + '%' }"></div>
+      </div>
+      <div class="progress-symbols">
+        <div v-for="(p, sym) in state.progress.symbols" :key="sym" class="progress-item">
+          <div class="progress-item-head">
+            <span>{{ sym }}</span>
+            <span>{{ p.collectProgressPct }}%</span>
+          </div>
+          <div class="progress-bar thin">
+            <div class="progress-fill" :style="{ width: p.collectProgressPct + '%' }"></div>
+          </div>
+          <div class="progress-detail">
+            样本 {{ p.samples }}/{{ state.progress.minDataPoints }} ·
+            时间跨度 {{ formatDuration(Math.floor((p.timeSpanMs || 0) / 1000)) }} ·
+            {{ p.windowReady ? '已就绪' : '收集中' }}
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="cards-grid">
+      <article v-for="card in symbolCards" :key="card.symbol" class="symbol-card" :class="card.status">
+        <div class="card-head">
+          <h3>{{ card.symbol }}</h3>
+          <span class="status-tag">{{ statusLabel(card.status) }}</span>
+        </div>
+
+        <div class="exchange-row">
+          <div class="exchange">
+            <div class="exchange-name binance">Binance</div>
+            <div class="quote-line"><span>Bid</span><strong>{{ fmt(card.aBid) }}</strong></div>
+            <div class="quote-line"><span>Ask</span><strong>{{ fmt(card.aAsk) }}</strong></div>
+          </div>
+          <div class="exchange">
+            <div class="exchange-name gate">Gate</div>
+            <div class="quote-line"><span>Bid</span><strong>{{ fmt(card.bBid) }}</strong></div>
+            <div class="quote-line"><span>Ask</span><strong>{{ fmt(card.bAsk) }}</strong></div>
+          </div>
+        </div>
+
+        <div class="spread-block">
+          <div class="spread-row">
+            <span class="spread-label">Spread A→B</span>
+            <strong :class="spreadClass(card.spreadAbAdj)">{{ fmtPct(card.spreadAb) }}</strong>
+            <small>adj {{ fmtPct(card.spreadAbAdj) }}</small>
+          </div>
+          <div class="spread-row">
+            <span class="spread-label">Spread B→A</span>
+            <strong :class="spreadClass(card.spreadBaAdj)">{{ fmtPct(card.spreadBa) }}</strong>
+            <small>adj {{ fmtPct(card.spreadBaAdj) }}</small>
+          </div>
+        </div>
+
+        <div class="z-row" v-if="card.windowReady">
+          <span>zAb {{ fmt(card.zAb, 2) }}</span>
+          <span>zBa {{ fmt(card.zBa, 2) }}</span>
+        </div>
+        <div class="meta-row">
+          <span>age {{ card.priceAgeMs != null ? card.priceAgeMs + 'ms' : '-' }}</span>
+          <span>funding A/B {{ fmt(card.fundingA, 4) }} / {{ fmt(card.fundingB, 4) }}</span>
+        </div>
+      </article>
+    </section>
+
+    <section class="log-panel">
+      <div class="log-head">
+        <h2>交易 / 事件日志</h2>
+        <span>{{ state.trades.length }} 笔成交</span>
+      </div>
+      <div class="log-list">
+        <div v-if="combinedLogs.length === 0" class="log-empty">暂无日志，触发交易后会显示详情</div>
+        <article v-for="log in combinedLogs" :key="log.id" class="log-item" :class="log.level">
+          <div class="log-top">
+            <span class="log-time">{{ formatTime(log.timestamp) }}</span>
+            <span class="log-symbol">{{ log.symbol || '-' }}</span>
+            <span class="log-level">{{ log.level }}</span>
+          </div>
+          <div class="log-message">{{ log.message }}</div>
+          <pre v-if="log.detail" class="log-detail">{{ formatDetail(log.detail) }}</pre>
+        </article>
+      </div>
+    </section>
+  </div>
+
+  <script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

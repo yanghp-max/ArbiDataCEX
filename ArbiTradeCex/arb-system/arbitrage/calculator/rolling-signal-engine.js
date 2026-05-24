@@ -29,7 +29,19 @@ export class RollingSignalEngine {
     const windowReady = timeSpanMs >= this.windowSeconds * 1000 && samples >= this.minDataPoints;
 
     if (!windowReady || samples < 2) {
-      return { windowReady: false, zAb: null, zBa: null, samples };
+      const timeProgressPct = Math.min(100, (timeSpanMs / (this.windowSeconds * 1000)) * 100);
+      const sampleProgressPct = Math.min(100, (samples / this.minDataPoints) * 100);
+      const collectProgressPct = Math.min(timeProgressPct, sampleProgressPct);
+      return {
+        windowReady: false,
+        zAb: null,
+        zBa: null,
+        samples,
+        timeSpanMs,
+        timeProgressPct: Math.round(timeProgressPct * 10) / 10,
+        sampleProgressPct: Math.round(sampleProgressPct * 10) / 10,
+        collectProgressPct: Math.round(collectProgressPct * 10) / 10
+      };
     }
 
     const ab = entries.map((e) => e.spreadAbAdj).filter(Number.isFinite);
@@ -45,7 +57,24 @@ export class RollingSignalEngine {
     if (madAb > 0) zAb = (last.spreadAbAdj - medAb) / madAb;
     if (madBa > 0) zBa = (last.spreadBaAdj - medBa) / madBa;
 
-    return { windowReady: true, zAb, zBa, samples, spreadAbAdj: last.spreadAbAdj, spreadBaAdj: last.spreadBaAdj };
+    const timeProgressPct = Math.min(100, (timeSpanMs / (this.windowSeconds * 1000)) * 100);
+    const sampleProgressPct = Math.min(100, (samples / this.minDataPoints) * 100);
+    const collectProgressPct = windowReady
+      ? 100
+      : Math.min(timeProgressPct, sampleProgressPct);
+
+    return {
+      windowReady: true,
+      zAb,
+      zBa,
+      samples,
+      timeSpanMs,
+      timeProgressPct: Math.round(timeProgressPct * 10) / 10,
+      sampleProgressPct: Math.round(sampleProgressPct * 10) / 10,
+      collectProgressPct: Math.round(collectProgressPct * 10) / 10,
+      spreadAbAdj: last.spreadAbAdj,
+      spreadBaAdj: last.spreadBaAdj
+    };
   }
 }
 

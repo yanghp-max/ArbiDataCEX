@@ -27,17 +27,22 @@ export class CexCexTask {
 
   async onTick(symbol) {
     const tick = this.sr.quoteAggregator.buildTick(symbol);
-    if (!tick) return;
+    const engine = this.engines.get(symbol);
 
-    if (tick.priceAgeMs > this.cfg.maxPriceAgeMs) return;
+    if (!tick) {
+      this.sr.dashboardBridge?.updateMarketSnapshot({ symbol, tick: null, spreads: null, signal: null });
+      return;
+    }
 
     const spreads = calcSpreads(tick, this.totalCostPct);
-    const engine = this.engines.get(symbol);
     const signal = engine.updateAndCalc({
       timestamp: tick.timestamp,
       spreadAbAdj: spreads.spreadAbAdj,
       spreadBaAdj: spreads.spreadBaAdj
     });
+    this.sr.dashboardBridge?.updateMarketSnapshot({ symbol, tick, spreads, signal });
+
+    if (tick.priceAgeMs > this.cfg.maxPriceAgeMs) return;
 
     if (!signal.windowReady || signal.zAb == null || signal.zBa == null) return;
 
@@ -102,7 +107,8 @@ export class CexCexTask {
         direction,
         fill,
         netPnl,
-        accountCache: this.sr.accountCache
+        accountCache: this.sr.accountCache,
+        dashboardBridge: this.sr.dashboardBridge
       });
       this.lastOrderTs.set(symbol, Date.now());
 

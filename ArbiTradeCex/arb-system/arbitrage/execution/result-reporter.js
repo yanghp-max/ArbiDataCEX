@@ -26,7 +26,7 @@ export class ResultReporter {
     this.trades = [];
   }
 
-  recordTrade({ symbol, direction, fill, netPnl, accountCache }) {
+  recordTrade({ symbol, direction, fill, netPnl, accountCache, dashboardBridge }) {
     this.cumPnl += netPnl;
     const row = {
       symbol,
@@ -39,11 +39,13 @@ export class ResultReporter {
       bOrderId: fill.bOrderId,
       netPnl,
       cumPnl: this.cumPnl,
+      simulated: Boolean(fill.simulated),
       aPosQty: accountCache.getPosition('binance', symbol),
       bPosQty: accountCache.getPosition('gate', symbol)
     };
     this.trades.push(row);
     console.log('[TRADE]', JSON.stringify(row));
+    dashboardBridge?.recordTrade(row);
     return row;
   }
 }

@@ -7,6 +7,7 @@ import { OrderExecutor } from '../execution/order-executor.js';
 import { ResultReporter } from '../execution/result-reporter.js';
 import { QuoteAggregator } from '../services/quote-aggregator.js';
 import eventBus from '../event-bus/index.js';
+import { DashboardBridge } from '../dashboard/dashboard-bridge.js';
 
 export class SharedResources {
   constructor(config, options = {}) {
@@ -19,15 +20,31 @@ export class SharedResources {
     this.orderExecutor = null;
     this.resultReporter = new ResultReporter();
     this.eventBus = eventBus;
+    this.dashboardBridge = null;
     this.inFlightCount = 0;
     this.useMockAccount = false;
   }
 
   async init() {
+    const strat = this.config.strategy;
+    const dashCfg = this.config.dashboard || {};
+    this.dashboardBridge = new DashboardBridge({
+      enabled: dashCfg.enabled !== false,
+      port: dashCfg.port ?? 3456,
+      windowSeconds: strat.windowSeconds,
+      minDataPoints: strat.minDataPoints,
+      symbols: strat.symbols,
+      tradingEnabled: this.tradingEnabled,
+      useMockAccount: Boolean(strat.useMockAccount) && !this.tradingEnabled
+    });
+    await this.dashboardBridge.start();
+    this.eventBus.on('execution.status', (payload) => {
+      this.dashboardBridge?.recordExecutionStatus(payload);
+    });
+
     this.cexManager = await CexManager.createDefault();
     const binance = this.cexManager.get('binance');
     const gate = this.cexManager.get('gate');
-    const strat = this.config.strategy;
     this.useMockAccount = Boolean(strat.useMockAccount) && !this.tradingEnabled;
 
     if (this.useMockAccount) {
@@ -61,7 +78,8 @@ export class SharedResources {
   async shutdown() {
     await Promise.all([
       this.getBinance()?.disconnect(),
-      this.getGate()?.disconnect()
+      this.getGate()?.disconnect(),
+      this.dashboardBridge?.stop()
     ]);
   }
 }
