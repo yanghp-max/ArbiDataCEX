@@ -18,6 +18,7 @@ import path from 'node:path';
 import process from 'node:process';
 import axios from 'axios';
 import { getRootDir } from '../config/global-config.js';
+import { resolveGateOrderLimits } from '../common/utils/gate-contract-limits.js';
 
 const BINANCE_REST = process.env.BINANCE_REST_URL || 'https://fapi.binance.com';
 const GATE_REST = process.env.GATE_REST_URL || 'https://api.gateio.ws/api/v4';
@@ -194,16 +195,16 @@ function buildMinQtyEntry({ symbolId, gateSymbol, binanceInfo, gateInfo, bTicker
 
   const minQty = Number(lot.minQty);
   const stepSize = Number(lot.stepSize);
-  const gateMinContracts = Number(gateInfo.order_size_min);
-  const gateOrderSizeRound = Number(gateInfo.order_size_round || 0);
-  const gateQuantoMultiplier = Number(gateInfo.quanto_multiplier || 0);
 
   if (!Number.isFinite(minQty) || !Number.isFinite(stepSize)) {
     throw new Error(`invalid Binance minQty/stepSize for ${symbolId}`);
   }
-  if (!Number.isFinite(gateMinContracts) || gateMinContracts <= 0) {
-    throw new Error(`invalid Gate order_size_min for ${gateSymbol}`);
-  }
+
+  const gateLimits = resolveGateOrderLimits(gateInfo, {
+    binanceMinQty: minQty,
+    binanceStepSize: stepSize,
+    gateSymbol
+  });
 
   return {
     binance: {
@@ -219,15 +220,12 @@ function buildMinQtyEntry({ symbolId, gateSymbol, binanceInfo, gateInfo, bTicker
     },
     gate: {
       symbol: gateSymbol,
-      minQty: gateMinContracts,
-      stepSize: gateOrderSizeRound > 0 ? gateOrderSizeRound : 1,
-      quantityUnit: 'contract',
-      quantoMultiplier: Number.isFinite(gateQuantoMultiplier) && gateQuantoMultiplier > 0
-        ? gateQuantoMultiplier
-        : null,
-      minBaseQty: Number.isFinite(gateQuantoMultiplier) && gateQuantoMultiplier > 0
-        ? gateMinContracts * gateQuantoMultiplier
-        : null,
+      minQty: gateLimits.minQty,
+      stepSize: gateLimits.stepSize,
+      quantityUnit: gateLimits.quantityUnit,
+      enableDecimal: gateLimits.enableDecimal,
+      quantoMultiplier: gateLimits.quantoMultiplier,
+      minBaseQty: gateLimits.minBaseQty,
       priceRef: {
         collectedAt: priceCollectedAt,
         bid: gTicker?.bid ?? null,

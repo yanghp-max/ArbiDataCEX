@@ -94,7 +94,7 @@ export class GateAdapter extends BaseAdapter {
     return crypto.createHmac('sha512', secret).update(payload).digest('hex');
   }
 
-  async #signedRequest(method, path, bodyObj = null) {
+  async #signedRequest(method, path, bodyObj = null, extraHeaders = {}) {
     const key = process.env.GATE_API_KEY;
     const pathWithPrefix = `/api/v4${path}`;
     const queryString = '';
@@ -105,7 +105,13 @@ export class GateAdapter extends BaseAdapter {
     const config = {
       method,
       url,
-      headers: { KEY: key, Timestamp: timestamp, SIGN: sign, 'Content-Type': 'application/json' },
+      headers: {
+        KEY: key,
+        Timestamp: timestamp,
+        SIGN: sign,
+        'Content-Type': 'application/json',
+        ...extraHeaders
+      },
       timeout: 15000
     };
     if (bodyObj) config.data = bodyObj;
@@ -137,13 +143,15 @@ export class GateAdapter extends BaseAdapter {
       });
   }
 
-  async placeMarketOrder({ contract, size }) {
+  async placeMarketOrder({ contract, size, decimalSize = false }) {
+    const headers = decimalSize ? { 'X-Gate-Size-Decimal': '1' } : {};
+    const signedSize = decimalSize ? String(size) : Number(size);
     return this.#signedRequest('POST', '/futures/usdt/orders', {
       contract,
-      size: Number(size),
+      size: signedSize,
       price: '0',
       tif: 'ioc'
-    });
+    }, headers);
   }
 
   async disconnect() {

@@ -32,18 +32,32 @@ export class PrecisionChecker {
     if (qty < Number(cfg.binance.minQty)) qty = Number(cfg.binance.minQty);
     qty = floorByStep(qty, Number(cfg.binance.stepSize));
 
-    const multiplier = Number(cfg.gate.quantoMultiplier || 0);
-    const minContracts = Number(cfg.gate.minQty);
-    const step = Number(cfg.gate.stepSize || 1);
-    let gateContracts = 0;
-    if (multiplier > 0) {
-      gateContracts = floorByStep(qty / multiplier, step);
-      if (gateContracts < minContracts) gateContracts = minContracts;
+    const gateCfg = cfg.gate;
+    const minGate = Number(gateCfg.minQty);
+    const step = Number(gateCfg.stepSize || 1);
+    let gateSize = 0;
+
+    if (gateCfg.quantityUnit === 'base' || gateCfg.enableDecimal) {
+      gateSize = floorByStep(qty, step);
+      if (gateSize < minGate) gateSize = minGate;
+    } else {
+      const multiplier = Number(gateCfg.quantoMultiplier || 0);
+      if (multiplier > 0) {
+        gateSize = floorByStep(qty / multiplier, step);
+        if (gateSize < minGate) gateSize = minGate;
+      }
     }
 
-    if (qty <= 0 || gateContracts <= 0) return { qty: 0, gateContracts: 0 };
+    if (qty <= 0 || gateSize <= 0) return { qty: 0, gateSize: 0 };
 
-    return { qty, gateContracts, direction, aPrice, cfg };
+    return {
+      qty,
+      gateSize,
+      gateDecimalSize: Boolean(gateCfg.enableDecimal || gateCfg.quantityUnit === 'base'),
+      direction,
+      aPrice,
+      cfg
+    };
   }
 
   calcUsdtNeed(direction, qty, tick, rate = 0.1) {

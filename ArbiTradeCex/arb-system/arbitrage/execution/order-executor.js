@@ -9,9 +9,9 @@ export class OrderExecutor {
   }
 
   async executeBothLegs({ direction, tick, order }) {
-    const { qty, gateContracts } = order;
+    const { qty, gateSize, gateDecimalSize } = order;
     const binanceSide = direction === '-a+b' ? 'SELL' : 'BUY';
-    const gateSize = direction === '-a+b' ? gateContracts : -gateContracts;
+    const signedGateSize = direction === '-a+b' ? gateSize : -gateSize;
     const contract = this.gate.toGateContract(tick.symbol);
 
     if (!this.tradingEnabled) {
@@ -29,7 +29,7 @@ export class OrderExecutor {
 
     const [aRes, bRes] = await Promise.all([
       this.binance.placeMarketOrder({ symbol: tick.symbol, side: binanceSide, quantity: qty }),
-      this.gate.placeMarketOrder({ contract, size: gateSize })
+      this.gate.placeMarketOrder({ contract, size: signedGateSize, decimalSize: gateDecimalSize })
     ]);
 
     return {
