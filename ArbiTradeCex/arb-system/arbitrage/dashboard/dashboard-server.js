@@ -11,7 +11,8 @@ const MIME = {
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.svg': 'image/svg+xml',
-  '.ico': 'image/x-icon'
+  '.ico': 'image/x-icon',
+  '.map': 'application/json'
 };
 
 export class DashboardServer {
@@ -75,7 +76,10 @@ export class DashboardServer {
     try {
       const data = await fs.readFile(abs);
       const ext = path.extname(abs);
-      res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
+      res.writeHead(200, {
+        'Content-Type': MIME[ext] || 'application/octet-stream',
+        'Cache-Control': 'no-store, no-cache, must-revalidate'
+      });
       res.end(data);
     } catch {
       res.writeHead(404);

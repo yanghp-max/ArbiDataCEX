@@ -17,8 +17,17 @@ CEX-CEX 套利核心。结构对齐 ArbiTrade-1/arb-system。
 
 ```bash
 npm install
-npm run dry    # 虚拟盘（模拟下单，默认）
-npm run live   # 实盘（真实下单）
+npm run build:dashboard   # 构建 Vue3 dashboard（dry/live 会自动构建）
+npm run dry               # 虚拟盘（模拟下单，默认）
+npm run live              # 实盘（真实下单）
+```
+
+Dashboard 前端源码在 `dashboard/frontend/`（Vue 3 + Vite），构建产物输出到 `dashboard/public/`。
+
+开发时可单独跑前端热更新（需后端已启动提供 WS）：
+
+```bash
+npm run dev:dashboard
 ```
 
 交易币种从配置文件自动读取，无需命令行指定：
