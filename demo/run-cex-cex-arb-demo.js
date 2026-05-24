@@ -14,7 +14,8 @@ const Z_BA_OPEN = 1;
 const TOTAL_COST_PCT = 0.08;
 const TICK_KEEP = 5000;
 const LOOP_SLEEP_MS = 1200;
-const BINANCE_REST = process.env.BINANCE_REST_URL || 'https://fapi.binance.com';
+const BINANCE_FAPI_REST = process.env.BINANCE_REST_URL || 'https://fapi.binance.com';
+const BINANCE_PAPI_REST = process.env.BINANCE_PAPI_REST_URL || 'https://papi.binance.com';
 const GATE_REST = process.env.GATE_REST_URL || 'https://api.gateio.ws/api/v4';
 
 function parseArgs(argv) {
@@ -248,7 +249,7 @@ async function placeBinanceOrder(order) {
   });
   const query = params.toString();
   const signature = signBinanceQuery(secret, query);
-  const url = `${BINANCE_REST}/fapi/v1/order?${query}&signature=${signature}`;
+  const url = `${BINANCE_PAPI_REST}/papi/v1/um/order?${query}&signature=${signature}`;
   const resp = await axios.post(url, null, {
     headers: { 'X-MBX-APIKEY': apiKey },
     timeout: 15000

@@ -1,0 +1,40 @@
+{
+  "generatedAt": "2026-05-23T00:00:00.000Z",
+  "note": "Run npm run fetch:min-qty to refresh from exchange APIs",
+  "symbols": {
+    "BTCUSDT": {
+      "binance": {
+        "symbol": "BTCUSDT",
+        "minQty": 0.001,
+        "stepSize": 0.001,
+        "priceRef": null
+      },
+      "gate": {
+        "symbol": "BTC_USDT",
+        "minQty": 1,
+        "stepSize": 1,
+        "quantityUnit": "contract",
+        "quantoMultiplier": 0.0001,
+        "minBaseQty": 0.0001,
+        "priceRef": null
+      }
+    },
+    "ETHUSDT": {
+      "binance": {
+        "symbol": "ETHUSDT",
+        "minQty": 0.001,
+        "stepSize": 0.001,
+        "priceRef": null
+      },
+      "gate": {
+        "symbol": "ETH_USDT",
+        "minQty": 1,
+        "stepSize": 1,
+        "quantityUnit": "contract",
+        "quantoMultiplier": 0.01,
+        "minBaseQty": 0.01,
+        "priceRef": null
+      }
+    }
+  }
+}

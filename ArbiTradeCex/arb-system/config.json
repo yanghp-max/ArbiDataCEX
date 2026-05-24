@@ -1,0 +1,26 @@
+{
+  "strategy": {
+    "symbols": ["BTCUSDT", "ETHUSDT"],
+    "windowSeconds": 3600,
+    "minDataPoints": 50,
+    "zOpenAb": 2.0,
+    "zOpenBa": 2.0,
+    "orderUsd": 100,
+    "maxPositionUsd": 2000,
+    "cooldownMs": 1000,
+    "maxPriceAgeMs": 1500,
+    "fundingMin": -0.1,
+    "feeBpsTotal": 4,
+    "slippageBpsTotal": 4,
+    "minAvailableUsdt": 50,
+    "balanceCheckRate": 0.1,
+    "accountCacheMaxAgeMs": 5000,
+    "reservationTtlMs": 30000,
+    "maxInFlightTrades": 5,
+    "minQtyJson": "config/min-order-qty.json"
+  },
+  "adapters": {
+    "A": { "provider": "binance" },
+    "B": { "provider": "gate" }
+  }
+}

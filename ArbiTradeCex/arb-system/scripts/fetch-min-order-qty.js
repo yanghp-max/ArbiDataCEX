@@ -1,19 +1,20 @@
 /**
- * 拉取 Binance/Gate 最小下单量与精度。
- * Binance exchangeInfo / bookTicker 走 fapi（与统一账户无关）；实盘下单走 papi。
+ * 拉取 Binance/Gate 最小下单量与精度，写入本项目 config/min-order-qty.json
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import axios from 'axios';
+import { loadConfig, getRootDir } from '../config/global-config.js';
 
 const BINANCE_REST = process.env.BINANCE_REST_URL || 'https://fapi.binance.com';
 const GATE_REST = process.env.GATE_REST_URL || 'https://api.gateio.ws/api/v4';
 
 function parseArgs(argv) {
+  const rootDir = getRootDir();
   const args = {
     symbols: [],
-    output: path.resolve(process.cwd(), 'demo/min-order-qty.json')
+    output: path.join(rootDir, 'config/min-order-qty.json')
   };
 
   for (let i = 2; i < argv.length; i += 1) {
@@ -24,14 +25,17 @@ function parseArgs(argv) {
       continue;
     }
     if (token === '--output' && argv[i + 1]) {
-      args.output = path.resolve(process.cwd(), argv[i + 1]);
+      args.output = path.resolve(rootDir, argv[i + 1]);
       i += 1;
       continue;
     }
   }
 
   if (args.symbols.length === 0) {
-    throw new Error('missing --symbols, example: --symbols BTCUSDT,ETHUSDT or --symbols ["BTCUSDT","ETHUSDT"]');
+    args.symbols = loadConfig().strategy.symbols || [];
+  }
+  if (args.symbols.length === 0) {
+    throw new Error('missing --symbols or config.strategy.symbols in config.json');
   }
   return args;
 }

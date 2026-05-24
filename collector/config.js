@@ -21,10 +21,12 @@ export const config = {
   },
   binance: {
     wsUrl: process.env.BINANCE_WS_URL || 'wss://fstream.binance.com/ws',
-    restUrl: process.env.BINANCE_REST_URL || 'https://fapi.binance.com'
+    restUrl: process.env.BINANCE_REST_URL || 'https://fapi.binance.com', // 公共行情 / exchangeInfo
+    papiRestUrl: process.env.BINANCE_PAPI_REST_URL || 'https://papi.binance.com' // 统一账户：余额 / 下单 / listenKey
   },
   gate: {
     wsUrl: process.env.GATE_WS_URL || 'wss://fx-ws.gateio.ws/v4/ws/usdt',
+    unifiedWsUrl: process.env.GATE_UNIFIED_WS_URL || 'wss://ws.gate.com/v4/ws/unified',
     restUrl: process.env.GATE_REST_URL || 'https://api.gateio.ws/api/v4'
   },
   writer: {
