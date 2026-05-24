@@ -12,7 +12,6 @@
     "fundingMin": -0.1,
     "feeBpsTotal": 4,
     "slippageBpsTotal": 4,
-    // 下面两个变量是自定义余额检查，用于测试
     "useMockAccount": true,
     "mockBalanceUsdt": 10000,
     "minAvailableUsdt": 50,
