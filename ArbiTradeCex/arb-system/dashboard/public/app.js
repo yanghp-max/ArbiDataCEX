@@ -16,7 +16,10 @@ function emptyState() {
     logs: [],
     summary: {
       totalPnl: 0,
-      tradeCount: 0
+      tradeCount: 0,
+      winCount: 0,
+      lossCount: 0,
+      bySymbol: {}
     }
   };
 }
@@ -27,6 +30,39 @@ createApp({
     const state = reactive(emptyState());
     let ws = null;
     let reconnectTimer = null;
+
+    const pnlSummary = computed(() => {
+      const s = state.summary || {};
+      if (Number.isFinite(Number(s.totalPnl))) {
+        return {
+          totalPnl: Number(s.totalPnl),
+          tradeCount: s.tradeCount ?? 0,
+          winCount: s.winCount ?? 0,
+          lossCount: s.lossCount ?? 0,
+          bySymbol: s.bySymbol ?? {}
+        };
+      }
+      const trades = state.trades || [];
+      let totalPnl = 0;
+      let winCount = 0;
+      let lossCount = 0;
+      const bySymbol = {};
+      for (const t of trades) {
+        const net = Number(t.netPnl) || 0;
+        totalPnl += net;
+        if (net >= 0) winCount += 1;
+        else lossCount += 1;
+        bySymbol[t.symbol] = (bySymbol[t.symbol] ?? 0) + net;
+      }
+      return { totalPnl, tradeCount: trades.length, winCount, lossCount, bySymbol };
+    });
+
+    const pnlBySymbolRows = computed(() => {
+      const entries = Object.entries(pnlSummary.value.bySymbol || {});
+      return entries
+        .map(([symbol, pnl]) => ({ symbol, pnl }))
+        .sort((a, b) => Math.abs(b.pnl) - Math.abs(a.pnl));
+    });
 
     const symbolCards = computed(() => {
       const order = Object.keys(state.progress.symbols);
@@ -116,6 +152,19 @@ createApp({
       return map[status] || status;
     }
 
+    function pnlClass(v) {
+      const n = Number(v);
+      if (!Number.isFinite(n) || n === 0) return 'flat';
+      return n > 0 ? 'pos' : 'neg';
+    }
+
+    function formatPnl(v) {
+      const n = Number(v);
+      if (!Number.isFinite(n)) return '-';
+      const sign = n > 0 ? '+' : '';
+      return `${sign}${fmt(n, 4)}`;
+    }
+
     onMounted(connect);
     onUnmounted(() => {
       if (reconnectTimer) clearTimeout(reconnectTimer);
@@ -125,11 +174,15 @@ createApp({
     return {
       connected,
       state,
+      pnlSummary,
+      pnlBySymbolRows,
       symbolCards,
       combinedLogs,
       fmt,
       fmtPct,
       spreadClass,
+      pnlClass,
+      formatPnl,
       formatTime,
       formatDuration,
       formatDetail,

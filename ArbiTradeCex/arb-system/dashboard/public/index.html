@@ -17,11 +17,36 @@
         <span class="badge" :class="connected ? 'ok' : 'err'">{{ connected ? 'WS 已连接' : 'WS 断开' }}</span>
         <span class="badge" :class="state.tradingEnabled ? 'warn' : 'muted'">{{ state.tradingEnabled ? 'LIVE' : 'DRY-RUN' }}</span>
         <span v-if="state.useMockAccount" class="badge muted">Mock 余额</span>
-        <span class="badge pnl" :class="(state.summary?.totalPnl ?? 0) >= 0 ? 'ok' : 'err'">
-          总 PnL {{ fmt(state.summary?.totalPnl, 4) }} USDT · {{ state.summary?.tradeCount ?? 0 }} 笔
+        <span class="badge pnl" :class="pnlClass(pnlSummary.totalPnl)">
+          总 PnL {{ formatPnl(pnlSummary.totalPnl) }} USDT
         </span>
       </div>
     </header>
+
+    <section class="pnl-panel">
+      <div class="pnl-main">
+        <div class="pnl-label">累计 PnL</div>
+        <div class="pnl-value" :class="pnlClass(pnlSummary.totalPnl)">
+          {{ formatPnl(pnlSummary.totalPnl) }} <small>USDT</small>
+        </div>
+      </div>
+      <div class="pnl-stats">
+        <div class="pnl-stat">
+          <span class="pnl-stat-label">成交笔数</span>
+          <strong>{{ pnlSummary.tradeCount }}</strong>
+        </div>
+        <div class="pnl-stat">
+          <span class="pnl-stat-label">盈利 / 亏损</span>
+          <strong>{{ pnlSummary.winCount }} / {{ pnlSummary.lossCount }}</strong>
+        </div>
+      </div>
+      <div v-if="pnlBySymbolRows.length" class="pnl-by-symbol">
+        <div v-for="row in pnlBySymbolRows" :key="row.symbol" class="pnl-symbol-row">
+          <span>{{ row.symbol }}</span>
+          <strong :class="pnlClass(row.pnl)">{{ formatPnl(row.pnl) }}</strong>
+        </div>
+      </div>
+    </section>
 
     <section class="progress-panel">
       <div class="progress-head">
@@ -101,8 +126,8 @@
       <div class="log-head">
         <h2>交易 / 事件日志</h2>
         <span>
-          总 PnL {{ fmt(state.summary?.totalPnl, 4) }} USDT ·
-          {{ state.summary?.tradeCount ?? 0 }} 笔成交
+          总 PnL {{ formatPnl(pnlSummary.totalPnl) }} USDT ·
+          {{ pnlSummary.tradeCount }} 笔成交
         </span>
       </div>
       <div class="log-list">

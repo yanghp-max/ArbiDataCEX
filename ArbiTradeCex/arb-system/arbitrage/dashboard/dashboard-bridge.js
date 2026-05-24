@@ -27,7 +27,10 @@ export class DashboardBridge {
       logs: [],
       summary: {
         totalPnl: 0,
-        tradeCount: 0
+        tradeCount: 0,
+        winCount: 0,
+        lossCount: 0,
+        bySymbol: {}
       }
     };
 
@@ -151,12 +154,27 @@ export class DashboardBridge {
     this.#broadcast();
   }
 
-  recordTrade(tradeRow) {
+  recordTrade(tradeRow, summary = null) {
     if (!this.enabled) return;
     this.state.trades.unshift(tradeRow);
     if (this.state.trades.length > 100) this.state.trades.length = 100;
-    this.state.summary.totalPnl = tradeRow.cumPnl ?? this.state.summary.totalPnl;
-    this.state.summary.tradeCount += 1;
+    if (summary) {
+      this.state.summary = {
+        totalPnl: summary.totalPnl ?? 0,
+        tradeCount: summary.tradeCount ?? 0,
+        winCount: summary.winCount ?? 0,
+        lossCount: summary.lossCount ?? 0,
+        bySymbol: summary.bySymbol ?? {}
+      };
+    } else {
+      const net = tradeRow.netPnl ?? 0;
+      this.state.summary.totalPnl = tradeRow.cumPnl ?? (this.state.summary.totalPnl + net);
+      this.state.summary.tradeCount += 1;
+      if (net >= 0) this.state.summary.winCount += 1;
+      else this.state.summary.lossCount += 1;
+      this.state.summary.bySymbol[tradeRow.symbol] =
+        (this.state.summary.bySymbol[tradeRow.symbol] ?? 0) + net;
+    }
     this.#broadcast();
   }
 

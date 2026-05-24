@@ -23,11 +23,30 @@ export function calcTradePnl(fill, direction, feeBpsTotal = 4, slippageBpsTotal 
 export class ResultReporter {
   constructor() {
     this.cumPnl = 0;
+    this.tradeCount = 0;
+    this.winCount = 0;
+    this.lossCount = 0;
+    this.bySymbol = {};
     this.trades = [];
+  }
+
+  getSummary() {
+    return {
+      totalPnl: this.cumPnl,
+      tradeCount: this.tradeCount,
+      winCount: this.winCount,
+      lossCount: this.lossCount,
+      bySymbol: { ...this.bySymbol }
+    };
   }
 
   recordTrade({ symbol, direction, fill, netPnl, accountCache, dashboardBridge }) {
     this.cumPnl += netPnl;
+    this.tradeCount += 1;
+    if (netPnl >= 0) this.winCount += 1;
+    else this.lossCount += 1;
+    this.bySymbol[symbol] = (this.bySymbol[symbol] ?? 0) + netPnl;
+
     const row = {
       symbol,
       timestamp: Date.now(),
@@ -45,7 +64,10 @@ export class ResultReporter {
     };
     this.trades.push(row);
     console.log('[TRADE]', JSON.stringify(row));
-    dashboardBridge?.recordTrade(row);
+    console.log(
+      `[PNL] total=${this.cumPnl.toFixed(4)} USDT · trades=${this.tradeCount} · latest=${netPnl.toFixed(4)} (${symbol})`
+    );
+    dashboardBridge?.recordTrade(row, this.getSummary());
     return row;
   }
 }
