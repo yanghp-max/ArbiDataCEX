@@ -1,5 +1,5 @@
 /**
- * Gate 统一账户 + USDT 永续适配器（对齐 ArbiTrade-1 接口 + ArbiTradeCex 批量订阅）
+ * Gate 统一账户 + USDT 永续适配器
  */
 import WebSocket from 'ws';
 import axios from 'axios';
