@@ -1,5 +1,5 @@
 /**
- * 简单事件总线
+ * 事件总线
  */
 import { EventEmitter } from 'events';
 
@@ -10,4 +10,9 @@ class EventBus extends EventEmitter {
 }
 
 export const eventBus = new EventBus();
+
+export function getEventBus() {
+  return eventBus;
+}
+
 export default eventBus;

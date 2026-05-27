@@ -43,8 +43,6 @@ export class SharedResources {
     });
 
     this.cexManager = await CexManager.createDefault();
-    const binance = this.cexManager.get('binance');
-    const gate = this.cexManager.get('gate');
     this.useMockAccount = Boolean(strat.useMockAccount) && !this.tradingEnabled;
 
     if (this.useMockAccount) {
@@ -52,7 +50,7 @@ export class SharedResources {
       this.accountCache.seedMock({ balanceUsdt });
       console.log(`[SharedResources] mock account: ${balanceUsdt} USDT per exchange (skip balance REST)`);
     } else {
-      await this.accountCache.refreshFromAdapters(binance, gate);
+      await this.accountCache.refreshFromCexManager(this.cexManager);
     }
 
     this.accountCache.minAvailableUsdt = strat.minAvailableUsdt;
@@ -61,24 +59,18 @@ export class SharedResources {
       ttlMs: this.config.strategy.reservationTtlMs
     });
     this.orderExecutor = new OrderExecutor({
-      binanceAdapter: binance,
-      gateAdapter: gate,
+      cexManager: this.cexManager,
       tradingEnabled: this.tradingEnabled
     });
   }
 
-  getBinance() {
-    return this.cexManager.get('binance');
-  }
-
-  getGate() {
-    return this.cexManager.get('gate');
+  getAdapter(exchange) {
+    return this.cexManager.getAdapter(exchange);
   }
 
   async shutdown() {
     await Promise.all([
-      this.getBinance()?.disconnect(),
-      this.getGate()?.disconnect(),
+      this.cexManager?.disconnectAll(),
       this.dashboardBridge?.stop()
     ]);
   }

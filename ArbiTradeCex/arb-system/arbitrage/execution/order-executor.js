@@ -1,18 +1,16 @@
 /**
- * 双腿同时下单 + 回执解析
+ * 双腿同时下单 + 回执解析（通过 CexManager 统一接口）
  */
 export class OrderExecutor {
-  constructor({ binanceAdapter, gateAdapter, tradingEnabled }) {
-    this.binance = binanceAdapter;
-    this.gate = gateAdapter;
+  constructor({ cexManager, tradingEnabled }) {
+    this.cexManager = cexManager;
     this.tradingEnabled = tradingEnabled;
   }
 
   async executeBothLegs({ direction, tick, order }) {
     const { qty, gateSize, gateDecimalSize } = order;
-    const binanceSide = direction === '-a+b' ? 'SELL' : 'BUY';
-    const signedGateSize = direction === '-a+b' ? gateSize : -gateSize;
-    const contract = this.gate.toGateContract(tick.symbol);
+    const binanceSide = direction === '-a+b' ? 'sell' : 'buy';
+    const gateSide = direction === '-a+b' ? 'buy' : 'sell';
 
     if (!this.tradingEnabled) {
       return {
@@ -27,22 +25,33 @@ export class OrderExecutor {
       };
     }
 
-    const [aRes, bRes] = await Promise.all([
-      this.binance.placeMarketOrder({ symbol: tick.symbol, side: binanceSide, quantity: qty }),
-      this.gate.placeMarketOrder({ contract, size: signedGateSize, decimalSize: gateDecimalSize })
+    const [aOrder, bOrder] = await Promise.all([
+      this.cexManager.placeOrder('binance', {
+        symbol: tick.symbol,
+        side: binanceSide,
+        type: 'market',
+        amount: qty
+      }),
+      this.cexManager.placeOrder('gate', {
+        symbol: tick.symbol,
+        side: gateSide,
+        type: 'market',
+        amount: gateSize,
+        decimalSize: gateDecimalSize
+      })
     ]);
 
     return {
       simulated: false,
-      aOrderId: String(aRes.orderId),
-      bOrderId: String(bRes.id),
-      aPriceUsed: Number(aRes.avgPrice || aRes.price || order.aPrice),
-      bPriceUsed: Number(bRes.fill_price || bRes.price || (direction === '-a+b' ? tick.bAsk : tick.bBid)),
-      qty: Math.min(Number(aRes.executedQty || qty), qty),
-      aFilledQty: Number(aRes.executedQty || qty),
+      aOrderId: String(aOrder.orderId),
+      bOrderId: String(bOrder.orderId),
+      aPriceUsed: Number(aOrder.avgPrice || aOrder.price || order.aPrice),
+      bPriceUsed: Number(bOrder.avgPrice || bOrder.price || (direction === '-a+b' ? tick.bAsk : tick.bBid)),
+      qty: Math.min(Number(aOrder.filled || qty), qty),
+      aFilledQty: Number(aOrder.filled || qty),
       bFilledQty: qty,
-      rawA: aRes,
-      rawB: bRes
+      rawA: aOrder,
+      rawB: bOrder
     };
   }
 }

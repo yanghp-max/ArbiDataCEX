@@ -3,6 +3,7 @@
  */
 import path from 'node:path';
 import { loadConfig, getRootDir } from '../../config/global-config.js';
+import { EventTypes } from '../../cex/types.js';
 import { SharedResources } from './shared-resources.js';
 import { CexCexTask } from './cex-cex-task.js';
 import { PrecisionChecker } from '../risk/risk-manager.js';
@@ -32,27 +33,29 @@ export class TaskManager {
     const precision = await PrecisionChecker.loadFromJson(minQtyPath, strat.symbols);
     this.task = new CexCexTask(this.sharedResources, strat, precision);
 
-    const binance = this.sharedResources.getBinance();
-    const gate = this.sharedResources.getGate();
-    const adapterSymbols = strat.symbols.map((s) => binance.toAdapterSymbol(s));
+    const cexManager = this.sharedResources.cexManager;
+    const adapterSymbols = strat.symbols.map((s) => cexManager.normalizeSymbol('binance', s));
 
     const onQuoteUpdate = (symbol) => {
       this.task.onTick(symbol).catch((e) => console.error('[tick]', symbol, e.message));
     };
 
-    binance.on('ticker', (t) => {
+    const binance = cexManager.getAdapter('binance');
+    const gate = cexManager.getAdapter('gate');
+
+    binance.on(EventTypes.TICKER, (t) => {
       const symbol = t.symbol.replace('-', '');
       this.sharedResources.quoteAggregator.onTicker('binance', { ...t, symbol });
       onQuoteUpdate(symbol);
     });
-    gate.on('ticker', (t) => {
+    gate.on(EventTypes.TICKER, (t) => {
       this.sharedResources.quoteAggregator.onTicker('gate', t);
       onQuoteUpdate(t.symbol.replace('-', ''));
     });
 
     await Promise.all([
-      binance.subscribe(adapterSymbols, ['bookTicker']),
-      gate.subscribe(adapterSymbols, ['book_ticker'])
+      cexManager.subscribe('binance', adapterSymbols, ['bookTicker']),
+      cexManager.subscribe('gate', adapterSymbols, ['book_ticker'])
     ]);
 
     for (const sym of strat.symbols) {

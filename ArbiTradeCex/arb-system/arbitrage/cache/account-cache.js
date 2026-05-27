@@ -44,17 +44,35 @@ export class AccountCache {
     return this.positionCache.get(`${exchange}:${symbol}`)?.qty ?? 0;
   }
 
-  async refreshFromAdapters(binanceAdapter, gateAdapter) {
-    const [bBal, gBal, bPos, gPos] = await Promise.all([
-      binanceAdapter.getUsdtBalance(),
-      gateAdapter.getUsdtBalance(),
-      binanceAdapter.getPositions(),
-      gateAdapter.getPositions()
+  #compactSymbol(symbol) {
+    return String(symbol).replace(/[-_]/g, '');
+  }
+
+  #applyBalance(exchange, balances) {
+    const usdt = (balances || []).find((b) => b.currency === 'USDT');
+    const available = Number(usdt?.available ?? 0);
+    this.setBalance(exchange, {
+      total: Number(usdt?.total ?? available),
+      available,
+      updatedAtMs: Date.now()
+    });
+  }
+
+  async refreshFromCexManager(cexManager) {
+    const [bBalances, gBalances, bPos, gPos] = await Promise.all([
+      cexManager.getBalance('binance', { silent: true }),
+      cexManager.getBalance('gate', { silent: true }),
+      cexManager.getPositions('binance', { silent: true }),
+      cexManager.getPositions('gate', { silent: true })
     ]);
-    this.setBalance('binance', bBal);
-    this.setBalance('gate', gBal);
-    for (const p of bPos) this.setPosition('binance', p.symbol, p.qty);
-    for (const p of gPos) this.setPosition('gate', p.symbol, p.qty);
+    this.#applyBalance('binance', bBalances);
+    this.#applyBalance('gate', gBalances);
+    for (const p of bPos) {
+      this.setPosition('binance', this.#compactSymbol(p.symbol), p.qty);
+    }
+    for (const p of gPos) {
+      this.setPosition('gate', this.#compactSymbol(p.symbol), p.qty);
+    }
     this.reliable = true;
   }
 }

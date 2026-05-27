@@ -113,7 +113,7 @@ export class CexCexTask {
       this.lastOrderTs.set(symbol, Date.now());
 
       if (!fill.simulated) {
-        await this.sr.accountCache.refreshFromAdapters(this.sr.getBinance(), this.sr.getGate());
+        await this.sr.accountCache.refreshFromCexManager(this.sr.cexManager);
       }
       this.sr.eventBus.emitExecutionStatus({ stage: 'TRADE_DONE', symbol, direction, netPnl });
     } finally {
@@ -125,8 +125,8 @@ export class CexCexTask {
   async refreshFunding(symbol) {
     try {
       const [fa, fb] = await Promise.all([
-        this.sr.getBinance().getFundingRate(symbol),
-        this.sr.getGate().getFundingRate(symbol)
+        this.sr.cexManager.getFundingRate('binance', symbol),
+        this.sr.cexManager.getFundingRate('gate', symbol)
       ]);
       this.sr.quoteAggregator.setFunding(symbol, fa, fb);
     } catch {
