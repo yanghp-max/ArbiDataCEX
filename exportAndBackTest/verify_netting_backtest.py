@@ -1,4 +1,4 @@
-"""Quick verification that netting backtest counts orders by direction only."""
+"""Quick verification that netting backtest counts orders and close logic correctly."""
 
 import os
 import sys
@@ -42,6 +42,7 @@ def run_checks() -> None:
         output_dir=".",
         window_min=10,
         z_open=0.0,
+        z_close=0.0,
         order_usd=100.0,
         max_position_usd=2000.0,
         cooldown_ms=1000,
@@ -50,8 +51,7 @@ def run_checks() -> None:
         slippage_bps_total=4.0,
         symbols=None,
         z_open_list=[0.0, 1.0],
-        z_open_ab_list=[0.0, 1.0],
-        z_open_ba_list=[0.0, 1.0],
+        z_close_list=[0.0, 1.0],
         window_min_list=[10, 30],
     )
 
@@ -61,31 +61,27 @@ def run_checks() -> None:
 
     for window in cfg.window_min_list:
         features = compute_signal_features(raw, cfg, window)
-        for z_ab in cfg.z_open_ab_list:
-            for z_ba in cfg.z_open_ba_list:
+        for z_open in cfg.z_open_list:
+            for z_close in cfg.z_close_list:
                 summary = simulate_open_only(
                     features,
                     "SYNTH",
                     cfg,
                     window,
-                    z_ab,
-                    z_ba,
+                    z_open,
+                    z_close,
                 )
                 checked += 1
-                side_sum = summary["orders_side_ab"] + summary["orders_side_ba"]
-                if summary["orders"] != side_sum:
+                if summary["orders"] != summary["open_orders"] + summary["close_orders"]:
                     failures.append(
-                        f"w={window} z_ab={z_ab} z_ba={z_ba}: "
-                        f"orders={summary['orders']} != ab+ba={side_sum}"
+                        f"w={window} z_open={z_open} z_close={z_close}: "
+                        f"orders={summary['orders']} != open_orders({summary['open_orders']}) + "
+                        f"close_orders({summary['close_orders']})"
                     )
-                if summary["close_orders"] != 0:
+                if summary["final_a_position_qty"] != 0.0 or summary["final_b_position_qty"] != 0.0:
                     failures.append(
-                        f"w={window} z_ab={z_ab} z_ba={z_ba}: close_orders={summary['close_orders']}"
-                    )
-                if summary["close_profit_in_sim"] != 0.0:
-                    failures.append(
-                        f"w={window} z_ab={z_ab} z_ba={z_ba}: "
-                        f"close_profit_in_sim={summary['close_profit_in_sim']}"
+                        f"w={window} z_open={z_open} z_close={z_close}: "
+                        f"final position not flat: a={summary['final_a_position_qty']}, b={summary['final_b_position_qty']}"
                     )
 
     print(f"Checked {checked} parameter combos on synthetic data.")
@@ -103,12 +99,12 @@ def run_checks() -> None:
         0.0,
         0.0,
     )
-    print("Sample combo (window=10, z_ab=0, z_ba=0):")
+    print("Sample combo (window=10, z_open=0, z_close=0):")
     print(f"  orders={sample['orders']}")
-    print(f"  orders_side_ab={sample['orders_side_ab']}")
-    print(f"  orders_side_ba={sample['orders_side_ba']}")
+    print(f"  open_orders={sample['open_orders']}")
     print(f"  close_orders={sample['close_orders']}")
     print(f"  open_profit={sample['open_profit_usd_total']:.4f}")
+    print(f"  close_profit_in_sim={sample['close_profit_in_sim']:.4f}")
     print(f"  profit_total={sample['profit_usd_total']:.4f}")
     if sample["orders"] <= 0:
         raise SystemExit("Sample combo produced zero orders; synthetic fixture too weak.")

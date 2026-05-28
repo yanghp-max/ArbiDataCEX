@@ -12,6 +12,7 @@ import pandas as pd
 # 固定滚动窗口（分钟）
 WINDOW_MIN_LIST_FIXED = [10, 30, 60, 180, 360, 720]
 DEFAULT_Z_OPEN_LIST_STR = "0,1,2,3,4"
+DEFAULT_Z_CLOSE_LIST_STR = "0,1,2,3,4"
 
 
 @dataclass
@@ -20,6 +21,7 @@ class BacktestConfig:
     output_dir: str
     window_min: int
     z_open: float
+    z_close: float
     order_usd: float
     max_position_usd: float
     cooldown_ms: int
@@ -28,34 +30,29 @@ class BacktestConfig:
     slippage_bps_total: float
     symbols: Optional[List[str]]
     z_open_list: List[float]
-    z_open_ab_list: List[float]
-    z_open_ba_list: List[float]
+    z_close_list: List[float]
     window_min_list: List[int]
 
 
 def parse_args() -> BacktestConfig:
     parser = argparse.ArgumentParser(
-        description="CEX-CEX Netting backtest (Binance=A, Gate=B) - Optimized for c7i.2xlarge with 14G RAM"
+        description="CEX-CEX Netting backtest (Binance=A, Gate=B) - open/close with unified z_open & z_close"
     )
     parser.add_argument("--data_dir", default="./data/meta_data")
     parser.add_argument("--output_dir", default="./data/output_open_only")
-    
+
     parser.add_argument("--window_min", type=int, default=30)
     parser.add_argument("--z_open", type=float, default=2.0)
+    parser.add_argument("--z_close", type=float, default=0.0)
     parser.add_argument(
         "--z_open_list",
         default=DEFAULT_Z_OPEN_LIST_STR,
-        help="Comma separated z_open values, e.g. 1.2,1.5,2.0. If set, overrides default list."
+        help="Comma separated z_open thresholds for all open/add signals.",
     )
     parser.add_argument(
-        "--z_open_ab_list",
-        default=None,
-        help="Comma separated z_open thresholds for -a+b direction. Default inherits --z_open_list."
-    )
-    parser.add_argument(
-        "--z_open_ba_list",
-        default=None,
-        help="Comma separated z_open thresholds for +a-b direction. Default inherits --z_open_list."
+        "--z_close_list",
+        default=DEFAULT_Z_CLOSE_LIST_STR,
+        help="Comma separated z_close thresholds for all close signals.",
     )
     parser.add_argument("--order_usd", type=float, default=100.0)
     parser.add_argument("--max_position_usd", type=float, default=2000.0)
@@ -64,34 +61,28 @@ def parse_args() -> BacktestConfig:
         "--funding_min",
         type=float,
         default=-0.1,
-        help="If either side funding rate is below this, do not open."
+        help="If either side funding rate is below this, do not open or close.",
     )
     parser.add_argument("--fee_bps_total", type=float, default=4.0)
     parser.add_argument("--slippage_bps_total", type=float, default=4.0)
     parser.add_argument(
         "--symbols",
         default="",
-        help="Comma separated symbols, e.g. BTCUSDT,ETHUSDT. Empty means all csv files."
+        help="Comma separated symbols, e.g. BTCUSDT,ETHUSDT. Empty means all csv files.",
     )
     args = parser.parse_args()
 
     symbols = [s.strip() for s in args.symbols.split(",") if s.strip()] or None
     z_open_list = [float(x.strip()) for x in args.z_open_list.split(",") if x.strip()]
-    if args.z_open_ab_list and args.z_open_ab_list.strip():
-        z_open_ab_list = [float(x.strip()) for x in args.z_open_ab_list.split(",") if x.strip()]
-    else:
-        z_open_ab_list = list(z_open_list)
-    if args.z_open_ba_list and args.z_open_ba_list.strip():
-        z_open_ba_list = [float(x.strip()) for x in args.z_open_ba_list.split(",") if x.strip()]
-    else:
-        z_open_ba_list = list(z_open_list)
-        
+    z_close_list = [float(x.strip()) for x in args.z_close_list.split(",") if x.strip()]
+
     window_min_list = list(WINDOW_MIN_LIST_FIXED)
     return BacktestConfig(
         data_dir=args.data_dir,
         output_dir=args.output_dir,
         window_min=args.window_min,
         z_open=args.z_open,
+        z_close=args.z_close,
         order_usd=args.order_usd,
         max_position_usd=args.max_position_usd,
         cooldown_ms=args.cooldown_ms,
@@ -100,8 +91,7 @@ def parse_args() -> BacktestConfig:
         slippage_bps_total=args.slippage_bps_total,
         symbols=symbols,
         z_open_list=z_open_list,
-        z_open_ab_list=z_open_ab_list,
-        z_open_ba_list=z_open_ba_list,
+        z_close_list=z_close_list,
         window_min_list=window_min_list,
     )
 
@@ -235,8 +225,8 @@ def simulate_open_only(
     symbol: str,
     cfg: BacktestConfig,
     current_window_min: int,
-    current_z_open_ab: float,
-    current_z_open_ba: float,
+    current_z_open: float,
+    current_z_close: float,
 ) -> Dict:
     funding_a_col = pick_col(df, ["binance_funding_rate"])
     funding_b_col = pick_col(df, ["gate_funding_rate"])
@@ -248,11 +238,12 @@ def simulate_open_only(
     a_pos_qty = 0.0
     b_pos_qty = 0.0
     max_seen_position_qty = 0.0
+    locked_direction: Optional[str] = None
+    locked_branch: Optional[str] = None
 
     last_order_ts = -10**18
     trade_id = 0
-    orders_side_ab = 0
-    orders_side_ba = 0
+    open_orders = 0
     close_orders = 0
     forced_flat_count = 0
 
@@ -263,19 +254,35 @@ def simulate_open_only(
     blocked_by_spread_filter = 0
     evaluated_points = 0
 
-    profit_total = 0.0
     open_profit_total = 0.0
     close_profit_in_sim = 0.0
     fee_rate_total = (cfg.fee_bps_total + cfg.slippage_bps_total) / 10000.0  # 默认万8
     fee_rate_per_leg = fee_rate_total / 2.0
     total_adj_spread_pct = 0.0
+    open_trade_count = 0
     # 两套未对冲持仓分层（FIFO / LIFO）用于回滚口径
-    # 每层结构: {"direction": "+a-b"/"-a+b", "qty": float, "a_px": float, "b_px": float}
     open_lots_fifo: List[Dict] = []
     open_lots_lifo: List[Dict] = []
 
     def normalize_qty(qty: float) -> float:
         return float(np.round(qty, 12))
+
+    def is_flat() -> bool:
+        return abs(a_pos_qty) <= 1e-12 and abs(b_pos_qty) <= 1e-12
+
+    def clear_lock() -> None:
+        nonlocal locked_direction, locked_branch
+        locked_direction = None
+        locked_branch = None
+
+    def force_flat() -> None:
+        nonlocal a_pos_qty, b_pos_qty, forced_flat_count
+        a_pos_qty = 0.0
+        b_pos_qty = 0.0
+        open_lots_fifo.clear()
+        open_lots_lifo.clear()
+        clear_lock()
+        forced_flat_count += 1
 
     def calc_close_profit(close_qty: float, a_px_close: float, b_px_close: float, side: str) -> float:
         if close_qty <= 1e-12:
@@ -332,7 +339,7 @@ def simulate_open_only(
             return 0.0
         return max(0.0, high)
 
-    def read_signal_row(row) -> Optional[Dict[str, float]]:
+    def read_signal_row(row) -> Optional[Dict]:
         median_ab = float(row["median_ab"])
         median_ba = float(row["median_ba"])
         mad_ab = float(row["mad_ab"])
@@ -348,10 +355,10 @@ def simulate_open_only(
         spread_ba_adj = float(row["spread_ba_adj"])
         branch_ab = branch_for_ab(median_ab, median_ba)
         branch_ba = branch_for_ba(median_ab, median_ba)
-        open_z_ab, _ = compute_z_pair(
+        open_z_ab, close_z_ab = compute_z_pair(
             spread_ab_adj, spread_ba_adj, median_ab, median_ba, mad_ab, mad_ba, "-a+b", branch_ab
         )
-        open_z_ba, _ = compute_z_pair(
+        open_z_ba, close_z_ba = compute_z_pair(
             spread_ab_adj, spread_ba_adj, median_ab, median_ba, mad_ab, mad_ba, "+a-b", branch_ba
         )
         if pd.isna(open_z_ab) or pd.isna(open_z_ba):
@@ -367,14 +374,29 @@ def simulate_open_only(
             "branch_ba": branch_ba,
             "open_z_ab": open_z_ab,
             "open_z_ba": open_z_ba,
+            "close_z_ab": close_z_ab,
+            "close_z_ba": close_z_ba,
         }
+
+    def locked_z_values(signal: Dict, direction: str, branch: str) -> Tuple[float, float]:
+        open_z, close_z = compute_z_pair(
+            signal["spread_ab_adj"],
+            signal["spread_ba_adj"],
+            signal["median_ab"],
+            signal["median_ba"],
+            signal["mad_ab"],
+            signal["mad_ba"],
+            direction,
+            branch,
+        )
+        return open_z, close_z
 
     def apply_position_trade(direction: str, qty: float) -> Tuple[float, float]:
         if direction == "-a+b":
             return a_pos_qty - qty, b_pos_qty + qty
         return a_pos_qty + qty, b_pos_qty - qty
 
-    def get_trade_prices(direction: str, row) -> Tuple[float, float, bool]:
+    def get_open_prices(direction: str, row) -> Tuple[float, float, bool]:
         if direction == "-a+b":
             a_px = float(row[a_bid_col])
             b_px = float(row[b_ask_col])
@@ -384,21 +406,34 @@ def simulate_open_only(
         ok = np.isfinite(a_px) and np.isfinite(b_px) and a_px > 0 and b_px > 0
         return a_px, b_px, ok
 
-    def spread_filter_pass(direction: str, signal: Dict[str, float]) -> bool:
+    def get_close_prices(direction: str, row) -> Tuple[float, float, bool]:
+        if direction == "-a+b":
+            a_px = float(row[a_ask_col])
+            b_px = float(row[b_bid_col])
+        else:
+            a_px = float(row[a_bid_col])
+            b_px = float(row[b_ask_col])
+        ok = np.isfinite(a_px) and np.isfinite(b_px) and a_px > 0 and b_px > 0
+        return a_px, b_px, ok
+
+    def spread_filter_pass(direction: str, signal: Dict) -> bool:
         adj_spread = signal["spread_ab_adj"] if direction == "-a+b" else signal["spread_ba_adj"]
         return 0.0 <= adj_spread <= 10.0
 
-    def execute_open(direction: str, row, signal: Dict[str, float]) -> bool:
+    def held_qty() -> float:
+        return min(abs(a_pos_qty), abs(b_pos_qty))
+
+    def execute_open(direction: str, row, signal: Dict) -> bool:
         nonlocal a_pos_qty, b_pos_qty, max_seen_position_qty, trade_id, last_order_ts
-        nonlocal profit_total, open_profit_total, total_adj_spread_pct
-        nonlocal orders_side_ab, orders_side_ba, blocked_by_position, clipped_by_position
-        nonlocal blocked_by_spread_filter
+        nonlocal open_profit_total, total_adj_spread_pct, open_trade_count
+        nonlocal open_orders, blocked_by_position, clipped_by_position
+        nonlocal blocked_by_spread_filter, locked_direction, locked_branch
 
         if not spread_filter_pass(direction, signal):
             blocked_by_spread_filter += 1
             return False
 
-        a_px, b_px, ok = get_trade_prices(direction, row)
+        a_px, b_px, ok = get_open_prices(direction, row)
         if not ok:
             return False
 
@@ -420,24 +455,73 @@ def simulate_open_only(
 
         if direction == "-a+b":
             gross_profit = qty * a_px - qty * b_px
-            orders_side_ab += 1
         else:
             gross_profit = qty * b_px - qty * a_px
-            orders_side_ba += 1
+        open_orders += 1
 
         fee_cost = abs(qty * a_px) * fee_rate_per_leg + abs(qty * b_px) * fee_rate_per_leg
         trade_profit = gross_profit - fee_cost
 
+        was_flat = is_flat()
         a_pos_qty, b_pos_qty = apply_position_trade(direction, qty)
         add_open_lot(open_lots_fifo, direction, qty, a_px, b_px, mode="fifo")
         add_open_lot(open_lots_lifo, direction, qty, a_px, b_px, mode="lifo")
         max_seen_position_qty = max(max_seen_position_qty, abs(a_pos_qty), abs(b_pos_qty))
         trade_id += 1
         last_order_ts = int(row["timestamp"])
-        profit_total += trade_profit
         open_profit_total += trade_profit
+        open_trade_count += 1
         adj_spread = signal["spread_ab_adj"] if direction == "-a+b" else signal["spread_ba_adj"]
         total_adj_spread_pct += adj_spread
+
+        if was_flat:
+            locked_direction = direction
+            locked_branch = signal["branch_ab"] if direction == "-a+b" else signal["branch_ba"]
+        return True
+
+    def execute_close(row, signal: Dict) -> bool:
+        nonlocal a_pos_qty, b_pos_qty, trade_id, last_order_ts, close_profit_in_sim, close_orders
+        nonlocal blocked_by_spread_filter
+
+        if locked_direction is None:
+            return False
+
+        current_held = held_qty()
+        if current_held <= 1e-12:
+            return False
+
+        close_trade_direction = "+a-b" if locked_direction == "-a+b" else "-a+b"
+        if not spread_filter_pass(close_trade_direction, signal):
+            blocked_by_spread_filter += 1
+            return False
+
+        a_px, b_px, ok = get_close_prices(locked_direction, row)
+        if not ok:
+            return False
+
+        qty = normalize_qty(min(cfg.order_usd / a_px, current_held))
+        if qty <= 1e-12:
+            return False
+
+        trade_profit = calc_close_profit(qty, a_px, b_px, locked_direction)
+        a_pos_qty, b_pos_qty = apply_position_trade(close_trade_direction, qty)
+        add_open_lot(open_lots_fifo, close_trade_direction, qty, a_px, b_px, mode="fifo")
+        add_open_lot(open_lots_lifo, close_trade_direction, qty, a_px, b_px, mode="lifo")
+
+        if (
+            (a_pos_qty > 1e-12 and b_pos_qty > 1e-12)
+            or (a_pos_qty < -1e-12 and b_pos_qty < -1e-12)
+            or (abs(a_pos_qty) > 1e-12 and abs(b_pos_qty) <= 1e-12)
+            or (abs(b_pos_qty) > 1e-12 and abs(a_pos_qty) <= 1e-12)
+        ):
+            force_flat()
+        elif is_flat():
+            clear_lock()
+
+        trade_id += 1
+        last_order_ts = int(row["timestamp"])
+        close_profit_in_sim += trade_profit
+        close_orders += 1
         return True
 
     if len(df) > 0:
@@ -472,57 +556,69 @@ def simulate_open_only(
             blocked_by_funding += 1
             continue
 
-        can_open_ab = signal["open_z_ab"] >= current_z_open_ab
-        can_open_ba = signal["open_z_ba"] >= current_z_open_ba
-        if not can_open_ab and not can_open_ba:
+        if is_flat():
+            can_open_ab = signal["open_z_ab"] >= current_z_open
+            can_open_ba = signal["open_z_ba"] >= current_z_open
+            if not can_open_ab and not can_open_ba:
+                continue
+            if can_open_ab and can_open_ba:
+                trade_direction = (
+                    "-a+b" if signal["open_z_ab"] >= signal["open_z_ba"] else "+a-b"
+                )
+            elif can_open_ab:
+                trade_direction = "-a+b"
+            else:
+                trade_direction = "+a-b"
+            execute_open(trade_direction, row, signal)
             continue
-        if can_open_ab and can_open_ba:
-            trade_direction = (
-                "-a+b" if signal["open_z_ab"] >= signal["open_z_ba"] else "+a-b"
-            )
-        elif can_open_ab:
-            trade_direction = "-a+b"
-        else:
-            trade_direction = "+a-b"
 
-        execute_open(trade_direction, row, signal)
+        assert locked_direction is not None and locked_branch is not None
+        open_z, close_z = locked_z_values(signal, locked_direction, locked_branch)
+        if pd.isna(open_z) or pd.isna(close_z):
+            continue
+
+        can_add = open_z >= current_z_open
+        can_close = close_z >= current_z_close
+        if not can_add and not can_close:
+            continue
+        if can_add and can_close:
+            if open_z >= close_z:
+                execute_open(locked_direction, row, signal)
+            else:
+                execute_close(row, signal)
+        elif can_add:
+            execute_open(locked_direction, row, signal)
+        else:
+            execute_close(row, signal)
 
     # 回测结束后三种强平/回滚口径：
-    # 1) last_tick
-    # 2) rollback_unopened_fifo
-    # 3) rollback_unopened_lifo
     close_profit_last_tick = 0.0
     close_profit_rollback_unopened_fifo = 0.0
     close_profit_rollback_unopened_lifo = 0.0
-    if len(df) > 0 and (abs(a_pos_qty) > 1e-12 or abs(b_pos_qty) > 1e-12):
+    if len(df) > 0 and not is_flat():
         last = df.iloc[-1]
-        close_qty = min(abs(a_pos_qty), abs(b_pos_qty))
-        if close_qty > 1e-12:
-            if a_pos_qty < 0:
-                side = "-a+b"
-                # last tick 反向平仓价格：A 回补 ask，B 平多 bid
+        close_qty = held_qty()
+        if close_qty > 1e-12 and locked_direction is not None:
+            if locked_direction == "-a+b":
                 a_last_tick_px = float(last[a_ask_col])
                 b_last_tick_px = float(last[b_bid_col])
-            elif a_pos_qty > 0:
-                side = "+a-b"
-                # last tick 反向平仓价格：A 平多 bid，B 回补 ask
+            else:
                 a_last_tick_px = float(last[a_bid_col])
                 b_last_tick_px = float(last[b_ask_col])
-            else:
-                side = ""
-                a_last_tick_px = np.nan
-                b_last_tick_px = np.nan
 
-            close_profit_last_tick = calc_close_profit(close_qty, a_last_tick_px, b_last_tick_px, side)
+            close_profit_last_tick = calc_close_profit(
+                close_qty, a_last_tick_px, b_last_tick_px, locked_direction
+            )
 
-            # rollback FIFO
-            lots_for_side_fifo = [lot for lot in open_lots_fifo if lot["direction"] == side and lot["qty"] > 1e-12]
+            lots_for_side_fifo = [
+                lot for lot in open_lots_fifo if lot["direction"] == locked_direction and lot["qty"] > 1e-12
+            ]
             rollback_amount_fifo = 0.0
             for lot in lots_for_side_fifo:
                 q = float(lot["qty"])
                 a_open = float(lot["a_px"])
                 b_open = float(lot["b_px"])
-                if side == "-a+b":
+                if locked_direction == "-a+b":
                     gross_open = q * a_open - q * b_open
                 else:
                     gross_open = q * b_open - q * a_open
@@ -530,14 +626,15 @@ def simulate_open_only(
                 rollback_amount_fifo += (gross_open - fee_open)
             close_profit_rollback_unopened_fifo = -rollback_amount_fifo
 
-            # rollback LIFO
-            lots_for_side_lifo = [lot for lot in open_lots_lifo if lot["direction"] == side and lot["qty"] > 1e-12]
+            lots_for_side_lifo = [
+                lot for lot in open_lots_lifo if lot["direction"] == locked_direction and lot["qty"] > 1e-12
+            ]
             rollback_amount_lifo = 0.0
             for lot in lots_for_side_lifo:
                 q = float(lot["qty"])
                 a_open = float(lot["a_px"])
                 b_open = float(lot["b_px"])
-                if side == "-a+b":
+                if locked_direction == "-a+b":
                     gross_open = q * a_open - q * b_open
                 else:
                     gross_open = q * b_open - q * a_open
@@ -545,26 +642,24 @@ def simulate_open_only(
                 rollback_amount_lifo += (gross_open - fee_open)
             close_profit_rollback_unopened_lifo = -rollback_amount_lifo
 
-        # 主汇总字段默认使用 last_tick 口径
-        profit_total += close_profit_last_tick
         a_pos_qty = 0.0
         b_pos_qty = 0.0
+        clear_lock()
 
-    close_profit_usd_total = close_profit_last_tick
-    profit_total_last_tick = open_profit_total + close_profit_last_tick
+    close_profit_usd_total = close_profit_in_sim + close_profit_last_tick
+    profit_total_last_tick = open_profit_total + close_profit_usd_total
     profit_total_rollback_unopened_fifo = (
-        open_profit_total + close_profit_rollback_unopened_fifo
+        open_profit_total + close_profit_in_sim + close_profit_rollback_unopened_fifo
     )
     profit_total_rollback_unopened_lifo = (
-        open_profit_total + close_profit_rollback_unopened_lifo
+        open_profit_total + close_profit_in_sim + close_profit_rollback_unopened_lifo
     )
 
     summary = {
         "symbol": symbol,
         "rows": len(df),
         "orders": trade_id,
-        "orders_side_ab": orders_side_ab,
-        "orders_side_ba": orders_side_ba,
+        "open_orders": open_orders,
         "close_orders": close_orders,
         "forced_flat_count": forced_flat_count,
         "final_a_position_qty": a_pos_qty,
@@ -581,7 +676,7 @@ def simulate_open_only(
         "profit_usd_total_last_tick": profit_total_last_tick,
         "profit_usd_total_rollback_unopened_fifo": profit_total_rollback_unopened_fifo,
         "profit_usd_total_rollback_unopened_lifo": profit_total_rollback_unopened_lifo,
-        "avg_adj_spread_pct": float(total_adj_spread_pct / trade_id) if trade_id > 0 else 0.0,
+        "avg_adj_spread_pct": float(total_adj_spread_pct / open_trade_count) if open_trade_count > 0 else 0.0,
         "blocked_by_funding": blocked_by_funding,
         "blocked_by_rate_limit": blocked_by_rate_limit,
         "blocked_by_position": blocked_by_position,
@@ -610,9 +705,9 @@ def process_single_file(file_info: tuple) -> list:
     path, cfg, file_idx, total_files = file_info
     symbol = os.path.splitext(os.path.basename(path))[0]
     file_summaries = []
-    
+
     print(f"[PROCESS] 进程分配成功: [{file_idx}/{total_files}] 正在算 {symbol}")
-    
+
     try:
         raw_data = load_symbol_csv(path)
         raw_data = ensure_spreads(raw_data)
@@ -623,34 +718,34 @@ def process_single_file(file_info: tuple) -> list:
     for window_min_value in cfg.window_min_list:
         features = compute_signal_features(raw_data, cfg, current_window_min=window_min_value)
 
-        for z_open_ab_value in cfg.z_open_ab_list:
-            for z_open_ba_value in cfg.z_open_ba_list:
+        for z_open_value in cfg.z_open_list:
+            for z_close_value in cfg.z_close_list:
                 try:
                     summary = simulate_open_only(
                         features,
                         symbol,
                         cfg,
                         current_window_min=window_min_value,
-                        current_z_open_ab=z_open_ab_value,
-                        current_z_open_ba=z_open_ba_value,
+                        current_z_open=z_open_value,
+                        current_z_close=z_close_value,
                     )
                     summary["window_min"] = window_min_value
-                    summary["z_open_ab"] = z_open_ab_value
-                    summary["z_open_ba"] = z_open_ba_value
+                    summary["z_open"] = z_open_value
+                    summary["z_close"] = z_close_value
                     file_summaries.append(summary)
                 except Exception as exc:
                     print(
                         f"[ERROR] 策略出错 {symbol} w={window_min_value}, "
-                        f"z_ab={z_open_ab_value}, z_ba={z_open_ba_value}: {exc}"
+                        f"z_open={z_open_value}, z_close={z_close_value}: {exc}"
                     )
-                
+
     print(f"[SUCCESS] 完成处理: {symbol}，生成组合记录 {len(file_summaries)} 条")
-    
+
     del raw_data
-    if 'features' in locals():
+    if "features" in locals():
         del features
-    gc.collect() 
-    
+    gc.collect()
+
     return file_summaries
 
 
@@ -661,34 +756,35 @@ def main():
         print(f"[ERROR] no csv files found in {cfg.data_dir} with symbols={cfg.symbols}")
         return
 
-    TARGET_WORKERS = 2 
+    TARGET_WORKERS = 2
     total_files_count = len(files)
-    
+
     print(
         f"[START] AWS c7i.2xlarge 内存防护追加版系统启动 | 锁定核心数: {TARGET_WORKERS}\n"
         f"数据读取目录: {cfg.data_dir} | 结果输出目录: {cfg.output_dir}\n"
         f"待扫描文件数: {total_files_count} | 参数复杂度: {len(cfg.window_min_list)} 窗口 × "
-        f"{len(cfg.z_open_ab_list)}(z_ab阈值) × {len(cfg.z_open_ba_list)}(z_ba阈值)"
+        f"{len(cfg.z_open_list)}(z_open) × {len(cfg.z_close_list)}(z_close)"
     )
 
     tasks = [(f, cfg, i, total_files_count) for i, f in enumerate(files, 1)]
-    
+
     os.makedirs(cfg.output_dir, exist_ok=True)
     summary_path = os.path.join(cfg.output_dir, "summary_open_only.csv")
-    
+
     if os.path.exists(summary_path):
         os.remove(summary_path)
 
     cols_order = [
-        "symbol", "window_min", "z_open_ab", "z_open_ba", "orders",
-        "orders_side_ab", "orders_side_ba", 
+        "symbol", "window_min", "z_open", "z_close", "orders",
+        "open_orders", "close_orders",
         "open_profit_usd_total",
+        "close_profit_in_sim",
         "close_profit_usd_total", "profit_usd_total",
         "close_profit_last_tick",
         "close_profit_rollback_unopened_fifo", "close_profit_rollback_unopened_lifo",
         "profit_usd_total_last_tick",
         "profit_usd_total_rollback_unopened_fifo", "profit_usd_total_rollback_unopened_lifo",
-        "max_seen_position_qty", "final_a_position_qty", "final_b_position_qty"
+        "max_seen_position_qty", "final_a_position_qty", "final_b_position_qty",
     ]
 
     ctx = multiprocessing.get_context("spawn")
@@ -701,22 +797,22 @@ def main():
                     completed_count += 1
                     print(f"[PROGRESS] ▓▓ 任务进度: {completed_count}/{total_files_count} | 某个文件执行失败跳过")
                     continue
-                
+
                 completed_count += 1
-                current_symbol = res_list[0]['symbol']
-                
+                current_symbol = res_list[0]["symbol"]
+
                 df_chunk = pd.DataFrame(res_list)
                 remaining_cols = [c for c in df_chunk.columns if c not in cols_order]
                 df_chunk = df_chunk[cols_order + remaining_cols]
-                
+
                 is_first_write = not os.path.exists(summary_path)
-                df_chunk.to_csv(summary_path, mode='a', index=False, header=is_first_write)
-                
+                df_chunk.to_csv(summary_path, mode="a", index=False, header=is_first_write)
+
                 print(
                     f"[PROGRESS] ▓▓ 任务进度: {completed_count}/{total_files_count} | "
                     f"💾 刚刚成功写入: {current_symbol}"
                 )
-                
+
         except Exception as e:
             print(f"\n[FATAL ERROR] 捕获到多进程异常: {e}")
             return
