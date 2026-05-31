@@ -69,8 +69,14 @@ export class DashboardBridge {
       spreadBa: null,
       spreadAbAdj: null,
       spreadBaAdj: null,
-      zAb: null,
-      zBa: null,
+      openZAb: null,
+      openZBa: null,
+      closeZAb: null,
+      closeZBa: null,
+      branchAb: null,
+      branchBa: null,
+      lockedDirection: null,
+      lockedBranch: null,
       fundingA: null,
       fundingB: null,
       windowReady: false,
@@ -142,7 +148,7 @@ export class DashboardBridge {
     this.state.progress.overallPct = Math.round((sum / rows.length) * 10) / 10;
   }
 
-  updateMarketSnapshot({ symbol, tick, spreads, signal }) {
+  updateMarketSnapshot({ symbol, tick, spreads, signal, lock }) {
     if (!this.enabled) return;
 
     const sym = this.state.symbols[symbol] || this.#emptySymbol(symbol);
@@ -167,8 +173,14 @@ export class DashboardBridge {
     sym.spreadBa = spreads?.spreadBa ?? null;
     sym.spreadAbAdj = spreads?.spreadAbAdj ?? null;
     sym.spreadBaAdj = spreads?.spreadBaAdj ?? null;
-    sym.zAb = signal?.zAb ?? null;
-    sym.zBa = signal?.zBa ?? null;
+    sym.openZAb = signal?.openZAb ?? null;
+    sym.openZBa = signal?.openZBa ?? null;
+    sym.closeZAb = signal?.closeZAb ?? null;
+    sym.closeZBa = signal?.closeZBa ?? null;
+    sym.branchAb = signal?.branchAb ?? null;
+    sym.branchBa = signal?.branchBa ?? null;
+    sym.lockedDirection = lock?.direction ?? null;
+    sym.lockedBranch = lock?.branch ?? null;
     sym.windowReady = Boolean(signal?.windowReady);
     sym.updatedAt = Date.now();
     this.state.symbols[symbol] = sym;

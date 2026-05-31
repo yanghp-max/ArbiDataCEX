@@ -42,8 +42,11 @@ defineProps({
     </div>
 
     <div v-if="card.windowReady" class="z-row">
-      <span>zAb {{ fmt(card.zAb, 2) }}</span>
-      <span>zBa {{ fmt(card.zBa, 2) }}</span>
+      <span>openZ ab/ba {{ fmt(card.openZAb, 2) }} / {{ fmt(card.openZBa, 2) }}</span>
+      <span>closeZ ab/ba {{ fmt(card.closeZAb, 2) }} / {{ fmt(card.closeZBa, 2) }}</span>
+    </div>
+    <div v-if="card.lockedDirection" class="z-row">
+      <span>lock {{ card.lockedDirection }} · branch {{ card.lockedBranch }}</span>
     </div>
     <div class="meta-row">
       <span>age {{ card.priceAgeMs != null ? card.priceAgeMs + 'ms' : '-' }}</span>

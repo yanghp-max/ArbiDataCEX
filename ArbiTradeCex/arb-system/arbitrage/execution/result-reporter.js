@@ -40,7 +40,7 @@ export class ResultReporter {
     };
   }
 
-  recordTrade({ symbol, direction, fill, netPnl, accountCache, dashboardBridge }) {
+  recordTrade({ symbol, direction, action = 'open', lockedDirection, fill, netPnl, accountCache, dashboardBridge }) {
     this.cumPnl += netPnl;
     this.tradeCount += 1;
     if (netPnl >= 0) this.winCount += 1;
@@ -51,6 +51,8 @@ export class ResultReporter {
       symbol,
       timestamp: Date.now(),
       direction,
+      action,
+      lockedDirection: lockedDirection ?? direction,
       aPriceUsed: fill.aPriceUsed,
       bPriceUsed: fill.bPriceUsed,
       qty: fill.qty,

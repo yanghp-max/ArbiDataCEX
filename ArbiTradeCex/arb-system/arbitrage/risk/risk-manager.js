@@ -117,6 +117,14 @@ export class RiskManager {
     if (Math.abs(aAfter) > maxQ) q = Math.min(q, maxQ - Math.abs(aBefore));
     return Math.max(0, q);
   }
+
+  clipCloseQty(qty, tick, accountCache) {
+    const sym = tick.symbol;
+    const aBefore = accountCache.getPosition('binance', sym);
+    const bBefore = accountCache.getPosition('gate', sym);
+    const held = Math.min(Math.abs(aBefore), Math.abs(bBefore));
+    return Math.max(0, Math.min(qty, held));
+  }
 }
 
 export function finalCheckPass(tick, direction, adjSpread, maxPriceAgeMs) {
