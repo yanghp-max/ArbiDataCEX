@@ -49,7 +49,10 @@ defineProps({
       <span>lock {{ card.lockedDirection }} · branch {{ card.lockedBranch }}</span>
     </div>
     <div class="meta-row">
-      <span>age {{ card.priceAgeMs != null ? card.priceAgeMs + 'ms' : '-' }}</span>
+      <span>price age {{ fmt(card.priceAgeMs, 0) }}ms · leg A/B {{ fmt(card.aAgeMs, 0) }}/{{ fmt(card.bAgeMs, 0) }}ms</span>
+      <span>lat A/B {{ fmt(card.aLatencyMs, 0) }}/{{ fmt(card.bLatencyMs, 0) }}ms</span>
+    </div>
+    <div class="meta-row">
       <span>funding A/B {{ fmt(card.fundingA, 4) }} / {{ fmt(card.fundingB, 4) }}</span>
     </div>
   </article>

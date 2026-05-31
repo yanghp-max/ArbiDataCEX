@@ -14,6 +14,7 @@ export class DashboardBridge {
     this.port = options.port ?? 3456;
     this.windowSeconds = options.windowSeconds ?? 3600;
     this.minDataPoints = options.minDataPoints ?? 50;
+    this.maxPriceAgeMs = options.maxPriceAgeMs ?? 1000;
     this.symbols = options.symbols ?? [];
     this.server = null;
     this.state = {
@@ -61,6 +62,10 @@ export class DashboardBridge {
       symbol,
       status: 'waiting_quotes',
       priceAgeMs: null,
+      aAgeMs: null,
+      bAgeMs: null,
+      aLatencyMs: null,
+      bLatencyMs: null,
       aBid: null,
       aAsk: null,
       bBid: null,
@@ -160,9 +165,13 @@ export class DashboardBridge {
       return;
     }
 
-    const stale = tick.priceAgeMs > 5000;
+    const stale = tick.priceAgeMs > this.maxPriceAgeMs;
     sym.status = stale ? 'stale' : (signal?.windowReady ? 'ready' : 'collecting');
     sym.priceAgeMs = tick.priceAgeMs;
+    sym.aAgeMs = tick.aAgeMs ?? null;
+    sym.bAgeMs = tick.bAgeMs ?? null;
+    sym.aLatencyMs = tick.aLatencyMs ?? null;
+    sym.bLatencyMs = tick.bLatencyMs ?? null;
     sym.aBid = tick.aBid;
     sym.aAsk = tick.aAsk;
     sym.bBid = tick.bBid;

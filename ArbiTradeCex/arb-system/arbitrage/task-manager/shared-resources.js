@@ -33,6 +33,7 @@ export class SharedResources {
       port: dashCfg.port ?? 3456,
       windowSeconds: strat.windowSeconds,
       minDataPoints: strat.minDataPoints,
+      maxPriceAgeMs: strat.maxPriceAgeMs ?? 1000,
       symbols: strat.symbols,
       tradingEnabled: this.tradingEnabled,
       useMockAccount: Boolean(strat.useMockAccount) && !this.tradingEnabled

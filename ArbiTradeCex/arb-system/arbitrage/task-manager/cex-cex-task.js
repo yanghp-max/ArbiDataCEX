@@ -20,7 +20,8 @@ export class CexCexTask {
     this.cfg = {
       ...strategyConfig,
       zOpen: strategyConfig.zOpen ?? strategyConfig.zOpenAb ?? 2.0,
-      zClose: strategyConfig.zClose ?? 0.0
+      zClose: strategyConfig.zClose ?? 0.0,
+      signalMaxAgeMs: strategyConfig.signalMaxAgeMs ?? 50
     };
     this.precision = precisionChecker;
     this.risk = new RiskManager(strategyConfig);
@@ -165,6 +166,11 @@ export class CexCexTask {
       qty = this.risk.clipQty(qty, tick, execDirection, this.sr.accountCache);
     }
     if (qty <= 0) return;
+
+    if (Date.now() - tick.timestamp > this.cfg.signalMaxAgeMs) {
+      this.sr.eventBus.emitExecutionStatus({ stage: 'SIGNAL_STALE', symbol });
+      return;
+    }
 
     const posBefore = {
       a: this.sr.accountCache.getPosition('binance', symbol),
