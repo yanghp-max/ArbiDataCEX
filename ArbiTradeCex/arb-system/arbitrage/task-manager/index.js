@@ -36,21 +36,16 @@ export class TaskManager {
     const cexManager = this.sharedResources.cexManager;
     const adapterSymbols = strat.symbols.map((s) => cexManager.normalizeSymbol('binance', s));
 
-    const onQuoteUpdate = (symbol) => {
-      this.task.onTick(symbol).catch((e) => console.error('[tick]', symbol, e.message));
-    };
-
     const binance = cexManager.getAdapter('binance');
     const gate = cexManager.getAdapter('gate');
 
+    // 对齐 ArbiTrade-1：WS 只更新行情缓存；策略 tick 由定时器统一驱动（避免 WS+timer 双触发并发）
     binance.on(EventTypes.TICKER, (t) => {
       const symbol = t.symbol.replace('-', '');
       this.sharedResources.quoteAggregator.onTicker('binance', { ...t, symbol });
-      onQuoteUpdate(symbol);
     });
     gate.on(EventTypes.TICKER, (t) => {
       this.sharedResources.quoteAggregator.onTicker('gate', t);
-      onQuoteUpdate(t.symbol.replace('-', ''));
     });
 
     await Promise.all([

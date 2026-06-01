@@ -28,7 +28,7 @@ export class AccountCache {
   }
 
   setPosition(exchange, symbol, qty) {
-    const key = `${exchange}:${symbol}`;
+    const key = `${exchange}:${this.#compactSymbol(symbol)}`;
     if (Math.abs(qty) < 1e-12) {
       this.positionCache.delete(key);
       return;
@@ -41,7 +41,7 @@ export class AccountCache {
   }
 
   getPosition(exchange, symbol) {
-    return this.positionCache.get(`${exchange}:${symbol}`)?.qty ?? 0;
+    return this.positionCache.get(`${exchange}:${this.#compactSymbol(symbol)}`)?.qty ?? 0;
   }
 
   /**

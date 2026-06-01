@@ -9,9 +9,15 @@ export class ReservationManager {
   constructor(options = {}) {
     this.reservations = new Map();
     this.positionReserved = new Map();
+    /** 同一 symbol 在途交易（对齐 ArbiTrade-1 SmartBalanceCache 预占互斥） */
+    this.busySymbols = new Set();
     this.ttlMs = options.ttlMs ?? 30000;
     this.mutex = new Mutex();
     this.accountCache = options.accountCache;
+  }
+
+  #compactSymbol(symbol) {
+    return String(symbol).replace(/[-_]/g, '');
   }
 
   #sumReserved(exchange) {
@@ -31,13 +37,17 @@ export class ReservationManager {
   }
 
   getAvailablePositionCapacity(exchange, symbol, maxPositionQty) {
-    const pos = Math.abs(this.accountCache.getPosition(exchange, symbol));
-    const reserved = this.positionReserved.get(`${exchange}:${symbol}`) || 0;
+    const sym = this.#compactSymbol(symbol);
+    const pos = Math.abs(this.accountCache.getPosition(exchange, sym));
+    const reserved = this.positionReserved.get(`${exchange}:${sym}`) || 0;
     return Math.max(0, maxPositionQty - pos - reserved);
   }
 
   async tryReserve({ tradeId, symbol, direction, qty, aNeed, bNeed, maxPositionQty, increasesAbs }) {
+    const sym = this.#compactSymbol(symbol);
     return this.mutex.runExclusive(() => {
+      if (this.busySymbols.has(sym)) return null;
+
       const minUsdt = this.accountCache.minAvailableUsdt ?? 50;
 
       if (this.getAvailableUsdt('binance') < Math.max(minUsdt, aNeed)) return null;
@@ -46,19 +56,22 @@ export class ReservationManager {
       const ids = { balA: null, balB: null, pos: [] };
 
       if (increasesAbs) {
-        const capA = this.getAvailablePositionCapacity('binance', symbol, maxPositionQty);
-        const capB = this.getAvailablePositionCapacity('gate', symbol, maxPositionQty);
+        const capA = this.getAvailablePositionCapacity('binance', sym, maxPositionQty);
+        const capB = this.getAvailablePositionCapacity('gate', sym, maxPositionQty);
         if (qty > capA || qty > capB) return null;
       }
 
+      this.busySymbols.add(sym);
+
       ids.balA = this.#addReservation('balance', 'binance:USDT', aNeed, tradeId);
       ids.balB = this.#addReservation('balance', 'gate:USDT', bNeed, tradeId);
+      ids.symbol = sym;
 
       if (increasesAbs) {
-        this.#addPositionReserved('binance', symbol, qty);
-        this.#addPositionReserved('gate', symbol, qty);
+        this.#addPositionReserved('binance', sym, qty);
+        this.#addPositionReserved('gate', sym, qty);
         ids.pos = ['binance', 'gate'].map((ex) =>
-          this.#addReservation('position', `${ex}:${symbol}`, qty, tradeId)
+          this.#addReservation('position', `${ex}:${sym}`, qty, tradeId)
         );
       }
 
@@ -75,13 +88,14 @@ export class ReservationManager {
   }
 
   #addPositionReserved(exchange, symbol, qty) {
-    const k = `${exchange}:${symbol}`;
+    const k = `${exchange}:${this.#compactSymbol(symbol)}`;
     this.positionReserved.set(k, (this.positionReserved.get(k) || 0) + qty);
   }
 
   async releaseAll(ids) {
     if (!ids) return;
     await this.mutex.runExclusive(() => {
+      if (ids.symbol) this.busySymbols.delete(ids.symbol);
       const all = [ids.balA, ids.balB, ...(ids.pos || [])].filter(Boolean);
       for (const id of all) {
         const r = this.reservations.get(id);

@@ -44,8 +44,17 @@ export class CexCexTask {
   #syncLockState(symbol, signal) {
     const aQty = this.sr.accountCache.getPosition('binance', symbol);
     const bQty = this.sr.accountCache.getPosition('gate', symbol);
+    const inFlight = this.executingSymbols.has(symbol);
 
     if (isFlatPosition(aQty, bQty)) {
+      // 下单进行中：持仓尚未写入缓存，保留锁，避免并发 tick 再次 open
+      if (inFlight) {
+        const direction = this.lockedDirection.get(symbol) ?? null;
+        const branch = this.lockedBranch.get(symbol) ?? null;
+        if (direction) {
+          return { flat: false, direction, branch };
+        }
+      }
       this.lockedDirection.delete(symbol);
       this.lockedBranch.delete(symbol);
       return { flat: true, direction: null, branch: null };
@@ -182,25 +191,40 @@ export class CexCexTask {
     const maxPosQty = this.risk.maxPositionQty(tick, isClose ? tradePlan.direction : execDirection);
     const { aNeed, bNeed } = this.precision.calcUsdtNeed(execDirection, qty, tick, this.cfg.balanceCheckRate);
 
+    // 在 await 之前占位（对齐 ArbiTrade-1 预占前互斥 + 单路径 tick）
+    if (this.executingSymbols.has(symbol)) return;
+    this.executingSymbols.add(symbol);
+    this.lastOrderTs.set(symbol, Date.now());
+    if (!isClose) {
+      this.lockedDirection.set(symbol, tradePlan.direction);
+      if (tradePlan.branch) this.lockedBranch.set(symbol, tradePlan.branch);
+    }
+
     const tradeId = `${symbol}_${Date.now()}`;
-    const reservations = await this.sr.reservationManager.tryReserve({
-      tradeId,
-      symbol,
-      direction: execDirection,
-      qty,
-      aNeed,
-      bNeed,
-      maxPositionQty: maxPosQty,
-      increasesAbs
-    });
+    let reservations;
+    try {
+      reservations = await this.sr.reservationManager.tryReserve({
+        tradeId,
+        symbol,
+        direction: execDirection,
+        qty,
+        aNeed,
+        bNeed,
+        maxPositionQty: maxPosQty,
+        increasesAbs
+      });
+    } catch (err) {
+      this.#releaseSymbolClaim(symbol, { restoreCooldown: true });
+      throw err;
+    }
 
     if (!reservations) {
+      this.#releaseSymbolClaim(symbol, { restoreCooldown: true });
       this.sr.eventBus.emitExecutionStatus({ stage: 'RESERVE_FAILED', symbol, direction: execDirection });
       return;
     }
 
     this.sr.inFlightCount += 1;
-    this.executingSymbols.add(symbol);
     this.executeAsync({
       symbol,
       action: tradePlan.action,
@@ -214,6 +238,19 @@ export class CexCexTask {
       closeZ: tradePlan.closeZ,
       reservations
     }).catch((err) => console.error(`[CexCexTask] execute error ${symbol}:`, err.message));
+  }
+
+  #releaseSymbolClaim(symbol, { restoreCooldown = false } = {}) {
+    this.executingSymbols.delete(symbol);
+    if (restoreCooldown) {
+      this.lastOrderTs.set(symbol, 0);
+    }
+    const aQty = this.sr.accountCache.getPosition('binance', symbol);
+    const bQty = this.sr.accountCache.getPosition('gate', symbol);
+    if (isFlatPosition(aQty, bQty)) {
+      this.lockedDirection.delete(symbol);
+      this.lockedBranch.delete(symbol);
+    }
   }
 
   async executeAsync(ctx) {
@@ -231,6 +268,7 @@ export class CexCexTask {
     try {
       if (!finalCheckPass(tick, execDirection, adjSpread, this.cfg.maxPriceAgeMs)) {
         this.sr.eventBus.emitExecutionStatus({ stage: 'FINAL_SKIP', symbol });
+        this.#releaseSymbolClaim(symbol, { restoreCooldown: true });
         return;
       }
 
@@ -255,8 +293,6 @@ export class CexCexTask {
         accountCache: this.sr.accountCache,
         dashboardBridge: this.sr.dashboardBridge
       });
-      this.lastOrderTs.set(symbol, Date.now());
-
       const aQty = this.sr.accountCache.getPosition('binance', symbol);
       const bQty = this.sr.accountCache.getPosition('gate', symbol);
       if (action === 'open' || action === 'add') {
@@ -276,7 +312,7 @@ export class CexCexTask {
       });
     } finally {
       await this.sr.reservationManager.releaseAll(reservations);
-      this.executingSymbols.delete(symbol);
+      this.#releaseSymbolClaim(symbol);
       this.sr.inFlightCount -= 1;
     }
   }
