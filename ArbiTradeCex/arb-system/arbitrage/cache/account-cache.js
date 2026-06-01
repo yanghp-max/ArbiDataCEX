@@ -44,6 +44,28 @@ export class AccountCache {
     return this.positionCache.get(`${exchange}:${symbol}`)?.qty ?? 0;
   }
 
+  /**
+   * 按套利腿方向更新本地持仓（dry 模拟成交 / 与 risk-manager 符号约定一致）
+   * -a+b: A 减、B 增；+a-b: A 增、B 减
+   */
+  applyLegDelta(symbol, direction, qty) {
+    const sym = this.#compactSymbol(symbol);
+    const q = Number(qty);
+    if (!Number.isFinite(q) || q <= 0) return;
+
+    let aQty = this.getPosition('binance', sym);
+    let bQty = this.getPosition('gate', sym);
+    if (direction === '-a+b') {
+      aQty -= q;
+      bQty += q;
+    } else {
+      aQty += q;
+      bQty -= q;
+    }
+    this.setPosition('binance', sym, aQty);
+    this.setPosition('gate', sym, bQty);
+  }
+
   #compactSymbol(symbol) {
     return String(symbol).replace(/[-_]/g, '');
   }
@@ -67,6 +89,8 @@ export class AccountCache {
     ]);
     this.#applyBalance('binance', bBalances);
     this.#applyBalance('gate', gBalances);
+    // 以交易所 REST 快照为准：未返回的 symbol 视为空仓（避免平仓后缓存残留）
+    this.positionCache.clear();
     for (const p of bPos) {
       this.setPosition('binance', this.#compactSymbol(p.symbol), p.qty);
     }

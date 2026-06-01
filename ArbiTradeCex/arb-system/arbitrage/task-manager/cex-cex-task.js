@@ -29,6 +29,7 @@ export class CexCexTask {
     this.lastOrderTs = new Map();
     this.lockedDirection = new Map();
     this.lockedBranch = new Map();
+    this.executingSymbols = new Set();
     this.totalCostPct = (strategyConfig.feeBpsTotal + strategyConfig.slippageBpsTotal) / 100;
 
     for (const sym of strategyConfig.symbols) {
@@ -106,6 +107,7 @@ export class CexCexTask {
     if (tick.fundingB != null && tick.fundingB < this.cfg.fundingMin) return;
 
     if (Date.now() - this.lastOrderTs.get(symbol) < this.cfg.cooldownMs) return;
+    if (this.executingSymbols.has(symbol)) return;
     if (this.sr.inFlightCount >= this.cfg.maxInFlightTrades) return;
 
     let tradePlan = null;
@@ -198,6 +200,7 @@ export class CexCexTask {
     }
 
     this.sr.inFlightCount += 1;
+    this.executingSymbols.add(symbol);
     this.executeAsync({
       symbol,
       action: tradePlan.action,
@@ -232,6 +235,13 @@ export class CexCexTask {
       }
 
       const fill = await this.sr.orderExecutor.executeBothLegs({ direction: execDirection, tick, order });
+
+      if (fill.simulated) {
+        this.sr.accountCache.applyLegDelta(symbol, execDirection, fill.qty);
+      } else {
+        await this.sr.accountCache.refreshFromCexManager(this.sr.cexManager);
+      }
+
       const pnlDirection = action === 'close' ? lockedDirection : execDirection;
       const netPnl = calcTradePnl(fill, pnlDirection, this.cfg.feeBpsTotal, this.cfg.slippageBpsTotal);
 
@@ -247,15 +257,11 @@ export class CexCexTask {
       });
       this.lastOrderTs.set(symbol, Date.now());
 
-      if (!fill.simulated) {
-        await this.sr.accountCache.refreshFromCexManager(this.sr.cexManager);
-      }
-
       const aQty = this.sr.accountCache.getPosition('binance', symbol);
       const bQty = this.sr.accountCache.getPosition('gate', symbol);
-      if (action === 'open') {
+      if (action === 'open' || action === 'add') {
         this.lockedDirection.set(symbol, lockedDirection ?? execDirection);
-        this.lockedBranch.set(symbol, branch);
+        if (branch) this.lockedBranch.set(symbol, branch);
       } else if (action === 'close' && isFlatPosition(aQty, bQty)) {
         this.lockedDirection.delete(symbol);
         this.lockedBranch.delete(symbol);
@@ -270,6 +276,7 @@ export class CexCexTask {
       });
     } finally {
       await this.sr.reservationManager.releaseAll(reservations);
+      this.executingSymbols.delete(symbol);
       this.sr.inFlightCount -= 1;
     }
   }

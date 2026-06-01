@@ -41,15 +41,19 @@ export class OrderExecutor {
       })
     ]);
 
+    const aFilled = Number(aOrder.filled || qty);
+    const bFilled = Number(bOrder.filled || qty);
+    const matchedQty = Math.min(aFilled, bFilled, qty);
+
     return {
       simulated: false,
       aOrderId: String(aOrder.orderId),
       bOrderId: String(bOrder.orderId),
       aPriceUsed: Number(aOrder.avgPrice || aOrder.price || order.aPrice),
       bPriceUsed: Number(bOrder.avgPrice || bOrder.price || (direction === '-a+b' ? tick.bAsk : tick.bBid)),
-      qty: Math.min(Number(aOrder.filled || qty), qty),
-      aFilledQty: Number(aOrder.filled || qty),
-      bFilledQty: qty,
+      qty: matchedQty,
+      aFilledQty: aFilled,
+      bFilledQty: bFilled,
       rawA: aOrder,
       rawB: bOrder
     };
