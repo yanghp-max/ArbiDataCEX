@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { floorByStep } from '../../common/utils/precision.js';
+import { legPricesForDirection } from '../services/spread-calculator.js';
 
 export class PrecisionChecker {
   constructor(minQtyBySymbol = {}) {
@@ -26,7 +27,7 @@ export class PrecisionChecker {
     const cfg = this.minQtyBySymbol[tick.symbol];
     if (!cfg) return { qty: 0 };
 
-    const aPrice = direction === '-a+b' ? tick.aBid : tick.aAsk;
+    const { aPrice } = legPricesForDirection(direction, tick);
     const rawQty = orderUsd / aPrice;
     let qty = floorByStep(rawQty, Number(cfg.binance.stepSize));
     if (qty < Number(cfg.binance.minQty)) qty = Number(cfg.binance.minQty);
@@ -61,15 +62,16 @@ export class PrecisionChecker {
   }
 
   calcUsdtNeed(direction, qty, tick, rate = 0.1) {
+    const { aPrice, bPrice } = legPricesForDirection(direction, tick);
     if (direction === '-a+b') {
       return {
-        aNeed: qty * tick.aBid * rate,
-        bNeed: qty * tick.bAsk * rate
+        aNeed: qty * aPrice * rate,
+        bNeed: qty * bPrice * rate
       };
     }
     return {
-      aNeed: qty * tick.aAsk * rate,
-      bNeed: qty * tick.bBid * rate
+      aNeed: qty * aPrice * rate,
+      bNeed: qty * bPrice * rate
     };
   }
 }

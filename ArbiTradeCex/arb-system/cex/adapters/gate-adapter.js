@@ -348,6 +348,9 @@ export class GateAdapter extends BaseAdapter {
       price: type === 'limit' ? String(orderData.price) : '0',
       tif: type === 'limit' ? (orderData.timeInForce || 'gtc') : 'ioc'
     };
+    if (orderData.reduceOnly) {
+      body.reduce_only = true;
+    }
     const headers = orderData.decimalSize ? { 'X-Gate-Size-Decimal': '1' } : {};
     const response = await this.#signedRequest('POST', '/futures/usdt/orders', body, headers);
     return new Order({

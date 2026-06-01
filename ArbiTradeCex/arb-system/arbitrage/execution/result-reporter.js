@@ -1,23 +1,66 @@
-export function calcTradePnl(fill, direction, feeBpsTotal = 4, slippageBpsTotal = 4) {
+/**
+ * PnL 计算 — 与 backtest_cex_cex_open_only.py 完全一致
+ *
+ * 开仓 / 加仓（direction = 执行方向）：
+ *   -a+b: gross = qty × (a − b)
+ *   +a-b: gross = qty × (b − a)
+ *
+ * 平仓（lockedDirection = 原持仓方向，执行方向相反）：
+ *   locked -a+b: gross = qty × (b − a)   // 与开仓 -a+b 符号相反
+ *   locked +a-b: gross = qty × (a − b)   // 与开仓 +a-b 符号相反
+ *
+ * 手续费（两腿分别按成交额）：
+ *   fee_rate_per_leg = (fee_bps_total + slippage_bps_total) / 2 / 10000
+ *   fee_cost = |a_leg| × fee_rate_per_leg + |b_leg| × fee_rate_per_leg
+ *
+ * 累计 PnL：cumPnl = Σ 每笔 netPnl（开/加/平全部累加）
+ */
+
+function feeCost(qty, aPx, bPx, feeBpsTotal, slippageBpsTotal) {
+  const perLeg = (feeBpsTotal + slippageBpsTotal) / 10000 / 2;
+  const aLeg = qty * aPx;
+  const bLeg = qty * bPx;
+  return Math.abs(aLeg) * perLeg + Math.abs(bLeg) * perLeg;
+}
+
+/** 开仓 / 加仓 PnL（同 backtest execute_open） */
+export function calcOpenPnl(fill, direction, feeBpsTotal = 4, slippageBpsTotal = 4) {
   const qty = fill.qty;
   const aPx = fill.aPriceUsed;
   const bPx = fill.bPriceUsed;
-  let gross;
-  let aLeg;
-  let bLeg;
-  if (direction === '-a+b') {
-    gross = qty * aPx - qty * bPx;
-    aLeg = qty * aPx;
-    bLeg = qty * bPx;
-  } else {
-    gross = qty * bPx - qty * aPx;
-    aLeg = qty * aPx;
-    bLeg = qty * bPx;
+  const gross = direction === '-a+b'
+    ? qty * aPx - qty * bPx
+    : qty * bPx - qty * aPx;
+  return gross - feeCost(qty, aPx, bPx, feeBpsTotal, slippageBpsTotal);
+}
+
+/** 平仓 PnL（同 backtest calc_close_profit，按 lockedDirection） */
+export function calcClosePnl(fill, lockedDirection, feeBpsTotal = 4, slippageBpsTotal = 4) {
+  const qty = fill.qty;
+  const aPx = fill.aPriceUsed;
+  const bPx = fill.bPriceUsed;
+  const gross = lockedDirection === '-a+b'
+    ? qty * bPx - qty * aPx
+    : qty * aPx - qty * bPx;
+  return gross - feeCost(qty, aPx, bPx, feeBpsTotal, slippageBpsTotal);
+}
+
+/**
+ * @param {object} fill
+ * @param {object} ctx
+ * @param {string} ctx.action - 'open' | 'add' | 'close'
+ * @param {string} ctx.direction - 本笔执行方向（execDirection）
+ * @param {string} [ctx.lockedDirection] - 平仓时原持仓方向
+ */
+export function calcTradePnl(fill, ctx, feeBpsTotal = 4, slippageBpsTotal = 4) {
+  const { action, direction, lockedDirection } = ctx;
+  if (action === 'close') {
+    if (!lockedDirection) {
+      throw new Error('calcTradePnl close requires lockedDirection');
+    }
+    return calcClosePnl(fill, lockedDirection, feeBpsTotal, slippageBpsTotal);
   }
-  const feeRate = (feeBpsTotal + slippageBpsTotal) / 10000;
-  const perLeg = feeRate / 2;
-  const feeCost = Math.abs(aLeg) * perLeg + Math.abs(bLeg) * perLeg;
-  return gross - feeCost;
+  return calcOpenPnl(fill, direction, feeBpsTotal, slippageBpsTotal);
 }
 
 export class ResultReporter {

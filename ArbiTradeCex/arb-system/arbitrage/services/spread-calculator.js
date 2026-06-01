@@ -1,3 +1,11 @@
+/** 执行方向对应的 A/B 成交价（对齐 backtest get_open_prices / get_close_prices） */
+export function legPricesForDirection(direction, tick) {
+  if (direction === '-a+b') {
+    return { aPrice: tick.aBid, bPrice: tick.bAsk };
+  }
+  return { aPrice: tick.aAsk, bPrice: tick.bBid };
+}
+
 export function calcSpreads(tick, totalCostPct) {
   const spreadAb = ((tick.aBid - tick.bAsk) / tick.bAsk) * 100;
   const spreadBa = ((tick.bBid - tick.aAsk) / tick.aAsk) * 100;

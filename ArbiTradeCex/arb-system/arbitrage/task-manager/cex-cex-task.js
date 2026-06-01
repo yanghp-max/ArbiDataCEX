@@ -272,7 +272,12 @@ export class CexCexTask {
         return;
       }
 
-      const fill = await this.sr.orderExecutor.executeBothLegs({ direction: execDirection, tick, order });
+      const fill = await this.sr.orderExecutor.executeBothLegs({
+        direction: execDirection,
+        tick,
+        order,
+        reduceOnly: action === 'close'
+      });
 
       if (fill.simulated) {
         this.sr.accountCache.applyLegDelta(symbol, execDirection, fill.qty);
@@ -280,8 +285,12 @@ export class CexCexTask {
         await this.sr.accountCache.refreshFromCexManager(this.sr.cexManager);
       }
 
-      const pnlDirection = action === 'close' ? lockedDirection : execDirection;
-      const netPnl = calcTradePnl(fill, pnlDirection, this.cfg.feeBpsTotal, this.cfg.slippageBpsTotal);
+      const netPnl = calcTradePnl(
+        fill,
+        { action, direction: execDirection, lockedDirection },
+        this.cfg.feeBpsTotal,
+        this.cfg.slippageBpsTotal
+      );
 
       this.sr.resultReporter.recordTrade({
         symbol,
