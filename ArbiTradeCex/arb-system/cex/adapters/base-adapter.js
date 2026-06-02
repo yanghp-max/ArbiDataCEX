@@ -458,7 +458,6 @@ export class BaseAdapter extends EventEmitter {
       console.error(`[${this.config.name}] Failed to emit to global EventBus:`, error.message);
     }
 
-    console.log(`[${this.config.name}] Position update emitted: ${positions?.length || 0} positions`);
   }
 
   /**
@@ -487,6 +486,5 @@ export class BaseAdapter extends EventEmitter {
       console.error(`[${this.config.name}] Failed to emit balance to global EventBus:`, error.message);
     }
 
-    console.log(`[${this.config.name}] Balance update emitted: ${balances?.length || 0} balances`);
   }
 }

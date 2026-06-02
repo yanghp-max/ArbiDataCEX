@@ -53,6 +53,10 @@ export class TaskManager {
       cexManager.subscribe('gate', adapterSymbols, ['book_ticker'])
     ]);
 
+    if (!this.sharedResources.useMockAccount && this.sharedResources.accountStreamBridge) {
+      await this.sharedResources.accountStreamBridge.start();
+    }
+
     for (const sym of strat.symbols) {
       await this.task.refreshFunding(sym);
     }

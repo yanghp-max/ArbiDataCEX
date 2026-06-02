@@ -33,7 +33,8 @@ export class ReservationManager {
   getAvailableUsdt(exchange) {
     const bal = this.accountCache.getBalance(exchange);
     if (!bal) return 0;
-    return bal.total - this.#sumReserved(exchange);
+    const base = Number.isFinite(bal.available) ? bal.available : bal.total;
+    return Math.max(0, base - this.#sumReserved(exchange));
   }
 
   getAvailablePositionCapacity(exchange, symbol, maxPositionQty) {
@@ -115,10 +116,25 @@ export class ReservationManager {
 
   purgeExpired() {
     const now = Date.now();
-    for (const [id, r] of this.reservations) {
-      if (now - r.createdAt > this.ttlMs) {
-        this.releaseAll({ balA: id, balB: null, pos: [] }).catch(() => {});
+    const expiredTradeIds = new Set();
+    for (const r of this.reservations.values()) {
+      if (r.status === 'active' && now - r.createdAt > this.ttlMs && r.tradeId) {
+        expiredTradeIds.add(r.tradeId);
       }
+    }
+    for (const tradeId of expiredTradeIds) {
+      const ids = { balA: null, balB: null, pos: [], symbol: null };
+      for (const [id, r] of this.reservations) {
+        if (r.tradeId !== tradeId || r.status !== 'active') continue;
+        if (r.type === 'balance' && r.key === 'binance:USDT') ids.balA = id;
+        if (r.type === 'balance' && r.key === 'gate:USDT') ids.balB = id;
+        if (r.type === 'position') {
+          ids.pos.push(id);
+          const parts = String(r.key).split(':');
+          if (parts.length >= 2) ids.symbol = parts.slice(1).join(':');
+        }
+      }
+      this.releaseAll(ids).catch(() => {});
     }
   }
 }

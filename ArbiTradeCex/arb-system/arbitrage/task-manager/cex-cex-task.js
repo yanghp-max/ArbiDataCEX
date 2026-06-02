@@ -191,6 +191,15 @@ export class CexCexTask {
     const maxPosQty = this.risk.maxPositionQty(tick, isClose ? tradePlan.direction : execDirection);
     const { aNeed, bNeed } = this.precision.calcUsdtNeed(execDirection, qty, tick, this.cfg.balanceCheckRate);
 
+    if (!this.sr.useMockAccount) {
+      try {
+        await this.sr.accountCache.ensureFresh(this.sr.cexManager);
+      } catch (err) {
+        console.warn(`[CexCexTask] account cache refresh failed ${symbol}:`, err.message);
+        return;
+      }
+    }
+
     // 在 await 之前占位（对齐 ArbiTrade-1 预占前互斥 + 单路径 tick）
     if (this.executingSymbols.has(symbol)) return;
     this.executingSymbols.add(symbol);

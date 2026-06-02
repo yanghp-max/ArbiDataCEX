@@ -17,6 +17,7 @@
     "minAvailableUsdt": 50,
     "balanceCheckRate": 0.1,
     "accountCacheMaxAgeMs": 5000,
+    "listenKeyKeepaliveMin": 60,
     "reservationTtlMs": 30000,
     "maxInFlightTrades": 5,
     "symbolsConfigJson": "config/symbols_config.json",

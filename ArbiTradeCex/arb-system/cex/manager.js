@@ -99,9 +99,27 @@ export class CexManager {
     return this.#requireAdapter(exchange).normalizeSymbol(symbol);
   }
 
-  static async createDefault() {
+  async startPrivateAccountStreams(symbols = []) {
+    const binance = this.get('binance');
+    const gate = this.get('gate');
+    await Promise.all([
+      binance?.startPrivateAccountStream?.(),
+      gate?.startPrivateAccountStream?.(symbols)
+    ]);
+  }
+
+  async stopPrivateAccountStreams() {
+    await Promise.all([
+      this.get('binance')?.stopPrivateAccountStream?.(),
+      this.get('gate')?.stopPrivateAccountStream?.()
+    ]);
+  }
+
+  static async createDefault(strategyConfig = {}) {
     const mgr = new CexManager();
-    const binance = new BinanceAdapter();
+    const binance = new BinanceAdapter({
+      listenKeyKeepaliveMin: strategyConfig.listenKeyKeepaliveMin ?? 60
+    });
     const gate = new GateAdapter();
     await Promise.all([binance.connect(), gate.connect()]);
     mgr.register('binance', binance);

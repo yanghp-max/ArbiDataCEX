@@ -24,6 +24,11 @@ export class GateAdapter extends BaseAdapter {
     this.subscribedChannels = ['book_ticker'];
     this._balanceCache = null;
     this._positionCache = new Map();
+    this.unifiedWsUrl = process.env.GATE_UNIFIED_WS_URL || 'wss://ws.gate.com/v4/ws/unified';
+    this.unifiedWs = null;
+    this.unifiedWsConnected = false;
+    this.privatePositionsSubscribed = false;
+    this._userId = null;
   }
 
   toCompactSymbol(symbol) {
@@ -58,6 +63,7 @@ export class GateAdapter extends BaseAdapter {
   }
 
   async disconnect() {
+    await this.stopPrivateAccountStream();
     if (this.ws) {
       this.ws.removeAllListeners();
       this.ws.close();
@@ -150,6 +156,14 @@ export class GateAdapter extends BaseAdapter {
         if (this.subscribed.length > 0) {
           await this.subscribe(this.subscribed, this.subscribedChannels);
         }
+        if (this.privatePositionsSubscribed || this.unifiedWsConnected) {
+          await this.#subscribePositions(this.subscribed).catch((err) => {
+            console.warn('[Gate] resubscribe positions failed:', err.message);
+          });
+          if (this.privatePositionsSubscribed) {
+            this.emit('PRIVATE_WS_CONNECTED', { exchange: 'gate', positionsReady: true });
+          }
+        }
         resolve();
       });
       this.ws.on('message', (raw) => this.handleMessage(raw));
@@ -189,9 +203,22 @@ export class GateAdapter extends BaseAdapter {
     }
   }
 
+  #wsAuth(channel, event, timeSec) {
+    const message = `channel=${channel}&event=${event}&time=${timeSec}`;
+    return {
+      method: 'api_key',
+      KEY: process.env.GATE_API_KEY || '',
+      SIGN: cryptoUtils.hmacSha512(message, process.env.GATE_API_SECRET || '')
+    };
+  }
+
   handleMessage(raw) {
     try {
       const msg = JSON.parse(raw.toString());
+      if (msg.channel === 'futures.positions' && msg.event === 'update') {
+        this.#handlePositionsUpdate(msg.result);
+        return;
+      }
       if (msg.channel !== 'futures.book_ticker' || msg.event !== 'update') return;
 
       const r = msg.result || {};
@@ -427,6 +454,182 @@ export class GateAdapter extends BaseAdapter {
   async checkOrder(orderData) {
     this.validateOrderData(orderData);
     return true;
+  }
+
+  async syncAccountSnapshot(options = {}) {
+    await this.getBalance({ silent: true, ...options });
+    await this.getPositions({ silent: true, ...options });
+  }
+
+  async #fetchUserId() {
+    if (this._userId) return this._userId;
+    const data = await this.#signedRequest('GET', '/unified/accounts');
+    const uid = data?.user_id ?? data?.user ?? data?.uid ?? data?.id;
+    if (uid != null && String(uid)) {
+      this._userId = String(uid);
+      return this._userId;
+    }
+    throw new Error('Gate user_id not found in /unified/accounts');
+  }
+
+  #handlePositionsUpdate(result) {
+    const rows = Array.isArray(result) ? result : (result ? [result] : []);
+    const positions = [];
+    for (const r of rows) {
+      const contract = String(r.contract || r.s || '');
+      if (!contract) continue;
+      const size = Number(r.size ?? 0);
+      const multiplier = Number(r.quanto_multiplier || 1);
+      const baseQty = size * multiplier;
+      positions.push(new Position({
+        symbol: this.toCompactSymbol(contract),
+        exchange: this.config.name,
+        side: size >= 0 ? 'long' : 'short',
+        size: Math.abs(baseQty),
+        qty: baseQty,
+        entryPrice: Number(r.entry_price || 0),
+        markPrice: Number(r.mark_price || 0),
+        unrealizedPnl: Number(r.unrealised_pnl || 0),
+        leverage: Number(r.leverage || 1),
+        timestamp: Date.now()
+      }));
+    }
+    if (positions.length > 0) {
+      this.emitPositionUpdate(positions);
+    }
+  }
+
+  async #reconnectPrivateAccount() {
+    const symbols = this.subscribed;
+    await this.stopPrivateAccountStream();
+    this.privatePositionsSubscribed = false;
+    await this.startPrivateAccountStream(symbols);
+  }
+
+  #handleUnifiedMessage(raw) {
+    try {
+      const msg = JSON.parse(raw.toString());
+      if (msg.channel !== 'unified.asset_detail' || msg.event !== 'update') return;
+      const result = msg.result || {};
+      if (result.u != null) this._userId = String(result.u);
+      const dts = result.dts || {};
+      const usdt = dts.USDT;
+      if (!usdt) return;
+      const available = Number(usdt.a ?? usdt.available ?? 0);
+      const total = Number(usdt.b ?? usdt.balance ?? available);
+      if (total <= 1e-12 && available <= 1e-12) {
+        this.emitBalanceUpdate([new Balance({
+          currency: 'USDT',
+          exchange: this.config.name,
+          total: 0,
+          available: 0,
+          frozen: 0,
+          timestamp: Date.now()
+        })]);
+        return;
+      }
+      this.emitBalanceUpdate([new Balance({
+        currency: 'USDT',
+        exchange: this.config.name,
+        total,
+        available,
+        frozen: Math.max(0, total - available),
+        timestamp: Date.now()
+      })]);
+    } catch {
+      // ignore
+    }
+  }
+
+  async #subscribePositions(symbols) {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    const userId = await this.#fetchUserId();
+    const contracts = (symbols || this.subscribed || []).map((s) => this.toGateContract(s));
+    const time = Math.floor(Date.now() / 1000);
+    const channel = 'futures.positions';
+    const event = 'subscribe';
+    this.ws.send(JSON.stringify({
+      time,
+      channel,
+      event,
+      auth: this.#wsAuth(channel, event, time),
+      payload: [userId, ...contracts]
+    }));
+    this.privatePositionsSubscribed = true;
+  }
+
+  async #connectUnifiedWs() {
+    if (this.unifiedWs) return;
+    await new Promise((resolve, reject) => {
+      this.unifiedWs = new WebSocket(this.unifiedWsUrl);
+      this.unifiedWs.on('open', () => {
+        const time = Math.floor(Date.now() / 1000);
+        const channel = 'unified.asset_detail';
+        const event = 'subscribe';
+        this.unifiedWs.send(JSON.stringify({
+          time,
+          channel,
+          event,
+          auth: this.#wsAuth(channel, event, time),
+          payload: ['USDT']
+        }));
+        resolve();
+      });
+      this.unifiedWs.on('message', (raw) => this.#handleUnifiedMessage(raw));
+      this.unifiedWs.on('close', () => {
+        this.unifiedWsConnected = false;
+        this.emit('PRIVATE_WS_DISCONNECTED', { exchange: 'gate' });
+        if (this._shuttingDown) return;
+        setTimeout(() => {
+          this.#reconnectPrivateAccount().catch(() => {});
+        }, 2000);
+      });
+      this.unifiedWs.on('error', reject);
+    });
+    this.unifiedWsConnected = true;
+  }
+
+  async #reconnectUnifiedWs() {
+    if (this.unifiedWs) {
+      this.unifiedWs.removeAllListeners();
+      this.unifiedWs.close();
+      this.unifiedWs = null;
+    }
+    await this.#connectUnifiedWs();
+  }
+
+  async startPrivateAccountStream(symbols = []) {
+    if (!process.env.GATE_API_KEY || !process.env.GATE_API_SECRET) return;
+
+    await this.syncAccountSnapshot({ silent: true });
+    await this.#connectUnifiedWs();
+
+    if (this.ws?.readyState !== WebSocket.OPEN) {
+      await new Promise((r) => setTimeout(r, 500));
+    }
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      await this.#subscribePositions(symbols);
+    } else {
+      console.warn('[Gate] public fx-ws not open; futures.positions subscription skipped');
+    }
+
+    this.emit('PRIVATE_WS_CONNECTED', {
+      exchange: 'gate',
+      positionsReady: this.privatePositionsSubscribed
+    });
+    const posNote = this.privatePositionsSubscribed ? 'futures.positions' : 'positions pending';
+    console.log(`[Gate] private account streams started (unified USDT + ${posNote})`);
+  }
+
+  async stopPrivateAccountStream() {
+    this.privatePositionsSubscribed = false;
+    if (this.unifiedWs) {
+      this.unifiedWs.removeAllListeners();
+      this.unifiedWs.close();
+      this.unifiedWs = null;
+    }
+    this.unifiedWsConnected = false;
+    this.emit('PRIVATE_WS_DISCONNECTED', { exchange: 'gate' });
   }
 }
 

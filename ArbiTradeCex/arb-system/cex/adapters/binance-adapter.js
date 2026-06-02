@@ -25,6 +25,12 @@ export class BinanceAdapter extends BaseAdapter {
     this.processing = false;
     this._balanceCache = null;
     this._positionCache = new Map();
+    this.privateWs = null;
+    this.listenKey = null;
+    this.privateWsConnected = false;
+    this.listenKeyKeepaliveMin = Number(config.listenKeyKeepaliveMin) || 60;
+    this._listenKeyTimer = null;
+    this.pmWsUrl = process.env.BINANCE_PM_WS_URL || 'wss://fstream.binance.com/pm/ws';
   }
 
   toCompactSymbol(symbol) {
@@ -51,6 +57,7 @@ export class BinanceAdapter extends BaseAdapter {
   }
 
   async disconnect() {
+    await this.stopPrivateAccountStream();
     if (this.ws) {
       this.ws.removeAllListeners();
       this.ws.close();
@@ -385,6 +392,181 @@ export class BinanceAdapter extends BaseAdapter {
       throw new Error('Order amount must be greater than 0');
     }
     return true;
+  }
+
+  async syncAccountSnapshot(options = {}) {
+    await this.getBalance({ silent: true, ...options });
+    await this.getPositions({ silent: true, ...options });
+  }
+
+  async #createListenKey() {
+    const data = await this.#signedRequest('POST', '/papi/v1/listenKey', {});
+    const key = data?.listenKey;
+    if (!key) throw new Error('Binance listenKey missing in response');
+    return key;
+  }
+
+  async #keepaliveListenKey() {
+    if (!this.listenKey) return;
+    await this.#signedRequest('PUT', '/papi/v1/listenKey', {});
+  }
+
+  #stopListenKeyTimer() {
+    if (this._listenKeyTimer) {
+      clearInterval(this._listenKeyTimer);
+      this._listenKeyTimer = null;
+    }
+  }
+
+  #startListenKeyTimer() {
+    this.#stopListenKeyTimer();
+    const ms = Math.max(1, this.listenKeyKeepaliveMin) * 60 * 1000;
+    this._listenKeyTimer = setInterval(() => {
+      this.#keepaliveListenKey().catch((err) => {
+        console.warn('[Binance] listenKey keepalive failed:', err.message);
+      });
+    }, ms);
+  }
+
+  #emitBalanceMerge(rows) {
+    if (!rows?.length) return;
+    this.emitBalanceUpdate(rows.map((row) => new Balance({
+      currency: row.currency,
+      exchange: this.config.name,
+      total: row.total,
+      available: row.available,
+      frozen: row.frozen ?? 0,
+      timestamp: Date.now()
+    })));
+  }
+
+  #emitPositionMerge(rows) {
+    if (!rows?.length) return;
+    const positions = rows.map((row) => {
+      const qty = Number(row.qty);
+      return new Position({
+        symbol: this.toCompactSymbol(row.symbol),
+        exchange: this.config.name,
+        side: qty >= 0 ? 'long' : 'short',
+        size: Math.abs(qty),
+        qty,
+        entryPrice: 0,
+        markPrice: 0,
+        unrealizedPnl: 0,
+        leverage: 1,
+        timestamp: Date.now()
+      });
+    });
+    this.emitPositionUpdate(positions);
+  }
+
+  #handlePrivateMessage(raw) {
+    try {
+      const msg = JSON.parse(raw.toString());
+      if (msg.e === 'listenKeyExpired') {
+        console.warn('[Binance] listenKey expired, reconnecting private WS...');
+        this.#reconnectPrivateWs().catch(() => {});
+        return;
+      }
+      if (msg.e !== 'ACCOUNT_UPDATE' || !msg.a) return;
+
+      const balanceRows = [];
+      for (const b of msg.a.B || []) {
+        const currency = String(b.a || '').toUpperCase();
+        if (!currency) continue;
+        const wb = Number(b.wb ?? 0);
+        const cw = Number(b.cw ?? wb);
+        balanceRows.push({
+          currency,
+          total: wb,
+          available: cw,
+          frozen: Math.max(0, wb - cw)
+        });
+      }
+      this.#emitBalanceMerge(balanceRows);
+
+      const positionRows = [];
+      for (const p of msg.a.P || []) {
+        const symbol = String(p.s || '');
+        if (!symbol) continue;
+        positionRows.push({ symbol, qty: Number(p.pa ?? 0) });
+      }
+      this.#emitPositionMerge(positionRows);
+    } catch {
+      // ignore parse errors
+    }
+  }
+
+  async #reconnectPrivateWs() {
+    if (this._privateWsReconnecting) return;
+    this._privateWsReconnecting = true;
+    try {
+      await this.stopPrivateAccountStream();
+      await this.startPrivateAccountStream();
+    } finally {
+      this._privateWsReconnecting = false;
+    }
+  }
+
+  async startPrivateAccountStream() {
+    if (!process.env.BINANCE_API_KEY || !process.env.BINANCE_API_SECRET) {
+      return;
+    }
+    if (this.privateWs) {
+      await this.stopPrivateAccountStream();
+    }
+
+    this.listenKey = await this.#createListenKey();
+    const url = `${this.pmWsUrl}/${this.listenKey}`;
+
+    await new Promise((resolve, reject) => {
+      this.privateWs = new WebSocket(url);
+      this.privateWs.on('open', async () => {
+        this.privateWsConnected = true;
+        try {
+          await this.syncAccountSnapshot({ silent: true });
+          this.emit('PRIVATE_WS_CONNECTED', { exchange: 'binance' });
+          console.log('[Binance] private WS connected, account snapshot synced');
+        } catch (err) {
+          console.error('[Binance] private WS onOpen sync failed:', err.message);
+          this.emit('PRIVATE_WS_DISCONNECTED', { exchange: 'binance' });
+        }
+        this.#startListenKeyTimer();
+        resolve();
+      });
+      this.privateWs.on('message', (raw) => this.#handlePrivateMessage(raw));
+      this.privateWs.on('close', () => {
+        this.privateWsConnected = false;
+        this.emit('PRIVATE_WS_DISCONNECTED', { exchange: 'binance' });
+        if (this._shuttingDown) return;
+        setTimeout(() => {
+          this.#reconnectPrivateWs().catch(() => {});
+        }, 2000);
+      });
+      this.privateWs.on('error', (err) => {
+        console.error('[Binance] private WS error:', err.message);
+        reject(err);
+      });
+    });
+  }
+
+  async stopPrivateAccountStream() {
+    this.#stopListenKeyTimer();
+    if (this.privateWs) {
+      this.privateWs.removeAllListeners();
+      this.privateWs.close();
+      this.privateWs = null;
+    }
+    this.privateWsConnected = false;
+    if (this.listenKey) {
+      try {
+        await this.#signedRequest('DELETE', '/papi/v1/listenKey', {});
+      } catch {
+        // ignore
+      }
+      this.listenKey = null;
+    }
+    this.emit('PRIVATE_WS_DISCONNECTED', { exchange: 'binance' });
   }
 }
 

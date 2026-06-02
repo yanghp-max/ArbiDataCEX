@@ -1,5 +1,5 @@
 /**
- * 账户 WS 缓存（REST 初始化 + merge；私有 WS 可后续接入）
+ * 账户 WS 缓存（REST 初始化 + 私有 WS 增量 merge）
  */
 export class AccountCache {
   constructor() {
@@ -7,12 +7,20 @@ export class AccountCache {
     this.positionCache = new Map();
     this.reliable = false;
     this.mockMode = false;
+    this.accountCacheMaxAgeMs = 5000;
+    this._lastRestRefreshMs = { binance: 0, gate: 0 };
+    this.restRefreshMinIntervalMs = 2000;
+    this.wsStatus = {
+      binance: { connected: false, reliable: false },
+      gate: { connected: false, reliable: false }
+    };
   }
 
   seedMock({ balanceUsdt = 10000 } = {}) {
     const now = Date.now();
     for (const exchange of ['binance', 'gate']) {
       this.setBalance(exchange, { total: balanceUsdt, available: balanceUsdt, updatedAtMs: now });
+      this.wsStatus[exchange] = { connected: true, reliable: true };
     }
     this.positionCache.clear();
     this.reliable = true;
@@ -27,6 +35,23 @@ export class AccountCache {
     });
   }
 
+  mergeBalance(exchange, { currency = 'USDT', total, available } = {}) {
+    const cur = String(currency).toUpperCase();
+    if (cur !== 'USDT') return;
+    const totalN = Number(total);
+    const availN = Number(available ?? total);
+    if (!Number.isFinite(totalN) && !Number.isFinite(availN)) return;
+    if (totalN <= 1e-12 && availN <= 1e-12) {
+      this.balanceCache.delete(`${exchange}:USDT`);
+      return;
+    }
+    this.setBalance(exchange, {
+      total: Number.isFinite(totalN) ? totalN : availN,
+      available: Number.isFinite(availN) ? availN : totalN,
+      updatedAtMs: Date.now()
+    });
+  }
+
   setPosition(exchange, symbol, qty) {
     const key = `${exchange}:${this.#compactSymbol(symbol)}`;
     if (Math.abs(qty) < 1e-12) {
@@ -34,6 +59,10 @@ export class AccountCache {
       return;
     }
     this.positionCache.set(key, { qty, updatedAtMs: Date.now() });
+  }
+
+  mergePosition(exchange, symbol, qty) {
+    this.setPosition(exchange, symbol, Number(qty));
   }
 
   getBalance(exchange) {
@@ -44,9 +73,35 @@ export class AccountCache {
     return this.positionCache.get(`${exchange}:${this.#compactSymbol(symbol)}`)?.qty ?? 0;
   }
 
+  getBalanceAgeMs(exchange) {
+    const bal = this.getBalance(exchange);
+    if (!bal?.updatedAtMs) return Infinity;
+    return Date.now() - bal.updatedAtMs;
+  }
+
+  isStale(exchange, maxAgeMs = this.accountCacheMaxAgeMs) {
+    return this.getBalanceAgeMs(exchange) > maxAgeMs;
+  }
+
+  isReliable(exchange) {
+    return Boolean(this.wsStatus[exchange]?.reliable);
+  }
+
+  isPrivateWsConnected(exchange) {
+    return Boolean(this.wsStatus[exchange]?.connected);
+  }
+
+  setWsStatus(exchange, { connected, reliable }) {
+    const prev = this.wsStatus[exchange] || { connected: false, reliable: false };
+    this.wsStatus[exchange] = {
+      connected: connected ?? prev.connected,
+      reliable: reliable ?? prev.reliable
+    };
+    this.reliable = ['binance', 'gate'].every((ex) => this.wsStatus[ex].reliable);
+  }
+
   /**
-   * 按套利腿方向更新本地持仓（dry 模拟成交 / 与 risk-manager 符号约定一致）
-   * -a+b: A 减、B 增；+a-b: A 增、B 减
+   * 按套利腿方向更新本地持仓（dry 模拟成交）
    */
   applyLegDelta(symbol, direction, qty) {
     const sym = this.#compactSymbol(symbol);
@@ -72,32 +127,72 @@ export class AccountCache {
 
   #applyBalance(exchange, balances) {
     const usdt = (balances || []).find((b) => b.currency === 'USDT');
-    const available = Number(usdt?.available ?? 0);
+    if (!usdt) return;
+    const available = Number(usdt.available ?? 0);
+    const total = Number(usdt.total ?? available);
+    if (total <= 1e-12 && available <= 1e-12) {
+      this.balanceCache.delete(`${exchange}:USDT`);
+      return;
+    }
     this.setBalance(exchange, {
-      total: Number(usdt?.total ?? available),
+      total,
       available,
       updatedAtMs: Date.now()
     });
   }
 
-  async refreshFromCexManager(cexManager) {
-    const [bBalances, gBalances, bPos, gPos] = await Promise.all([
-      cexManager.getBalance('binance', { silent: true }),
-      cexManager.getBalance('gate', { silent: true }),
-      cexManager.getPositions('binance', { silent: true }),
-      cexManager.getPositions('gate', { silent: true })
-    ]);
-    this.#applyBalance('binance', bBalances);
-    this.#applyBalance('gate', gBalances);
-    // 以交易所 REST 快照为准：未返回的 symbol 视为空仓（避免平仓后缓存残留）
-    this.positionCache.clear();
-    for (const p of bPos) {
-      this.setPosition('binance', this.#compactSymbol(p.symbol), p.qty);
+  async refreshExchange(cexManager, exchange, { force = false } = {}) {
+    const now = Date.now();
+    const minGap = this.restRefreshMinIntervalMs ?? 2000;
+    if (!force && now - (this._lastRestRefreshMs[exchange] || 0) < minGap) {
+      return;
     }
-    for (const p of gPos) {
-      this.setPosition('gate', this.#compactSymbol(p.symbol), p.qty);
+    this._lastRestRefreshMs[exchange] = now;
+
+    const [balances, positions] = await Promise.all([
+      cexManager.getBalance(exchange, { silent: true }),
+      cexManager.getPositions(exchange, { silent: true })
+    ]);
+    this.#applyBalance(exchange, balances);
+    const prefix = `${exchange}:`;
+    for (const key of [...this.positionCache.keys()]) {
+      if (key.startsWith(prefix)) this.positionCache.delete(key);
+    }
+    for (const p of positions) {
+      this.setPosition(exchange, this.#compactSymbol(p.symbol), p.qty);
+    }
+  }
+
+  async refreshFromCexManager(cexManager) {
+    await Promise.all([
+      this.refreshExchange(cexManager, 'binance', { force: true }),
+      this.refreshExchange(cexManager, 'gate', { force: true })
+    ]);
+    this.markRestSnapshotReliable();
+  }
+
+  /** 启动时 REST 全量同步后标记可用，避免私有 WS 连上前每笔信号都打 REST */
+  markRestSnapshotReliable() {
+    for (const exchange of ['binance', 'gate']) {
+      this.setWsStatus(exchange, { connected: false, reliable: true });
     }
     this.reliable = true;
+  }
+
+  /**
+   * 发单前：缓存过期或私有 WS 不可靠时 REST 补全
+   */
+  async ensureFresh(cexManager) {
+    if (this.mockMode) return;
+    const maxAge = this.accountCacheMaxAgeMs ?? 5000;
+    const tasks = [];
+    for (const exchange of ['binance', 'gate']) {
+      if (!this.isReliable(exchange) || this.isStale(exchange, maxAge)) {
+        const force = !this.isReliable(exchange);
+        tasks.push(this.refreshExchange(cexManager, exchange, { force }));
+      }
+    }
+    if (tasks.length > 0) await Promise.all(tasks);
   }
 }
 

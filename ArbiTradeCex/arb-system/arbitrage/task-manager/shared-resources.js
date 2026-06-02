@@ -2,7 +2,7 @@
  * 共享资源（对标 shared-resources.js）
  */
 import { CexManager } from '../../cex/manager.js';
-import { AccountCache, ReservationManager } from '../cache/index.js';
+import { AccountCache, ReservationManager, bindAccountStream } from '../cache/index.js';
 import { OrderExecutor } from '../execution/order-executor.js';
 import { ResultReporter } from '../execution/result-reporter.js';
 import { QuoteAggregator } from '../services/quote-aggregator.js';
@@ -23,6 +23,7 @@ export class SharedResources {
     this.dashboardBridge = null;
     this.inFlightCount = 0;
     this.useMockAccount = false;
+    this.accountStreamBridge = null;
   }
 
   async init() {
@@ -43,8 +44,11 @@ export class SharedResources {
       this.dashboardBridge?.recordExecutionStatus(payload);
     });
 
-    this.cexManager = await CexManager.createDefault();
+    this.cexManager = await CexManager.createDefault(strat);
     this.useMockAccount = Boolean(strat.useMockAccount) && !this.tradingEnabled;
+
+    this.accountCache.minAvailableUsdt = strat.minAvailableUsdt;
+    this.accountCache.accountCacheMaxAgeMs = Number(strat.accountCacheMaxAgeMs) || 5000;
 
     if (this.useMockAccount) {
       const balanceUsdt = Number(strat.mockBalanceUsdt) || 10000;
@@ -52,9 +56,12 @@ export class SharedResources {
       console.log(`[SharedResources] mock account: ${balanceUsdt} USDT per exchange (skip balance REST)`);
     } else {
       await this.accountCache.refreshFromCexManager(this.cexManager);
+      this.accountStreamBridge = bindAccountStream({
+        cexManager: this.cexManager,
+        accountCache: this.accountCache,
+        symbols: strat.symbols
+      });
     }
-
-    this.accountCache.minAvailableUsdt = strat.minAvailableUsdt;
     this.reservationManager = new ReservationManager({
       accountCache: this.accountCache,
       ttlMs: this.config.strategy.reservationTtlMs
@@ -71,6 +78,7 @@ export class SharedResources {
 
   async shutdown() {
     await Promise.all([
+      this.accountStreamBridge?.stop(),
       this.cexManager?.disconnectAll(),
       this.dashboardBridge?.stop()
     ]);
