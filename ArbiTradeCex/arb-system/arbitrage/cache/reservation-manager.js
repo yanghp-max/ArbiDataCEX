@@ -14,6 +14,8 @@ export class ReservationManager {
     this.ttlMs = options.ttlMs ?? 30000;
     this.mutex = new Mutex();
     this.accountCache = options.accountCache;
+    /** 执行中的 tradeId，purgeExpired 不得释放 */
+    this.executingTradeIds = new Set();
   }
 
   #compactSymbol(symbol) {
@@ -76,8 +78,16 @@ export class ReservationManager {
         );
       }
 
-      return ids;
+      return { ...ids, tradeId };
     });
+  }
+
+  markExecuting(tradeId) {
+    if (tradeId) this.executingTradeIds.add(tradeId);
+  }
+
+  markExecutionDone(tradeId) {
+    if (tradeId) this.executingTradeIds.delete(tradeId);
   }
 
   #addReservation(type, key, amount, tradeId) {
@@ -123,6 +133,7 @@ export class ReservationManager {
       }
     }
     for (const tradeId of expiredTradeIds) {
+      if (this.executingTradeIds.has(tradeId)) continue;
       const ids = { balA: null, balB: null, pos: [], symbol: null };
       for (const [id, r] of this.reservations) {
         if (r.tradeId !== tradeId || r.status !== 'active') continue;

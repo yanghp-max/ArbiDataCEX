@@ -89,6 +89,14 @@ export function resolveStrategySymbols(config) {
   return resolved;
 }
 
+/** 是否检查 maxPriceAgeMs / signalMaxAgeMs；未配置时 live=true、dry=false */
+export function resolveEnforceLatency(strategyConfig, tradingEnabled) {
+  if (strategyConfig?.enforceLatency != null) {
+    return Boolean(strategyConfig.enforceLatency);
+  }
+  return Boolean(tradingEnabled);
+}
+
 export function loadConfig() {
   if (cached) return cached;
   const configPath = path.join(rootDir, 'config.json');
@@ -102,4 +110,4 @@ export function getRootDir() {
   return rootDir;
 }
 
-export default { loadConfig, getRootDir, loadMinOrderQtyJson, loadSymbolsConfigJson, resolveStrategySymbols };
+export default { loadConfig, getRootDir, loadMinOrderQtyJson, loadSymbolsConfigJson, resolveStrategySymbols, resolveEnforceLatency };

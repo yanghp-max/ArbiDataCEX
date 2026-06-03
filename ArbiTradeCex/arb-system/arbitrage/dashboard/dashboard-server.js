@@ -65,10 +65,11 @@ export class DashboardServer {
 
   async #handleHttp(req, res) {
     const url = new URL(req.url || '/', `http://${req.headers.host}`);
-    let filePath = url.pathname === '/' ? '/index.html' : url.pathname;
-    filePath = path.normalize(filePath).replace(/^(\.\.[/\\])+/, '');
-    const abs = path.join(this.publicDir, filePath);
-    if (!abs.startsWith(this.publicDir)) {
+    let rel = url.pathname === '/' ? 'index.html' : url.pathname.replace(/^[/\\]+/, '');
+    rel = path.normalize(rel).replace(/^(\.\.([/\\]|$))+/, '');
+    const publicRoot = path.resolve(this.publicDir);
+    const abs = path.resolve(publicRoot, rel);
+    if (abs !== publicRoot && !abs.startsWith(`${publicRoot}${path.sep}`)) {
       res.writeHead(403);
       res.end('Forbidden');
       return;

@@ -30,6 +30,7 @@ export class CexCexTask {
     this.lockedDirection = new Map();
     this.lockedBranch = new Map();
     this.executingSymbols = new Set();
+    this.enforceLatency = sharedResources.enforceLatency;
     this.totalCostPct = (strategyConfig.feeBpsTotal + strategyConfig.slippageBpsTotal) / 100;
 
     for (const sym of strategyConfig.symbols) {
@@ -39,6 +40,10 @@ export class CexCexTask {
       }));
       this.lastOrderTs.set(sym, 0);
     }
+  }
+
+  #maxPriceAgeLimit() {
+    return this.enforceLatency ? this.cfg.maxPriceAgeMs : Infinity;
   }
 
   #syncLockState(symbol, signal) {
@@ -109,7 +114,7 @@ export class CexCexTask {
       }
     });
 
-    if (tick.priceAgeMs > this.cfg.maxPriceAgeMs) return;
+    if (this.enforceLatency && tick.priceAgeMs > this.cfg.maxPriceAgeMs) return;
     if (!signal.windowReady || signal.openZAb == null || signal.openZBa == null) return;
 
     if (tick.fundingA != null && tick.fundingA < this.cfg.fundingMin) return;
@@ -161,7 +166,7 @@ export class CexCexTask {
     const spreadFilterDir = tradePlan.spreadFilterDirection ?? tradePlan.direction;
     const filterSpread = spreadFilterDir === '-a+b' ? spreads.spreadAbAdj : spreads.spreadBaAdj;
 
-    if (!finalCheckPass(tick, spreadFilterDir, filterSpread, this.cfg.maxPriceAgeMs)) return;
+    if (!finalCheckPass(tick, spreadFilterDir, filterSpread, this.#maxPriceAgeLimit())) return;
 
     const orderBuild = this.precision.buildOrder({
       direction: execDirection,
@@ -178,7 +183,7 @@ export class CexCexTask {
     }
     if (qty <= 0) return;
 
-    if (Date.now() - tick.timestamp > this.cfg.signalMaxAgeMs) {
+    if (this.enforceLatency && Date.now() - tick.timestamp > this.cfg.signalMaxAgeMs) {
       this.sr.eventBus.emitExecutionStatus({ stage: 'SIGNAL_STALE', symbol });
       return;
     }
@@ -234,6 +239,7 @@ export class CexCexTask {
     }
 
     this.sr.inFlightCount += 1;
+    this.sr.reservationManager.markExecuting(tradeId);
     this.executeAsync({
       symbol,
       action: tradePlan.action,
@@ -274,19 +280,53 @@ export class CexCexTask {
       adjSpread,
       reservations
     } = ctx;
+    const tradeId = reservations?.tradeId;
     try {
-      if (!finalCheckPass(tick, execDirection, adjSpread, this.cfg.maxPriceAgeMs)) {
+      if (!finalCheckPass(tick, execDirection, adjSpread, this.#maxPriceAgeLimit())) {
         this.sr.eventBus.emitExecutionStatus({ stage: 'FINAL_SKIP', symbol });
         this.#releaseSymbolClaim(symbol, { restoreCooldown: true });
         return;
       }
 
-      const fill = await this.sr.orderExecutor.executeBothLegs({
-        direction: execDirection,
-        tick,
-        order,
-        reduceOnly: action === 'close'
-      });
+      let fill;
+      try {
+        fill = await this.sr.orderExecutor.executeBothLegs({
+          direction: execDirection,
+          tick,
+          order,
+          reduceOnly: action === 'close'
+        });
+      } catch (err) {
+        await this.sr.accountCache.refreshFromCexManager(this.sr.cexManager).catch(() => {});
+        this.sr.eventBus.emitExecutionStatus({
+          stage: err.message?.startsWith('LEG_EXPOSURE') ? 'LEG_EXPOSURE' : 'EXEC_FAILED',
+          symbol,
+          direction: execDirection,
+          detail: err.message
+        });
+        this.#releaseSymbolClaim(symbol, { restoreCooldown: true });
+        return;
+      }
+
+      if (!fill.simulated && fill.qty <= 0) {
+        this.sr.eventBus.emitExecutionStatus({
+          stage: 'ZERO_FILL',
+          symbol,
+          direction: execDirection,
+          detail: `A=${fill.aFilledQty} B=${fill.bFilledQty}`
+        });
+        this.#releaseSymbolClaim(symbol, { restoreCooldown: true });
+        return;
+      }
+
+      if (fill.legMismatch) {
+        this.sr.eventBus.emitExecutionStatus({
+          stage: 'LEG_MISMATCH',
+          symbol,
+          direction: execDirection,
+          detail: `A=${fill.aFilledQty} B(base)=${fill.bFilledQty} matched=${fill.qty}`
+        });
+      }
 
       if (fill.simulated) {
         this.sr.accountCache.applyLegDelta(symbol, execDirection, fill.qty);
@@ -330,6 +370,7 @@ export class CexCexTask {
       });
     } finally {
       await this.sr.reservationManager.releaseAll(reservations);
+      if (tradeId) this.sr.reservationManager.markExecutionDone(tradeId);
       this.#releaseSymbolClaim(symbol);
       this.sr.inFlightCount -= 1;
     }

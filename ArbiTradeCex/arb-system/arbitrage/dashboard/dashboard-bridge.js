@@ -15,11 +15,13 @@ export class DashboardBridge {
     this.windowSeconds = options.windowSeconds ?? 3600;
     this.minDataPoints = options.minDataPoints ?? 50;
     this.maxPriceAgeMs = options.maxPriceAgeMs ?? 1000;
+    this.enforceLatency = options.enforceLatency ?? options.tradingEnabled ?? false;
     this.symbols = options.symbols ?? [];
     this.server = null;
     this.state = {
       startedAt: Date.now(),
       tradingEnabled: options.tradingEnabled ?? false,
+      enforceLatency: this.enforceLatency,
       useMockAccount: options.useMockAccount ?? false,
       progress: {
         overallPct: 0,
@@ -165,7 +167,7 @@ export class DashboardBridge {
       return;
     }
 
-    const stale = tick.priceAgeMs > this.maxPriceAgeMs;
+    const stale = this.enforceLatency && tick.priceAgeMs > this.maxPriceAgeMs;
     sym.status = stale ? 'stale' : (signal?.windowReady ? 'ready' : 'collecting');
     sym.priceAgeMs = tick.priceAgeMs;
     sym.aAgeMs = tick.aAgeMs ?? null;
@@ -236,10 +238,15 @@ export class DashboardBridge {
   recordExecutionStatus(payload) {
     if (!this.enabled) return;
     if (payload.stage === 'TRADE_DONE' || payload.stage === 'FINAL_SKIP') return;
+    const level = ['RESERVE_FAILED', 'SIGNAL_STALE', 'ZERO_FILL'].includes(payload.stage)
+      ? 'warn'
+      : ['LEG_EXPOSURE', 'LEG_MISMATCH', 'EXEC_FAILED'].includes(payload.stage)
+        ? 'error'
+        : 'info';
     this.#pushLog({
-      level: payload.stage === 'RESERVE_FAILED' ? 'warn' : 'info',
+      level,
       symbol: payload.symbol,
-      message: `[${payload.stage}] ${payload.symbol}${payload.direction ? ` ${payload.direction}` : ''}`,
+      message: `[${payload.stage}] ${payload.symbol}${payload.direction ? ` ${payload.direction}` : ''}${payload.detail ? `: ${payload.detail}` : ''}`,
       detail: payload
     });
     this.#broadcast();

@@ -4,7 +4,31 @@
  *   -a+b: A@bid, B@ask
  *   +a-b: A@ask, B@bid
  */
+import { OrderStatus } from '../../cex/types.js';
 import { legPricesForDirection } from '../services/spread-calculator.js';
+
+const POLL_ATTEMPTS = 5;
+const POLL_INTERVAL_MS = 150;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function readFilled(order, requestedQty) {
+  const filled = Number(order?.filled);
+  if (Number.isFinite(filled) && filled >= 0) return filled;
+  return 0;
+}
+
+/** Gate 合约张数 → Binance 基础数量 */
+export function gateFillToBaseQty(filledContracts, order) {
+  const filled = Number(filledContracts);
+  if (!Number.isFinite(filled) || filled <= 0) return 0;
+  if (order.gateDecimalSize || order.gateQuantityUnit === 'base') return filled;
+  const mult = Number(order.gateQuantoMultiplier);
+  if (!Number.isFinite(mult) || mult <= 0) return filled;
+  return filled * mult;
+}
 
 export class OrderExecutor {
   constructor({ cexManager, tradingEnabled }) {
@@ -27,11 +51,13 @@ export class OrderExecutor {
         bPriceUsed: bPrice,
         qty,
         aFilledQty: qty,
-        bFilledQty: qty
+        bFilledQty: qty,
+        legMismatch: false
       };
     }
 
-    const [aOrder, bOrder] = await Promise.all([
+    const fallback = legPricesForDirection(direction, tick);
+    const [aResult, bResult] = await Promise.allSettled([
       this.cexManager.placeOrder('binance', {
         symbol: tick.symbol,
         side: binanceSide,
@@ -49,10 +75,26 @@ export class OrderExecutor {
       })
     ]);
 
-    const aFilled = Number(aOrder.filled || qty);
-    const bFilled = Number(bOrder.filled || qty);
-    const matchedQty = Math.min(aFilled, bFilled, qty);
-    const fallback = legPricesForDirection(direction, tick);
+    if (aResult.status === 'rejected' && bResult.status === 'rejected') {
+      throw new Error(`both legs failed: A=${aResult.reason?.message}; B=${bResult.reason?.message}`);
+    }
+    if (aResult.status === 'rejected' || bResult.status === 'rejected') {
+      const okLeg = aResult.status === 'fulfilled' ? 'binance' : 'gate';
+      const failLeg = aResult.status === 'rejected' ? 'binance' : 'gate';
+      const failMsg = (aResult.status === 'rejected' ? aResult.reason : bResult.reason)?.message;
+      throw new Error(`LEG_EXPOSURE: ${okLeg} placed, ${failLeg} failed: ${failMsg}`);
+    }
+
+    let aOrder = aResult.value;
+    let bOrder = bResult.value;
+
+    aOrder = await this.#ensureOrderFill('binance', aOrder, tick.symbol, qty);
+    bOrder = await this.#ensureOrderFill('gate', bOrder, tick.symbol, gateSize, gateDecimalSize);
+
+    const aFilled = readFilled(aOrder, qty);
+    const bFilledBase = gateFillToBaseQty(readFilled(bOrder, gateSize), order);
+    const matchedQty = Math.min(aFilled, bFilledBase, qty);
+    const legMismatch = aFilled > 0 && bFilledBase > 0 && Math.abs(aFilled - bFilledBase) > 1e-6;
 
     return {
       simulated: false,
@@ -62,10 +104,30 @@ export class OrderExecutor {
       bPriceUsed: Number(bOrder.avgPrice || bOrder.price || fallback.bPrice),
       qty: matchedQty,
       aFilledQty: aFilled,
-      bFilledQty: bFilled,
+      bFilledQty: bFilledBase,
+      legMismatch,
       rawA: aOrder,
       rawB: bOrder
     };
+  }
+
+  async #ensureOrderFill(exchange, order, symbol, requestedQty, gateDecimalSize = false) {
+    let current = order;
+    const needsPoll = () => {
+      const filled = readFilled(current, requestedQty);
+      const avg = Number(current.avgPrice || current.price || 0);
+      const terminal = current.status === OrderStatus.FILLED || current.status === OrderStatus.CANCELLED;
+      return filled <= 0 || avg <= 0 || (!terminal && filled < requestedQty);
+    };
+
+    if (!needsPoll()) return current;
+
+    for (let i = 0; i < POLL_ATTEMPTS; i += 1) {
+      await sleep(POLL_INTERVAL_MS);
+      current = await this.cexManager.getOrderStatus(exchange, current.orderId, symbol);
+      if (!needsPoll()) break;
+    }
+    return current;
   }
 }
 

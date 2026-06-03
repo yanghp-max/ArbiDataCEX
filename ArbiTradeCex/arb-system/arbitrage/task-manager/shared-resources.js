@@ -8,6 +8,7 @@ import { ResultReporter } from '../execution/result-reporter.js';
 import { QuoteAggregator } from '../services/quote-aggregator.js';
 import eventBus from '../event-bus/index.js';
 import { DashboardBridge } from '../dashboard/dashboard-bridge.js';
+import { resolveEnforceLatency } from '../../config/global-config.js';
 
 export class SharedResources {
   constructor(config, options = {}) {
@@ -29,6 +30,7 @@ export class SharedResources {
   async init() {
     const strat = this.config.strategy;
     const dashCfg = this.config.dashboard || {};
+    this.enforceLatency = resolveEnforceLatency(strat, this.tradingEnabled);
     this.dashboardBridge = new DashboardBridge({
       enabled: dashCfg.enabled !== false,
       port: dashCfg.port ?? 3456,
@@ -37,6 +39,7 @@ export class SharedResources {
       maxPriceAgeMs: strat.maxPriceAgeMs ?? 1000,
       symbols: strat.symbols,
       tradingEnabled: this.tradingEnabled,
+      enforceLatency: this.enforceLatency,
       useMockAccount: Boolean(strat.useMockAccount) && !this.tradingEnabled
     });
     await this.dashboardBridge.start();

@@ -363,6 +363,16 @@ export class GateAdapter extends BaseAdapter {
     return map[status] || OrderStatus.PENDING;
   }
 
+  #parseGateFilled(response) {
+    const size = Math.abs(Number(response.size || 0));
+    if (size <= 0) return 0;
+    if (response.left == null) {
+      return response.status === 'finished' ? size : 0;
+    }
+    const left = Math.abs(Number(response.left));
+    return Math.max(0, size - left);
+  }
+
   async placeOrder(orderData) {
     this.validateOrderData(orderData);
     const contract = this.toGateContract(orderData.symbol);
@@ -390,7 +400,7 @@ export class GateAdapter extends BaseAdapter {
       amount: Math.abs(Number(orderData.amount)),
       price: Number(response.price || orderData.price || 0),
       status: this.#mapOrderStatus(response.status),
-      filled: Math.abs(Number(response.size || 0)),
+      filled: this.#parseGateFilled(response),
       timestamp: Date.now(),
       avgPrice: Number(response.fill_price || 0)
     });
@@ -429,7 +439,7 @@ export class GateAdapter extends BaseAdapter {
       amount: Math.abs(Number(response.size || 0)),
       price: Number(response.price || 0),
       status: this.#mapOrderStatus(response.status),
-      filled: Math.abs(Number(response.size || 0)),
+      filled: this.#parseGateFilled(response),
       timestamp: Number(response.create_time || Date.now()) * 1000,
       avgPrice: Number(response.fill_price || 0)
     });
@@ -448,7 +458,7 @@ export class GateAdapter extends BaseAdapter {
       amount: Math.abs(Number(row.size || 0)),
       price: Number(row.price || 0),
       status: this.#mapOrderStatus(row.status),
-      filled: Math.abs(Number(row.size || 0)),
+      filled: this.#parseGateFilled(row),
       timestamp: Number(row.create_time || Date.now()) * 1000,
       avgPrice: Number(row.fill_price || 0)
     }));

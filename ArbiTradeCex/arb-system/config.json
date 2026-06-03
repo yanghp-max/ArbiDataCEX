@@ -1,6 +1,6 @@
 {
   "strategy": {
-    "windowSeconds": 3600,
+    "windowSeconds": 600,
     "minDataPoints": 50,
     "zOpen": 1.0,
     "zClose": 2.0,
@@ -9,6 +9,7 @@
     "cooldownMs": 1000,
     "maxPriceAgeMs": 1000,
     "signalMaxAgeMs": 50,
+    "enforceLatency": true,
     "fundingMin": -0.1,
     "feeBpsTotal": 4,
     "slippageBpsTotal": 4,

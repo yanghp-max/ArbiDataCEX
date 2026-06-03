@@ -46,6 +46,8 @@ export class PrecisionChecker {
       if (multiplier > 0) {
         gateSize = floorByStep(qty / multiplier, step);
         if (gateSize < minGate) gateSize = minGate;
+        // 按 Gate 合约张数回推 Binance 基础数量，避免两腿对冲量不一致
+        qty = floorByStep(gateSize * multiplier, Number(cfg.binance.stepSize));
       }
     }
 
@@ -55,6 +57,8 @@ export class PrecisionChecker {
       qty,
       gateSize,
       gateDecimalSize: Boolean(gateCfg.enableDecimal || gateCfg.quantityUnit === 'base'),
+      gateQuantityUnit: gateCfg.quantityUnit || 'contract',
+      gateQuantoMultiplier: Number(gateCfg.quantoMultiplier) || 1,
       direction,
       aPrice,
       cfg

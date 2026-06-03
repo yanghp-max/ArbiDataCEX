@@ -74,7 +74,11 @@ export class TaskManager {
       }
     }, 200);
 
-    console.log(`[TaskManager] started symbols=${strat.symbols.join(',')} trading=${this.tradingEnabled}`);
+    console.log(
+      `[TaskManager] started symbols=${strat.symbols.join(',')} trading=${this.tradingEnabled}`
+      + ` windowSeconds=${strat.windowSeconds} minDataPoints=${strat.minDataPoints}`
+      + ` enforceLatency=${this.sharedResources.enforceLatency}`
+    );
   }
 
   async stop() {

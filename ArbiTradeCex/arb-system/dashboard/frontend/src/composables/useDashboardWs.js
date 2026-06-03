@@ -4,6 +4,7 @@ function emptyState() {
   return {
     startedAt: Date.now(),
     tradingEnabled: false,
+    enforceLatency: false,
     useMockAccount: false,
     progress: {
       overallPct: 0,

@@ -51,6 +51,7 @@ const {
       v-for="card in symbolCards"
       :key="card.symbol"
       :card="card"
+      :show-latency="state.enforceLatency"
       :fmt="fmt"
       :fmt-pct="fmtPct"
       :spread-class="spreadClass"

@@ -1,6 +1,7 @@
 <script setup>
 defineProps({
   card: { type: Object, required: true },
+  showLatency: { type: Boolean, default: true },
   fmt: { type: Function, required: true },
   fmtPct: { type: Function, required: true },
   spreadClass: { type: Function, required: true },
@@ -48,7 +49,7 @@ defineProps({
     <div v-if="card.lockedDirection" class="z-row">
       <span>lock {{ card.lockedDirection }} · branch {{ card.lockedBranch }}</span>
     </div>
-    <div class="meta-row">
+    <div v-if="showLatency" class="meta-row">
       <span>price age {{ fmt(card.priceAgeMs, 0) }}ms · leg A/B {{ fmt(card.aAgeMs, 0) }}/{{ fmt(card.bAgeMs, 0) }}ms</span>
       <span>lat A/B {{ fmt(card.aLatencyMs, 0) }}/{{ fmt(card.bLatencyMs, 0) }}ms</span>
     </div>
