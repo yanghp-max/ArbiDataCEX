@@ -64,13 +64,14 @@ export function calcTradePnl(fill, ctx, feeBpsTotal = 4, slippageBpsTotal = 4) {
 }
 
 export class ResultReporter {
-  constructor() {
+  constructor({ tradeCsvWriter = null } = {}) {
     this.cumPnl = 0;
     this.tradeCount = 0;
     this.winCount = 0;
     this.lossCount = 0;
     this.bySymbol = {};
     this.trades = [];
+    this.tradeCsvWriter = tradeCsvWriter;
   }
 
   getSummary() {
@@ -90,20 +91,34 @@ export class ResultReporter {
     else this.lossCount += 1;
     this.bySymbol[symbol] = (this.bySymbol[symbol] ?? 0) + netPnl;
 
+    const ts = Date.now();
     const row = {
       symbol,
-      timestamp: Date.now(),
+      timestamp: ts,
+      timestampMs: ts,
+      timestampIso: new Date(ts).toISOString(),
       direction,
       action,
       lockedDirection: lockedDirection ?? direction,
+      aBidPre: fill.aBidPre,
+      aAskPre: fill.aAskPre,
+      bBidPre: fill.bBidPre,
+      bAskPre: fill.bAskPre,
+      aPricePre: fill.aPricePre,
+      bPricePre: fill.bPricePre,
       aPriceUsed: fill.aPriceUsed,
       bPriceUsed: fill.bPriceUsed,
+      aPricePost: fill.aPricePost ?? fill.aPriceUsed,
+      bPricePost: fill.bPricePost ?? fill.bPriceUsed,
       qty: fill.qty,
+      aFilledQty: fill.aFilledQty,
+      bFilledQty: fill.bFilledQty,
       aOrderId: fill.aOrderId,
       bOrderId: fill.bOrderId,
       netPnl,
       cumPnl: this.cumPnl,
       simulated: Boolean(fill.simulated),
+      legMismatch: Boolean(fill.legMismatch),
       aPosQty: accountCache.getPosition('binance', symbol),
       bPosQty: accountCache.getPosition('gate', symbol)
     };
@@ -113,6 +128,36 @@ export class ResultReporter {
       `[PNL] total=${this.cumPnl.toFixed(4)} USDT · trades=${this.tradeCount} · latest=${netPnl.toFixed(4)} (${symbol})`
     );
     dashboardBridge?.recordTrade(row, this.getSummary());
+    if (this.tradeCsvWriter && !row.simulated) {
+      this.tradeCsvWriter.appendRow({
+        timestamp_ms: row.timestampMs,
+        timestamp_iso: row.timestampIso,
+        symbol: row.symbol,
+        action: row.action,
+        direction: row.direction,
+        locked_direction: row.lockedDirection,
+        a_bid_pre: row.aBidPre,
+        a_ask_pre: row.aAskPre,
+        b_bid_pre: row.bBidPre,
+        b_ask_pre: row.bAskPre,
+        a_price_pre: row.aPricePre,
+        b_price_pre: row.bPricePre,
+        a_price_post: row.aPricePost,
+        b_price_post: row.bPricePost,
+        qty: row.qty,
+        a_filled_qty: row.aFilledQty,
+        b_filled_qty: row.bFilledQty,
+        a_order_id: row.aOrderId,
+        b_order_id: row.bOrderId,
+        net_pnl: row.netPnl,
+        cum_pnl: row.cumPnl,
+        a_pos_qty: row.aPosQty,
+        b_pos_qty: row.bPosQty,
+        leg_mismatch: row.legMismatch
+      }).catch((err) => {
+        console.error('[ResultReporter] failed to write trade CSV:', err.message);
+      });
+    }
     return row;
   }
 }

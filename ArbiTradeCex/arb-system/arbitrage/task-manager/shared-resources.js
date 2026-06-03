@@ -5,10 +5,11 @@ import { CexManager } from '../../cex/manager.js';
 import { AccountCache, ReservationManager, bindAccountStream } from '../cache/index.js';
 import { OrderExecutor } from '../execution/order-executor.js';
 import { ResultReporter } from '../execution/result-reporter.js';
+import { TradeCsvWriter } from '../execution/trade-csv-writer.js';
 import { QuoteAggregator } from '../services/quote-aggregator.js';
 import eventBus from '../event-bus/index.js';
 import { DashboardBridge } from '../dashboard/dashboard-bridge.js';
-import { resolveEnforceLatency } from '../../config/global-config.js';
+import { resolveEnforceLatency, getRootDir } from '../../config/global-config.js';
 
 export class SharedResources {
   constructor(config, options = {}) {
@@ -19,7 +20,8 @@ export class SharedResources {
     this.quoteAggregator = new QuoteAggregator();
     this.reservationManager = null;
     this.orderExecutor = null;
-    this.resultReporter = new ResultReporter();
+    this.resultReporter = null;
+    this.tradeCsvWriter = null;
     this.eventBus = eventBus;
     this.dashboardBridge = null;
     this.inFlightCount = 0;
@@ -73,6 +75,15 @@ export class SharedResources {
       cexManager: this.cexManager,
       tradingEnabled: this.tradingEnabled
     });
+
+    if (this.tradingEnabled && strat.tradeLogCsv) {
+      this.tradeCsvWriter = new TradeCsvWriter({
+        filePath: strat.tradeLogCsv,
+        rootDir: getRootDir()
+      });
+      console.log(`[SharedResources] live trade CSV -> ${this.tradeCsvWriter.filePath}`);
+    }
+    this.resultReporter = new ResultReporter({ tradeCsvWriter: this.tradeCsvWriter });
   }
 
   getAdapter(exchange) {

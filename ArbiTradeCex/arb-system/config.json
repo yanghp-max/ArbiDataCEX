@@ -21,6 +21,7 @@
     "listenKeyKeepaliveMin": 60,
     "reservationTtlMs": 30000,
     "maxInFlightTrades": 5,
+    "tradeLogCsv": "logs/live-trades.csv",
     "symbolsConfigJson": "config/symbols_config.json",
     "minQtyJson": "config/min-order-qty.json"
   },

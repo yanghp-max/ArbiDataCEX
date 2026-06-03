@@ -47,8 +47,16 @@ export class OrderExecutor {
         simulated: true,
         aOrderId: `SIM_A_${Date.now()}`,
         bOrderId: `SIM_B_${Date.now()}`,
+        aBidPre: tick.aBid,
+        aAskPre: tick.aAsk,
+        bBidPre: tick.bBid,
+        bAskPre: tick.bAsk,
+        aPricePre: aPrice,
+        bPricePre: bPrice,
         aPriceUsed: aPrice,
         bPriceUsed: bPrice,
+        aPricePost: aPrice,
+        bPricePost: bPrice,
         qty,
         aFilledQty: qty,
         bFilledQty: qty,
@@ -95,13 +103,23 @@ export class OrderExecutor {
     const bFilledBase = gateFillToBaseQty(readFilled(bOrder, gateSize), order);
     const matchedQty = Math.min(aFilled, bFilledBase, qty);
     const legMismatch = aFilled > 0 && bFilledBase > 0 && Math.abs(aFilled - bFilledBase) > 1e-6;
+    const aPricePost = Number(aOrder.avgPrice || aOrder.price || fallback.aPrice);
+    const bPricePost = Number(bOrder.avgPrice || bOrder.price || fallback.bPrice);
 
     return {
       simulated: false,
       aOrderId: String(aOrder.orderId),
       bOrderId: String(bOrder.orderId),
-      aPriceUsed: Number(aOrder.avgPrice || aOrder.price || fallback.aPrice),
-      bPriceUsed: Number(bOrder.avgPrice || bOrder.price || fallback.bPrice),
+      aBidPre: tick.aBid,
+      aAskPre: tick.aAsk,
+      bBidPre: tick.bBid,
+      bAskPre: tick.bAsk,
+      aPricePre: aPrice,
+      bPricePre: bPrice,
+      aPriceUsed: aPricePost,
+      bPriceUsed: bPricePost,
+      aPricePost,
+      bPricePost,
       qty: matchedQty,
       aFilledQty: aFilled,
       bFilledQty: bFilledBase,
