@@ -42,12 +42,12 @@ defineProps({
       </div>
     </div>
 
-    <div v-if="card.windowReady" class="z-row">
+    <div class="z-row" :class="{ 'z-row--hidden': !card.windowReady }">
       <span>openZ ab/ba {{ fmt(card.openZAb, 2) }} / {{ fmt(card.openZBa, 2) }}</span>
       <span>closeZ ab/ba {{ fmt(card.closeZAb, 2) }} / {{ fmt(card.closeZBa, 2) }}</span>
     </div>
-    <div v-if="card.lockedDirection" class="z-row">
-      <span>lock {{ card.lockedDirection }} · branch {{ card.lockedBranch }}</span>
+    <div class="z-row z-row--lock" :class="{ 'z-row--hidden': !card.lockedDirection }">
+      <span>lock {{ card.lockedDirection || '-' }} · branch {{ card.lockedBranch || '-' }}</span>
     </div>
     <div v-if="showLatency" class="meta-row">
       <span>price age {{ fmt(card.priceAgeMs, 0) }}ms · leg A/B {{ fmt(card.aAgeMs, 0) }}/{{ fmt(card.bAgeMs, 0) }}ms</span>
