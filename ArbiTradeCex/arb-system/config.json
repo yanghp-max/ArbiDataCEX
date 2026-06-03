@@ -9,7 +9,7 @@
     "cooldownMs": 1000,
     "maxPriceAgeMs": 1000,
     "signalMaxAgeMs": 50,
-    "enforceLatency": true,
+    "enforceLatency": false,
     "fundingMin": -0.1,
     "feeBpsTotal": 4,
     "slippageBpsTotal": 4,
