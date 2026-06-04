@@ -1,21 +1,50 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { floorByStep } from '../../common/utils/precision.js';
+import { resolveMinHedgeQty } from '../../common/utils/cross-exchange-order-qty.js';
 import { legPricesForDirection } from '../services/spread-calculator.js';
 
 export class PrecisionChecker {
-  constructor(minQtyBySymbol = {}) {
+  constructor(minQtyBySymbol = {}, options = {}) {
     this.minQtyBySymbol = minQtyBySymbol;
+    this.orderUsd = Number(options.orderUsd) || 0;
+    this.minOrderLotQtySymbols = new Set(
+      (options.minOrderLotQtySymbols || []).map((s) => String(s).toUpperCase())
+    );
   }
 
-  static async loadFromJson(jsonPath, symbols) {
+  static async loadFromJson(jsonPath, symbols, options = {}) {
     const text = await fs.readFile(jsonPath, 'utf8');
     const json = JSON.parse(text);
     const map = {};
     for (const sym of symbols) {
       if (json.symbols?.[sym]) map[sym] = json.symbols[sym];
     }
-    return new PrecisionChecker(map);
+    const checker = new PrecisionChecker(map, options);
+    checker.warnIfMinNotionalMissing(symbols);
+    return checker;
+  }
+
+  /** 情况 A：依赖 JSON 内 per-symbol minNotional（需先 build:symbols-min-qty） */
+  warnIfMinNotionalMissing(symbols) {
+    const lotSet = this.minOrderLotQtySymbols;
+    const missing = [];
+    for (const sym of symbols) {
+      if (lotSet.has(String(sym).toUpperCase())) continue;
+      const b = this.minQtyBySymbol[sym]?.binance;
+      if (!b) {
+        missing.push(`${sym}(no entry)`);
+        continue;
+      }
+      const apiU = Number(b.minNotional);
+      if (!Number.isFinite(apiU) || apiU <= 0) missing.push(sym);
+    }
+    if (missing.length > 0) {
+      console.warn(
+        `[PrecisionChecker] binance.minNotional missing for: ${missing.slice(0, 8).join(', ')}`
+        + `${missing.length > 8 ? ` ...+${missing.length - 8}` : ''}. `
+        + `Run: npm run build:symbols-min-qty — until then only orderUsd=${this.orderUsd} applies (BTC etc. may be wrong).`
+      );
+    }
   }
 
   resolvePath(configPath, rootDir) {
@@ -28,34 +57,28 @@ export class PrecisionChecker {
     if (!cfg) return { qty: 0 };
 
     const { aPrice } = legPricesForDirection(direction, tick);
-    const rawQty = orderUsd / aPrice;
-    let qty = floorByStep(rawQty, Number(cfg.binance.stepSize));
-    if (qty < Number(cfg.binance.minQty)) qty = Number(cfg.binance.minQty);
-    qty = floorByStep(qty, Number(cfg.binance.stepSize));
+    const minU = Number(orderUsd ?? this.orderUsd);
+    const useLotMinQty = this.minOrderLotQtySymbols.has(String(tick.symbol).toUpperCase());
 
-    const gateCfg = cfg.gate;
-    const minGate = Number(gateCfg.minQty);
-    const step = Number(gateCfg.stepSize || 1);
-    let gateSize = 0;
-
-    if (gateCfg.quantityUnit === 'base' || gateCfg.enableDecimal) {
-      gateSize = floorByStep(qty, step);
-      if (gateSize < minGate) gateSize = minGate;
-    } else {
-      const multiplier = Number(gateCfg.quantoMultiplier || 0);
-      if (multiplier > 0) {
-        gateSize = floorByStep(qty / multiplier, step);
-        if (gateSize < minGate) gateSize = minGate;
-        // 按 Gate 合约张数回推 Binance 基础数量，避免两腿对冲量不一致
-        qty = floorByStep(gateSize * multiplier, Number(cfg.binance.stepSize));
-      }
-    }
+    const resolved = resolveMinHedgeQty({
+      orderUsd: minU,
+      aPrice,
+      binanceCfg: cfg.binance,
+      gateCfg: cfg.gate,
+      useLotMinQty
+    });
+    const { qty, gateSize, effectiveMinNotional, qBinance, qGate } = resolved;
 
     if (qty <= 0 || gateSize <= 0) return { qty: 0, gateSize: 0 };
+
+    const gateCfg = cfg.gate;
 
     return {
       qty,
       gateSize,
+      effectiveMinNotional,
+      qBinance,
+      qGate,
       gateDecimalSize: Boolean(gateCfg.enableDecimal || gateCfg.quantityUnit === 'base'),
       gateQuantityUnit: gateCfg.quantityUnit || 'contract',
       gateQuantoMultiplier: Number(gateCfg.quantoMultiplier) || 1,

@@ -6,6 +6,7 @@ import path from 'node:path';
 import process from 'node:process';
 import axios from 'axios';
 import { loadConfig, getRootDir } from '../config/global-config.js';
+import { resolveBinanceOrderLimits } from '../common/utils/binance-order-limits.js';
 import { resolveGateOrderLimits } from '../common/utils/gate-contract-limits.js';
 
 const BINANCE_REST = process.env.BINANCE_REST_URL || 'https://fapi.binance.com';
@@ -83,8 +84,8 @@ function toGateContract(binanceStyleSymbol) {
   return `${binanceStyleSymbol.slice(0, -4)}_USDT`;
 }
 
-function getBinanceLotFilter(symbolInfo) {
-  return (symbolInfo.filters || []).find((f) => f.filterType === 'LOT_SIZE') || null;
+function binanceRefPrice(ticker) {
+  return ticker?.bid ?? ticker?.mid ?? ticker?.ask ?? null;
 }
 
 async function fetchBinanceExchangeInfo() {
@@ -197,31 +198,25 @@ async function main() {
       throw new Error(`symbol not found on Gate futures: ${gateContract}`);
     }
 
-    const lot = getBinanceLotFilter(b);
-    if (!lot) {
-      throw new Error(`LOT_SIZE filter missing on Binance for ${upper}`);
-    }
-
-    const minQty = Number(lot.minQty);
-    const stepSize = Number(lot.stepSize);
     const bTicker = binanceTickerMap.get(upper) || null;
     const gTicker = gateTickerMap.get(gateContract) || null;
-
-    if (!Number.isFinite(minQty) || !Number.isFinite(stepSize)) {
-      throw new Error(`invalid Binance minQty/stepSize for ${upper}`);
-    }
+    const binanceLimits = resolveBinanceOrderLimits(b, {
+      refPrice: binanceRefPrice(bTicker)
+    });
 
     const gateLimits = resolveGateOrderLimits(g, {
-      binanceMinQty: minQty,
-      binanceStepSize: stepSize,
+      binanceMinQty: binanceLimits.minQty,
+      binanceStepSize: binanceLimits.stepSize,
       gateSymbol: gateContract
     });
 
     result.symbols[upper] = {
       binance: {
         symbol: upper,
-        minQty,
-        stepSize,
+        lotMinQty: binanceLimits.lotMinQty,
+        minNotional: binanceLimits.minNotional,
+        minQty: binanceLimits.minQty,
+        stepSize: binanceLimits.stepSize,
         priceRef: {
           collectedAt: priceCollectedAt,
           bid: bTicker?.bid ?? null,
