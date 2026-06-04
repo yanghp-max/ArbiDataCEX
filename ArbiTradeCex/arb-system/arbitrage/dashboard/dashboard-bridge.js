@@ -5,9 +5,10 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { getRootDir } from '../../config/global-config.js';
 import { resolveLatencyLimits, tickLatencyPass } from '../risk/risk-manager.js';
+import { buildAccountSnapshot } from '../services/account-snapshot.js';
 import { DashboardServer } from './dashboard-server.js';
 
-const DASHBOARD_MARKER = 'dashboard v3';
+const DASHBOARD_MARKER = 'dashboard v4 account';
 
 export class DashboardBridge {
   constructor(options = {}) {
@@ -26,6 +27,7 @@ export class DashboardBridge {
     );
     this.symbols = options.symbols ?? [];
     this.server = null;
+    this.accountServices = null;
     this.state = {
       startedAt: Date.now(),
       tradingEnabled: options.tradingEnabled ?? false,
@@ -46,7 +48,9 @@ export class DashboardBridge {
         winCount: 0,
         lossCount: 0,
         bySymbol: {}
-      }
+      },
+      account: null,
+      accountBaseline: null
     };
 
     for (const sym of this.symbols) {
@@ -99,6 +103,56 @@ export class DashboardBridge {
     };
   }
 
+  /** 由 SharedResources 在 init 完成后注入 */
+  setAccountServices({ accountCache, cexManager, quoteAggregator, symbols }) {
+    this.accountServices = { accountCache, cexManager, quoteAggregator, symbols };
+  }
+
+  async refreshAccountSnapshot() {
+    if (!this.accountServices) {
+      throw new Error('account services not ready');
+    }
+    const snap = await buildAccountSnapshot({
+      ...this.accountServices,
+      forceRefresh: true
+    });
+    this.state.account = snap;
+    if (this.state.accountBaseline == null) {
+      this.state.accountBaseline = {
+        at: snap.at,
+        totalUsdt: snap.totalUsdt,
+        auto: true
+      };
+    }
+    const baseline = this.state.accountBaseline.totalUsdt ?? 0;
+    snap.vsBaselineUsdt = snap.totalUsdt - baseline;
+    snap.realizedPnlUsdt = this.state.summary?.totalPnl ?? 0;
+    const baselineNote = this.state.accountBaseline?.auto === false ? '较基准' : '较启动';
+    this.#pushLog({
+      level: 'info',
+      message: `[ACCOUNT] 总 U ${snap.totalUsdt.toFixed(2)} (Binance ${snap.binance.usdt.toFixed(2)} + Gate ${snap.gate.usdt.toFixed(2)}) · ${baselineNote} ${snap.vsBaselineUsdt >= 0 ? '+' : ''}${snap.vsBaselineUsdt.toFixed(2)}`
+    });
+    this.#broadcast();
+    return snap;
+  }
+
+  setAccountBaseline() {
+    const total = this.state.account?.totalUsdt;
+    if (!Number.isFinite(total)) {
+      throw new Error('请先点击「刷新账户 U」');
+    }
+    this.state.accountBaseline = { at: Date.now(), totalUsdt: total, auto: false };
+    if (this.state.account) {
+      this.state.account.vsBaselineUsdt = 0;
+    }
+    this.#pushLog({
+      level: 'info',
+      message: `[ACCOUNT] 基准已设为 ${total.toFixed(2)} USDT`
+    });
+    this.#broadcast();
+    return this.state.accountBaseline;
+  }
+
   async start() {
     if (!this.enabled) return;
     const publicDir = `${getRootDir()}/dashboard/public`;
@@ -106,6 +160,10 @@ export class DashboardBridge {
     this.server = new DashboardServer({ port: this.port, publicDir });
     this.server.onClientConnect = () => {
       this.server.broadcast({ type: 'snapshot', data: this.state });
+    };
+    this.server.accountApi = {
+      refreshSnapshot: () => this.refreshAccountSnapshot(),
+      setBaseline: () => this.setAccountBaseline()
     };
     await this.server.start();
     console.log(`[Dashboard] http://localhost:${this.port}`);

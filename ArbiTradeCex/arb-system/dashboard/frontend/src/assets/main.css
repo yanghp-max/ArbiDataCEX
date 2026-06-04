@@ -42,6 +42,87 @@ body {
 .badge.muted { color: var(--muted); }
 .badge.pnl { font-variant-numeric: tabular-nums; }
 
+.account-panel {
+  margin: 16px 24px 0;
+  padding: 20px 24px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.account-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+.account-title { font-size: 16px; font-weight: 600; }
+.account-hint { margin: 6px 0 0; font-size: 12px; color: var(--muted); max-width: 520px; }
+.account-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.btn {
+  padding: 8px 14px;
+  border-radius: 8px;
+  border: 1px solid var(--accent);
+  background: rgba(77, 163, 255, 0.15);
+  color: var(--text);
+  font-size: 13px;
+  cursor: pointer;
+}
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+.btn-muted {
+  border-color: var(--border);
+  background: transparent;
+  color: var(--muted);
+}
+.account-error { color: var(--err); font-size: 13px; margin: 12px 0 0; }
+.account-total {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 16px;
+}
+.account-total-label { color: var(--muted); font-size: 13px; }
+.account-total-value {
+  font-size: 32px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.account-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+.account-card {
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.account-card-label { font-size: 12px; color: var(--muted); }
+.account-card strong { font-size: 18px; font-variant-numeric: tabular-nums; }
+.account-card strong.pos { color: var(--ok); }
+.account-card strong.neg { color: var(--err); }
+.account-card small { font-size: 11px; color: var(--muted); }
+.account-positions {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.account-pos-title { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.account-pos-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  padding: 4px 0;
+  font-variant-numeric: tabular-nums;
+}
+.account-updated { margin: 12px 0 0; font-size: 11px; color: var(--muted); }
+.account-empty { margin: 16px 0 0; color: var(--muted); font-size: 13px; }
+
 .pnl-panel {
   display: flex;
   flex-wrap: wrap;

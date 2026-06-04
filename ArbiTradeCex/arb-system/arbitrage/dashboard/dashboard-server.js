@@ -63,8 +63,44 @@ export class DashboardServer {
     }
   }
 
+  async #handleAccountApi(req, res, action) {
+    const send = (code, body) => {
+      res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify(body));
+    };
+    try {
+      if (!this.accountApi) {
+        send(503, { ok: false, error: 'account_api_unavailable' });
+        return;
+      }
+      if (action === 'snapshot') {
+        const data = await this.accountApi.refreshSnapshot();
+        send(200, { ok: true, data });
+        return;
+      }
+      if (action === 'baseline') {
+        const data = this.accountApi.setBaseline();
+        send(200, { ok: true, data });
+        return;
+      }
+      send(404, { ok: false, error: 'not_found' });
+    } catch (err) {
+      send(500, { ok: false, error: err.message || String(err) });
+    }
+  }
+
   async #handleHttp(req, res) {
     const url = new URL(req.url || '/', `http://${req.headers.host}`);
+
+    if (url.pathname === '/api/account/snapshot' && req.method === 'POST') {
+      await this.#handleAccountApi(req, res, 'snapshot');
+      return;
+    }
+    if (url.pathname === '/api/account/baseline' && req.method === 'POST') {
+      await this.#handleAccountApi(req, res, 'baseline');
+      return;
+    }
+
     let rel = url.pathname === '/' ? 'index.html' : url.pathname.replace(/^[/\\]+/, '');
     rel = path.normalize(rel).replace(/^(\.\.([/\\]|$))+/, '');
     const publicRoot = path.resolve(this.publicDir);
