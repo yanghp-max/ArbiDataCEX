@@ -9,6 +9,8 @@
     "maxPositionUsd": 2000,
     "cooldownMs": 1000,
     "maxPriceAgeMs": 1000,
+    "maxLegSkewMs": 2000,
+    "maxWsLatencyMs": 100,
     "signalMaxAgeMs": 50,
     "enforceLatency": true,
     "fundingMin": -0.1,

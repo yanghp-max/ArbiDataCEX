@@ -49,12 +49,37 @@ defineProps({
     <div class="z-row z-row--lock" :class="{ 'z-row--hidden': !card.lockedDirection }">
       <span>lock {{ card.lockedDirection || '-' }} · branch {{ card.lockedBranch || '-' }}</span>
     </div>
-    <div v-if="showLatency" class="meta-row">
-      <span>price age {{ fmt(card.priceAgeMs, 0) }}ms · leg A/B {{ fmt(card.aAgeMs, 0) }}/{{ fmt(card.bAgeMs, 0) }}ms</span>
-      <span>lat A/B {{ fmt(card.aLatencyMs, 0) }}/{{ fmt(card.bLatencyMs, 0) }}ms</span>
-    </div>
-    <div class="meta-row">
-      <span>funding A/B {{ fmt(card.fundingA, 4) }} / {{ fmt(card.fundingB, 4) }}</span>
+    <div class="card-metrics">
+      <template v-if="showLatency">
+        <div class="meta-line">
+          <span class="meta-label">Price age</span>
+          <span class="meta-value">{{ fmt(card.priceAgeMs, 0) }} ms</span>
+        </div>
+        <div class="meta-line">
+          <span class="meta-label">Leg A age (Binance)</span>
+          <span class="meta-value">{{ fmt(card.aAgeMs, 0) }} ms</span>
+        </div>
+        <div class="meta-line">
+          <span class="meta-label">Leg B age (Gate)</span>
+          <span class="meta-value">{{ fmt(card.bAgeMs, 0) }} ms</span>
+        </div>
+        <div class="meta-line">
+          <span class="meta-label">Lat A (Binance)</span>
+          <span class="meta-value">{{ fmt(card.aLatencyMs, 0) }} ms</span>
+        </div>
+        <div class="meta-line">
+          <span class="meta-label">Lat B (Gate)</span>
+          <span class="meta-value">{{ fmt(card.bLatencyMs, 0) }} ms</span>
+        </div>
+      </template>
+      <div v-else class="meta-line meta-line--muted">
+        <span class="meta-label">Latency</span>
+        <span class="meta-value">check off</span>
+      </div>
+      <div class="meta-line">
+        <span class="meta-label">Funding A / B</span>
+        <span class="meta-value">{{ fmt(card.fundingA, 4) }} / {{ fmt(card.fundingB, 4) }}</span>
+      </div>
     </div>
   </article>
 </template>

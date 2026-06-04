@@ -156,8 +156,69 @@ export class RiskManager {
   }
 }
 
-export function finalCheckPass(tick, direction, adjSpread, maxPriceAgeMs) {
-  if (tick.priceAgeMs > maxPriceAgeMs) return false;
+/** enforceLatency=false 时上限为 Infinity，检查全部跳过 */
+export function resolveLatencyLimits(strategyConfig, enforceLatency) {
+  if (!enforceLatency) {
+    return { maxPriceAgeMs: Infinity, maxWsLatencyMs: Infinity, signalMaxAgeMs: Infinity };
+  }
+  return {
+    maxPriceAgeMs: strategyConfig.maxPriceAgeMs ?? 1000,
+    maxLegSkewMs: strategyConfig.maxLegSkewMs ?? 2000,
+    maxWsLatencyMs: strategyConfig.maxWsLatencyMs ?? 100,
+    signalMaxAgeMs: strategyConfig.signalMaxAgeMs ?? 50
+  };
+}
+
+/** 组合行情：距最近一次任一侧交易所活动时间（now - max(A_ts,B_ts)） */
+export function tickExchangeAgePass(tick, maxPriceAgeMs) {
+  return tick.priceAgeMs <= maxPriceAgeMs;
+}
+
+/** 两腿交易所时间差过大：一侧刚动、另一侧长期未推送（价可能仍显示在屏幕上） */
+export function tickLegSkewPass(tick, maxLegSkewMs) {
+  const skew = tick.legSkewMs ?? 0;
+  return skew <= maxLegSkewMs;
+}
+
+/** WS 传输延迟：任一端超阈即不通过（对齐 stable _wsDelay > 100） */
+export function tickWsLatencyPass(tick, maxWsLatencyMs) {
+  const ws = tick.maxWsLatencyMs ?? Math.max(tick.aLatencyMs ?? 0, tick.bLatencyMs ?? 0);
+  return ws <= maxWsLatencyMs;
+}
+
+export function tickLatencyPass(tick, limits) {
+  return tickExchangeAgePass(tick, limits.maxPriceAgeMs)
+    && tickLegSkewPass(tick, limits.maxLegSkewMs)
+    && tickWsLatencyPass(tick, limits.maxWsLatencyMs);
+}
+
+/** 本机收到价格后的处理延迟（对齐 stable priceReceiveTime → 执行） */
+export function tickSignalAgePass(tick, signalMaxAgeMs) {
+  const base = tick.priceReceiveMs ?? tick.timestamp;
+  return Date.now() - base <= signalMaxAgeMs;
+}
+
+/** 执行前：bid/ask 与决策时快照一致（对齐 stable price_stale / dedup_price_stale） */
+export function tickPriceSnapshotMatch(snapshot, tick) {
+  if (!snapshot || !tick) return false;
+  return snapshot.aBid === tick.aBid
+    && snapshot.aAsk === tick.aAsk
+    && snapshot.bBid === tick.bBid
+    && snapshot.bAsk === tick.bAsk;
+}
+
+export function tickPriceSnapshot(symbol, tick) {
+  return {
+    symbol,
+    aBid: tick.aBid,
+    aAsk: tick.aAsk,
+    bBid: tick.bBid,
+    bAsk: tick.bAsk
+  };
+}
+
+export function finalCheckPass(tick, direction, adjSpread, limits) {
+  if (!tickLatencyPass(tick, limits)) return false;
   if (adjSpread < 0 || adjSpread > 10) return false;
   return true;
 }

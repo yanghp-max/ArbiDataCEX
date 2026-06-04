@@ -39,6 +39,8 @@ export class SharedResources {
       windowSeconds: strat.windowSeconds,
       minDataPoints: strat.minDataPoints,
       maxPriceAgeMs: strat.maxPriceAgeMs ?? 1000,
+      maxLegSkewMs: strat.maxLegSkewMs ?? 2000,
+      maxWsLatencyMs: strat.maxWsLatencyMs ?? 100,
       symbols: strat.symbols,
       tradingEnabled: this.tradingEnabled,
       enforceLatency: this.enforceLatency,

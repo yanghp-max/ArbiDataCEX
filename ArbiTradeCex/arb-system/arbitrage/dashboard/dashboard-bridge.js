@@ -4,6 +4,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { getRootDir } from '../../config/global-config.js';
+import { resolveLatencyLimits, tickLatencyPass } from '../risk/risk-manager.js';
 import { DashboardServer } from './dashboard-server.js';
 
 const DASHBOARD_MARKER = 'dashboard v3';
@@ -14,8 +15,15 @@ export class DashboardBridge {
     this.port = options.port ?? 3456;
     this.windowSeconds = options.windowSeconds ?? 3600;
     this.minDataPoints = options.minDataPoints ?? 50;
-    this.maxPriceAgeMs = options.maxPriceAgeMs ?? 1000;
     this.enforceLatency = options.enforceLatency ?? options.tradingEnabled ?? false;
+    this.latencyLimits = resolveLatencyLimits(
+      {
+        maxPriceAgeMs: options.maxPriceAgeMs,
+        maxLegSkewMs: options.maxLegSkewMs,
+        maxWsLatencyMs: options.maxWsLatencyMs
+      },
+      this.enforceLatency
+    );
     this.symbols = options.symbols ?? [];
     this.server = null;
     this.state = {
@@ -167,7 +175,7 @@ export class DashboardBridge {
       return;
     }
 
-    const stale = this.enforceLatency && tick.priceAgeMs > this.maxPriceAgeMs;
+    const stale = this.enforceLatency && !tickLatencyPass(tick, this.latencyLimits);
     sym.status = stale ? 'stale' : (signal?.windowReady ? 'ready' : 'collecting');
     sym.priceAgeMs = tick.priceAgeMs;
     sym.aAgeMs = tick.aAgeMs ?? null;
