@@ -1,12 +1,12 @@
 {
   "strategy": {
-    "windowSeconds": 600,
+    "windowSeconds": 3600,
     "minDataPoints": 50,
     "zOpen": 1.0,
     "zClose": 2.0,
     "orderUsd": 5,
     "minOrderLotQtySymbols": [],
-    "maxPositionUsd": 2000,
+    "maxPositionUsd": 50,
     "cooldownMs": 1000,
     "maxPriceAgeMs": 1000,
     "maxLegSkewMs": 2000,
