@@ -21,7 +21,9 @@ function emptyState() {
       winCount: 0,
       lossCount: 0,
       bySymbol: {}
-    }
+    },
+    account: null,
+    accountBaseline: null
   };
 }
 
@@ -93,11 +95,39 @@ export function useDashboardWs() {
     };
   }
 
+  async function postAccountApi(path) {
+    const res = await fetch(path, { method: 'POST' });
+    const json = await res.json();
+    if (!res.ok || !json.ok) {
+      throw new Error(json.error || `HTTP ${res.status}`);
+    }
+    return json.data;
+  }
+
+  async function refreshAccount() {
+    const data = await postAccountApi('/api/account/snapshot');
+    if (data) state.account = data;
+  }
+
+  async function setAccountBaseline() {
+    const data = await postAccountApi('/api/account/baseline');
+    if (data) state.accountBaseline = data;
+    if (state.account) state.account.vsBaselineUsdt = 0;
+  }
+
   onMounted(connect);
   onUnmounted(() => {
     if (reconnectTimer) clearTimeout(reconnectTimer);
     ws?.close();
   });
 
-  return { connected, state, pnlSummary, pnlBySymbolRows, symbolCards };
+  return {
+    connected,
+    state,
+    pnlSummary,
+    pnlBySymbolRows,
+    symbolCards,
+    refreshAccount,
+    setAccountBaseline
+  };
 }

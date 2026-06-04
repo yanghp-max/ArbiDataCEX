@@ -61,42 +61,115 @@ wss://ws.gate.com/v4/ws/unified  → 私有 unified.asset_detail（USDT 可用�
 
 每个 tick 到来后（**按 symbol 独立更新信号**），按下面顺序处理：
 
-1. 接收该 symbol 的 A/B 盘口和资金费率。
-2. 检查行情新鲜度。
+1. 接收该 symbol 的 A/B 盘口和资金费率（WS 只写缓存；策略由 **200ms 定时器** 统一 `buildTick`，避免 WS+timer 双触发）。
+2. 检查行情新鲜度（§2.1：`price_age_ms`、`leg_skew_ms`、`max_ws_latency_ms`；`enforce_latency=false` 时全部跳过）。
 3. 根据 `bid/ask` 计算两个方向的 spread。
 4. 计算扣成本后的 spread。
 5. 按秒入桶更新 **该 symbol** 滚动窗口，计算 `median`、`MAD`、`z-score`（每秒只保留 1 个 spread 样本）。
 6. 做 **该 symbol** 信号层检查：warmup、z-score、funding、价差范围、`cooldown_ms`（per-symbol）。
-7. 用 **最新 tick** 算 `qty`，**立即 try_reserve**（§7.5、§10.5）：够 → 异步发单；不够 → **skip**（`RESERVE_FAILED`），看下一个 symbol 的 tick。
-8. 信号从产生到开跑：`now − tick.timestamp ≤ signal_max_age_ms`（默认 50ms），否则 **skip**（`SIGNAL_STALE`）。
-9. 预占成功 → 第 8–11 章重检 + 第 12 章发单（可与其它 symbol **并行**）。
+7. 用 **最新 tick** 按 §8 算 `qty` / `gate_size`，**立即 try_reserve**（§7.5、§10.5）：够 → 异步发单；不够 → **skip**（`RESERVE_FAILED`）。
+8. 信号处理延迟：`now − tick.price_receive_ms ≤ signal_max_age_ms`（默认 50ms），否则 **skip**（`SIGNAL_STALE`）；决策时保存 **四价快照**（§2.1）。
+9. 预占成功 → 异步 `execute`：**重新 buildTick** + 快照四价一致 + §11 最终检查 → 第 12 章发单（可与其它 symbol **并行**）。
 10. REST 回执 → 记 PnL → **release 预占**；WS 更新 cache。
 
 ## 2. 输入数据
 
 本节只定义 **tick 里要有哪些字段**；数据从哪来、怎么连 WS，见 **第 3 章**。公共 WS 推送盘口后，在内存里拼成下面这一结构（一个 symbol 一条 tick，不是每个字段一条 WS）。
 
-每个 tick 至少需要：
+每个 tick 由 `QuoteAggregator.buildTick(symbol)` 合并 A/B 最新缓存后输出，至少需要：
 
-- `timestamp`：交易所行情时间戳，毫秒。
-- `symbol`：交易对，例如 `BTCUSDT`。
-- `a_bid` / `a_ask`：A 交易所买一 / 卖一。
-- `b_bid` / `b_ask`：B 交易所买一 / 卖一。
-- `funding_a` / `funding_b`：两边资金费率，可使用最近一次缓存值（可 REST 定时拉，或公共 WS 上另订阅 funding 相关频道，**与盘口共用同一条公共 WS**）。
+| 字段 | 含义 |
+|------|------|
+| `symbol` | 交易对，如 `BTCUSDT` |
+| `timestamp` | `max(A交易所时间, B交易所时间)`，毫秒；供 Z-Score 时间桶 |
+| `a_bid` / `a_ask` | Binance 买一 / 卖一 |
+| `b_bid` / `b_ask` | Gate 买一 / 卖一 |
+| `a_age_ms` / `b_age_ms` | 各腿 `now − 该腿交易所时间`（**仅 Dashboard 诊断**） |
+| `a_latency_ms` / `b_latency_ms` | 各腿 `local_timestamp − server_timestamp`（WS 传输延迟） |
+| `price_age_ms` | `now − timestamp`（组合行情**最近一次任一侧交易所活动**距今多久） |
+| `leg_skew_ms` | `\|A交易所时间 − B交易所时间\|`（两腿时间差） |
+| `price_receive_ms` | `max(A.local_timestamp, B.local_timestamp)`（本机收到两腿报价的较晚时刻） |
+| `max_ws_latency_ms` | `max(a_latency_ms, b_latency_ms)` |
+| `funding_a` / `funding_b` | 资金费率（REST 定时拉，写入 aggregator） |
 
-程序收到 tick 后，记录本地接收时间，计算行情新鲜度：
+WS 推送时在 ticker 上附带 `server_timestamp`（交易所事件时间）与 `local_timestamp`（本机 `Date.now()`）。
+
+### 2.1 行情新鲜度与延迟（实现：`risk-manager.js` + `cex-cex-task.js`）
+
+`enforce_latency`（`config.json`）为 `true` 时启用下列检查；为 `false` 或 dry-run 未开交易时等价于全部放行。
+
+#### 2.1.1 组合交易所年龄 `price_age_ms`
 
 ```text
+timestamp    = max(A_exchange_ts, B_exchange_ts)
 price_age_ms = now_ms - timestamp
 ```
 
-如果：
+含义：**距 A/B 最近一次「任一侧有交易所事件时间」过了多久**。一侧刚更新、另一侧价未变仅时间戳较旧时，取较新一侧时间，不会因「最旧腿」误杀（与 `max(a_age_ms, b_age_ms)` 不同）。
 
 ```text
-price_age_ms > max_price_age_ms
+price_age_ms > max_price_age_ms  →  本 tick 不参与交易（默认 1000ms）
 ```
 
-说明行情太旧，本 tick 不参与交易。
+#### 2.1.2 两腿时间差 `leg_skew_ms`
+
+```text
+leg_skew_ms = |A_exchange_ts - B_exchange_ts|
+leg_skew_ms > max_leg_skew_ms  →  本 tick 不参与交易（默认 2000ms）
+```
+
+对齐参考项目 CEX–DEX 中「CEX 领先 DEX >2s」的**对称版**：防止一侧长期无推送、另一侧持续变动时仍用屏幕上旧价算价差。
+
+#### 2.1.3 WS 传输延迟
+
+```text
+a_latency_ms = A.local_timestamp - A.server_timestamp
+b_latency_ms = B.local_timestamp - B.server_timestamp
+max_ws_latency_ms = max(a_latency_ms, b_latency_ms)
+
+max_ws_latency_ms > max_ws_latency_ms  →  本 tick 不参与交易（默认 100ms）
+```
+
+对齐参考项目 Binance `_wsDelay > 100`；CEX–CEX **两腿都检查**。
+
+#### 2.1.4 信号处理延迟 `signal_max_age_ms`
+
+从 **本机收到价格** 到 **开始 try_reserve 之前**：
+
+```text
+now_ms - price_receive_ms > signal_max_age_ms  →  SKIP（SIGNAL_STALE，默认 50ms）
+```
+
+不用 `now − timestamp`（交易所时间），避免与 §2.1.1 重复且不能反映账户刷新等处理耗时。
+
+#### 2.1.5 执行前四价快照
+
+决策通过并 `try_reserve` 前保存：
+
+```text
+price_snapshot = { a_bid, a_ask, b_bid, b_ask }
+```
+
+异步 `execute` 入口处 **重新 `buildTick`**，须同时满足：
+
+- `tick_latency_pass(fresh_tick)`（§2.1.1–2.1.3）  
+- `tick_price_snapshot_match(price_snapshot, fresh_tick)`（四价与决策时完全一致）  
+
+否则 `PRICE_STALE`（`quote_changed` / `latency` / `no_tick`），释放预占、不下单。对齐参考项目 `dedup_price_stale` / `price_stale`。
+
+#### 2.1.6 检查顺序小结
+
+```text
+on_tick（200ms 定时器）:
+  ① tick_latency_pass        → price_age + leg_skew + ws
+  … 信号层 …
+  ② final_check_pass         → ① + spread 范围
+  ③ tick_signal_age_pass     → price_receive_ms
+  ④ 保存 price_snapshot → try_reserve → execute_async
+
+execute_async 入口:
+  ⑤ fresh_tick + ① + ④ → 用 fresh_tick 下单
+```
 
 ## 3. WebSocket 连接与数据流
 
@@ -149,9 +222,13 @@ Demo 通过 WebSocket 收 **盘口** 和 **账户变动**。实现时按下面�
   → 更新内存：quoteCache[symbol].a 或 .b  （A 边 / B 边）
 
 当某 symbol 的 A、B 两边 bid/ask 都有：
-  → 拼成第 2 章 tick（a_bid, a_ask, b_bid, b_ask, funding_a, funding_b, timestamp）
-  → 交给信号计算
+  → 写入 quoteAggregator 缓存（不立刻算信号）
+
+200ms 定时器（每个 symbol）：
+  → buildTick → 第 2 章 tick → on_tick / 信号计算
 ```
+
+**实现说明：** WS 回调只 `onTicker` 更新缓存；策略 tick 由 `setInterval(200ms)` 驱动，与 ArbiTradeCex `task-manager/index.js` 一致。
 
 Funding 若用 REST 定时拉，写入同一 `quoteCache` 或单独 `fundingCache`，拼 tick 时读即可。
 
@@ -285,17 +362,22 @@ window_seconds = 3600
 min_data_points = 50
 z_open_ab = 2.0
 z_open_ba = 2.0
-order_usd = 100
+order_usd = 5                    // 与 min-order-qty.json 里 binance.minNotional 取大，见 §8
+min_order_lot_qty_symbols = []   // 非空时该币用 JSON lotMinQty，不用 U/价换算
 max_position_usd = 2000
 cooldown_ms = 1000
-signal_max_age_ms = 50
+enforce_latency = true           // false 时跳过 §2.1 全部延迟检查
+max_price_age_ms = 1000          // §2.1.1
+max_leg_skew_ms = 2000           // §2.1.2
+max_ws_latency_ms = 100          // §2.1.3
+signal_max_age_ms = 50           // §2.1.4（相对 price_receive_ms）
 reservation_ttl_ms = 30000
 max_in_flight_trades = 5
 symbols = ["BTCUSDT", "ETHUSDT"]   // 示例；CLI 或 symbols_config 加载
 funding_min = -0.1
 fee_bps_total = 4
 slippage_bps_total = 4
-max_price_age_ms = 1000
+min_qty_json = "config/min-order-qty.json"   // build:symbols-min-qty 生成
 min_available_usdt = 50
 balance_check_rate = 0.10
 account_cache_max_age_ms = 5000
@@ -311,7 +393,11 @@ ws_silent_timeout_ms = 300000
 - `balance_check_rate`：本单所需 USDT 粗算系数，按 `qty × 成交价 × balance_check_rate` 估算（默认 0.10，约等于 10x 杠杆粗算）。
 - `account_cache_max_age_ms`：账户 WS 缓存超过该年龄时，发单前必须 REST 刷新。
 - `cooldown_ms`：**Per-symbol** 同一 symbol 两笔之间的最短间隔，默认 1000。
-- `signal_max_age_ms`：信号 tick 的 `timestamp` 到 **开始 try_reserve** 不得超过该值，否则 skip，默认 **50ms**（替代排队超时；**无队列**）。
+- `enforce_latency`：是否启用 §2.1；未配置时 live 交易为 true、dry 为 false。
+- `max_leg_skew_ms`：两腿交易所时间差上限，默认 **2000ms**。
+- `max_ws_latency_ms`：两腿 WS 传输延迟上限，默认 **100ms**。
+- `signal_max_age_ms`：`price_receive_ms` 到 **开始 try_reserve** 不得超过该值，否则 `SIGNAL_STALE`，默认 **50ms**。
+- `min_order_lot_qty_symbols`：列表内 symbol 使用 JSON `lotMinQty`（情况 B）；空列表时依赖 per-symbol `minNotional`（情况 A，需先 `npm run build:symbols-min-qty`）。
 - `reservation_ttl_ms`：预占超时自动 `release`，默认 30000。
 - `max_in_flight_trades`：全局 in-flight 上限，默认 5。
 - `symbols`：本进程订阅并评估的 symbol 列表；共用一套 Binance / Gate 账户 USDT。
@@ -323,7 +409,9 @@ ws_silent_timeout_ms = 300000
 数量换算约定：
 
 ```text
-USD 名义金额统一使用 A 侧，也就是 Binance 侧价格换算成币数量。
+每笔 qty 为「两腿都能成交的最小对冲量」，不是简单 order_usd/价格。
+名义 U 下限：effective_min_notional = max(order_usd, binance.minNotional from JSON)。
+USD→币数量统一用 A 侧（Binance）价格；Gate 张数合约再按 multiplier 回推对齐。
 ```
 
 成本口径：
@@ -597,70 +685,102 @@ get_available_usdt(exchange):
 
 ## 8. 数量计算与交易所精度
 
-### 8.1 先按 `order_usd` 计算目标数量
+实现：`PrecisionChecker.buildOrder` → `cross-exchange-order-qty.js`（`resolveMinHedgeQty`）。规则来自 `config/min-order-qty.json`（`npm run build:symbols-min-qty` 生成，含 `lotMinQty`、`minNotional`、`minBaseQty`、`quantoMultiplier` 等）。
 
-无论交易方向是什么，`order_usd` 转 `qty` 都统一使用 A 侧价格。
-
-`-a+b`：
+### 8.1 方向与 A 侧价格
 
 ```text
-raw_qty = order_usd / a_bid
+-a+b  →  a_price = a_bid
++a-b  →  a_price = a_ask
 ```
 
-`+a-b`：
+### 8.2 有效最小名义 U
 
 ```text
-raw_qty = order_usd / a_ask
+effective_min_notional = max(order_usd, binance.minNotional)
 ```
 
-### 8.2 再按两个交易所规则修正
+- `order_usd`：`config.json` 默认（如 5 USDT）。  
+- `binance.minNotional`：来自 exchangeInfo 的 MIN_NOTIONAL（脚本写入 JSON）；缺失时启动告警，BTC 等可能偏小。  
+- `min_order_lot_qty_symbols` 含该 symbol 时走 **§8.4 情况 B**，不用本节的 U/价换算。
 
-实盘下单前必须读取并缓存两个交易所的交易规则：
+### 8.3 情况 A：按 U + 实时价算最小对冲量（默认）
 
-- `minQty`：最小下单数量。
-- `stepSize`：数量步进。
-- `minNotional`：最小名义金额。
-- `priceTickSize`：价格精度。只有使用限价单、或者需要自己传订单价格时才需要；如果第一版全部使用市价单，可以先不参与数量修正。
-
-规则接口见文首 A/B 差异表（Binance `GET /fapi/v1/exchangeInfo` 仍在 **fapi**；Gate `contracts`）。
-
-数量修正：先分别按 A/B 两边的数量精度向下取整，再取两边都能成交的较小数量。
+**Binance 侧基础币数量：**
 
 ```text
-a_qty = floor_to_step(raw_qty, a_step_size)
-b_qty = floor_to_step(raw_qty, b_step_size)
-qty = min(a_qty, b_qty)
+q_binance = ceil(effective_min_notional / a_price, binance.stepSize)
 ```
 
-如果 `qty` 小于 A/B 任一侧的最小下单数量，本次不下单：
+**与 Gate 张数对齐步长：**
 
 ```text
-qty < a_minQty || qty < b_minQty
+align_step = max(binance.stepSize, gate.quantoMultiplier)   // 张数合约且 multiplier>1
+若 align_step > binance.stepSize：
+  q_binance = ceil(q_binance, align_step)
 ```
 
-或者任一边名义金额低于对应交易所的 `minNotional`，本次不下单。
-
-`-a+b` 方向使用的成交参考价：
+**Gate 侧最小基础币：**
 
 ```text
-a_notional = qty * a_bid
-b_notional = qty * b_ask
+q_gate = gate.minBaseQty
+       或 gate.minQty * gate.quantoMultiplier   // 张数合约
 ```
 
-`+a-b` 方向使用的成交参考价：
+**合并并 Gate 回推：**
 
 ```text
-a_notional = qty * a_ask
-b_notional = qty * b_bid
+qty = max(q_binance, q_gate)
+
+张数合约（gate.quantityUnit = contract）：
+  gate_size = floor(qty / quanto_multiplier, gate.stepSize)
+  若 gate_size <= 0 且 q_gate > 0：gate_size = ceil(q_gate / multiplier, gate.stepSize)
+  qty = floor(gate_size * quanto_multiplier, binance.stepSize)
+
+小数币（gate.enableDecimal 或 quantityUnit = base）：
+  gate_size = floor(qty, gate.stepSize)
+  qty = gate_size
 ```
 
-只要任一侧低于对应交易所的最小名义金额，本次不下单：
+`qty <= 0` 或 `gate_size <= 0` → 本 tick 不下单。
+
+**说明：** 不再用 `floor(order_usd/price)` 作目标量；每笔约为**满足双所规则的最小可成交量**（约 5U 档 + API minNotional），`max_position_usd` 仍限制总敞口。
+
+### 8.4 情况 B：`min_order_lot_qty_symbols` 列表内
 
 ```text
-a_notional < a_minNotional || b_notional < b_minNotional
+q_binance = ceil(binance.lotMinQty ?? binance.minQty, binance.stepSize)
+qty = max(q_binance, q_gate)
+→ 同样走 §8.3 的 Gate 张数回推
 ```
 
-金额、数量、PnL 计算建议使用高精度 decimal / big number，不要直接依赖浮点数做最终下单数量。
+用于 LOT_SIZE.minQty 与 MIN_NOTIONAL 不一致、需固定张数的币。
+
+### 8.5 `buildOrder` 返回值
+
+```text
+{
+  qty,              // 基础币数量（Binance 下单量）
+  gate_size,        // Gate 张数（或小数币数量）
+  gate_decimal_size,
+  gate_quantity_unit,
+  gate_quanto_multiplier,
+  effective_min_notional,
+  q_binance, q_gate,
+  direction, a_price, cfg
+}
+```
+
+### 8.6 数据源与维护
+
+| 字段 | Binance | Gate |
+|------|---------|------|
+| `minNotional` / `lotMinQty` / `stepSize` | fapi `exchangeInfo` | — |
+| `minQty` / `minBaseQty` / `quantoMultiplier` | — | `contracts` |
+
+脚本：`scripts/build-common-min-order-qty.js`（推荐）、`scripts/fetch-min-order-qty.js`（手动 symbol 列表）。
+
+金额、数量、PnL 建议使用高精度 decimal，避免浮点累积误差。
 
 ## 9. 仓位上限检查（WS 仓位缓存）
 
@@ -887,12 +1007,24 @@ Gate:    GET https://api.gateio.ws/api/v4/unified/accounts  +  GET /futures/usdt
 
 ### 11.2 检查项
 
-- 行情未过期：`price_age_ms <= max_price_age_ms`。
-- spread：选定方向扣成本 spread 仍在 `0% - 10%`。
-- 精度：`minQty`、`stepSize`、`minNotional` 仍满足。
-- **若 10.1 触发了 REST 刷新**：用刷新后的 `available_balance` 重算第 10 章 `a_need` / `b_need`。
+**同步入口（`execute_async` 发单前）：**
 
-任一不满足 → 跳过本次交易，不下单。
+1. 重新 `buildTick(symbol)` 得 `fresh_tick`。
+2. `tick_latency_pass(fresh_tick)`：`price_age_ms`、`leg_skew_ms`、`max_ws_latency_ms`（§2.1.1–2.1.3）。
+3. `tick_price_snapshot_match(price_snapshot, fresh_tick)`：四价与决策时一致（§2.1.5）。
+4. `final_check_pass`：② + 扣成本 spread ∈ `[0, 10]`。
+
+**若 10.1 触发了 REST 刷新**：用刷新后的 `available_balance` 重算第 10 章 `a_need` / `b_need`（在 `try_reserve` 前已完成；执行阶段不重算 qty，除非快照失败已 return）。
+
+失败阶段：
+
+| stage | 含义 |
+|-------|------|
+| `PRICE_STALE` | 快照不一致或 fresh_tick 延迟不通过 |
+| `FINAL_SKIP` | spread / 延迟 final_check 失败 |
+| `SIGNAL_STALE` | §2.1.4，try_reserve 前 |
+
+任一不满足 → 跳过本次交易，释放预占。
 
 ## 12. 双腿同时下单
 
@@ -994,7 +1126,8 @@ cum_pnl = previous_cum_pnl + net_pnl
 - `SpreadCalculator`：计算 `spread_ab` / `spread_ba` 和扣成本 spread。
 - `RollingSignalEngine`：按 symbol 实例化；**1 秒时间桶** 滚动窗口 → `median`、`MAD`、`z_ab`、`z_ba`。
 - `ReservationManager`：`try_reserve` / `release` / TTL；**mutex 同步临界区**（§7.5.3.2）。
-- `RiskManager`：funding、价差范围、per-symbol `cooldown`；第 9 章仓位截断。
+- `RiskManager`：funding、价差范围、per-symbol `cooldown`、§2.1 延迟工具函数、`final_check_pass`；第 9 章仓位截断。
+- `PrecisionChecker` / `cross-exchange-order-qty`：§8 最小对冲量与 Gate 张数。
 - `BalanceChecker`：读 **扣预占后** `available_balance`（§10.1）。
 - `FinalChecker`：第 11 章 REST 刷新（必要时）+ spread/行情/精度最终校验；不重查仓位。
 - `OrderExecutor`：向两个交易所同时发送订单，查询成交回报。
@@ -1009,41 +1142,54 @@ cum_pnl = previous_cum_pnl + net_pnl
 reservationManager = new ReservationManager({ ttlMs: 30000 })
 in_flight_count = 0
 
-function on_tick(tick):
-  if tick.price_age_ms > max_price_age_ms:
-    return
+// 每 200ms：对每个 symbol 调用 on_tick（WS 只更新 quoteAggregator 缓存）
 
-  signal = rolling_engine[tick.symbol].update_and_calc(...)
+function on_tick(symbol):
+  tick = quote_aggregator.build_tick(symbol)
+  if not tick:
+    return
+  if enforce_latency and not tick_latency_pass(tick, limits):
+    return   // price_age + leg_skew + ws
+
+  signal = rolling_engine[symbol].update_and_calc(tick, spreads)
   if not signal_layer_pass(tick, signal):
     return
 
-  if now_ms() - tick.timestamp > signal_max_age_ms:
-    return   // SIGNAL_STALE
-
-  if now_ms() - state[tick.symbol].last_order_ts < cooldown_ms:
+  if not final_check_pass(tick, direction, adj_spread, limits):
     return
 
-  if in_flight_count >= max_in_flight_trades:
-    return
-
-  direction, _, _ = pick_direction(signal, ...)
-  order = build_and_normalize_order(direction, tick)
+  order = precision_checker.build_order(direction, tick, order_usd)   // §8
   if order.qty <= 0:
     return
 
-  reservations = reservationManager.try_reserve(tick.symbol, direction, order, tick)
+  if enforce_latency and not tick_signal_age_pass(tick, signal_max_age_ms):
+    return   // SIGNAL_STALE（price_receive_ms）
+
+  price_snapshot = tick_price_snapshot(symbol, tick)
+
+  if now_ms() - state[symbol].last_order_ts < cooldown_ms:
+    return
+  if in_flight_count >= max_in_flight_trades:
+    return
+
+  reservations = reservationManager.try_reserve(...)
   if not reservations:
-    return   // RESERVE_FAILED，无余额/容量，直接跳过
+    return   // RESERVE_FAILED
 
   in_flight_count++
-  execute_trade_async(tick.symbol, order, tick, reservations)
+  execute_trade_async(symbol, order, tick, price_snapshot, reservations)
 
 
-async function execute_trade_async(symbol, order, tick, reservations):
+async function execute_trade_async(symbol, order, tick, price_snapshot, reservations):
   try:
-    if not final_checker.pass(order, tick):
-      return
-    fill = order_executor.execute_both_legs(order, tick)
+    fresh_tick = quote_aggregator.build_tick(symbol)
+    if not fresh_tick
+        or not tick_latency_pass(fresh_tick, limits)
+        or not tick_price_snapshot_match(price_snapshot, fresh_tick):
+      return   // PRICE_STALE
+    if not final_check_pass(fresh_tick, direction, adj_spread, limits):
+      return   // FINAL_SKIP
+    fill = order_executor.execute_both_legs(order, fresh_tick)
     reporter.record_trade(fill, calc_trade_pnl(fill), account_cache)
     state[symbol].last_order_ts = now_ms()
   finally:
@@ -1080,9 +1226,11 @@ async function execute_trade_async(symbol, order, tick, reservations):
 - 启动 / 重连：私有 WS **onOpen 内 REST 全量**初始化 cache；运行中 WS **只 merge 变更**（见 3.4）；断线 **不清 cache**。
 - 发单前 **必须预占** USDT + 仓位容量（§7.5、§10.5）；`available = total − reserved`。
 - A/B 永续账户使用单向净持仓；启动时 REST 同步一次仓位与余额。
-- 下单前检查 `minQty` / `stepSize` / `minNotional`。
+- 数量：§8 `buildOrder` + `min-order-qty.json`；先 `npm run build:symbols-min-qty` 写入 `minNotional`。
+- 延迟：§2.1（`max_price_age_ms` / `max_leg_skew_ms` / `max_ws_latency_ms` / `signal_max_age_ms` / 执行前快照）。
 - 下单后记录真实成交回报；`a_pos_qty` / `b_pos_qty` 读 WS 更新后的缓存，不要手工 `pos ± qty` 记账。
 - 接口超时、限频；WS 重连持续失败需告警。
 - **单账户多币种**：**预占 + drop-fast**，无队列；`signal_max_age_ms=50`；不够就 `RESERVE_FAILED` skip。
-- 状态流：`SIGNAL_OK` → `RESERVE_OK` / `RESERVE_FAILED` → `FINAL_OK` → `TRADE_DONE` → `RESERVE_RELEASED`。
+- 状态流：`SIGNAL_STALE` / `RESERVE_FAILED` / `PRICE_STALE` / `FINAL_SKIP` / `TRADE_DONE` 等（见 §11.2）。
+- 策略 tick：**200ms 定时器** + `QuoteAggregator`；WS 只更新缓存。
 

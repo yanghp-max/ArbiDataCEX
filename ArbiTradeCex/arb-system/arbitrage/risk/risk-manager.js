@@ -1,21 +1,50 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { floorByStep } from '../../common/utils/precision.js';
+import { resolveMinHedgeQty } from '../../common/utils/cross-exchange-order-qty.js';
 import { legPricesForDirection } from '../services/spread-calculator.js';
 
 export class PrecisionChecker {
-  constructor(minQtyBySymbol = {}) {
+  constructor(minQtyBySymbol = {}, options = {}) {
     this.minQtyBySymbol = minQtyBySymbol;
+    this.orderUsd = Number(options.orderUsd) || 0;
+    this.minOrderLotQtySymbols = new Set(
+      (options.minOrderLotQtySymbols || []).map((s) => String(s).toUpperCase())
+    );
   }
 
-  static async loadFromJson(jsonPath, symbols) {
+  static async loadFromJson(jsonPath, symbols, options = {}) {
     const text = await fs.readFile(jsonPath, 'utf8');
     const json = JSON.parse(text);
     const map = {};
     for (const sym of symbols) {
       if (json.symbols?.[sym]) map[sym] = json.symbols[sym];
     }
-    return new PrecisionChecker(map);
+    const checker = new PrecisionChecker(map, options);
+    checker.warnIfMinNotionalMissing(symbols);
+    return checker;
+  }
+
+  /** 情况 A：依赖 JSON 内 per-symbol minNotional（需先 build:symbols-min-qty） */
+  warnIfMinNotionalMissing(symbols) {
+    const lotSet = this.minOrderLotQtySymbols;
+    const missing = [];
+    for (const sym of symbols) {
+      if (lotSet.has(String(sym).toUpperCase())) continue;
+      const b = this.minQtyBySymbol[sym]?.binance;
+      if (!b) {
+        missing.push(`${sym}(no entry)`);
+        continue;
+      }
+      const apiU = Number(b.minNotional);
+      if (!Number.isFinite(apiU) || apiU <= 0) missing.push(sym);
+    }
+    if (missing.length > 0) {
+      console.warn(
+        `[PrecisionChecker] binance.minNotional missing for: ${missing.slice(0, 8).join(', ')}`
+        + `${missing.length > 8 ? ` ...+${missing.length - 8}` : ''}. `
+        + `Run: npm run build:symbols-min-qty — until then only orderUsd=${this.orderUsd} applies (BTC etc. may be wrong).`
+      );
+    }
   }
 
   resolvePath(configPath, rootDir) {
@@ -28,34 +57,28 @@ export class PrecisionChecker {
     if (!cfg) return { qty: 0 };
 
     const { aPrice } = legPricesForDirection(direction, tick);
-    const rawQty = orderUsd / aPrice;
-    let qty = floorByStep(rawQty, Number(cfg.binance.stepSize));
-    if (qty < Number(cfg.binance.minQty)) qty = Number(cfg.binance.minQty);
-    qty = floorByStep(qty, Number(cfg.binance.stepSize));
+    const minU = Number(orderUsd ?? this.orderUsd);
+    const useLotMinQty = this.minOrderLotQtySymbols.has(String(tick.symbol).toUpperCase());
 
-    const gateCfg = cfg.gate;
-    const minGate = Number(gateCfg.minQty);
-    const step = Number(gateCfg.stepSize || 1);
-    let gateSize = 0;
-
-    if (gateCfg.quantityUnit === 'base' || gateCfg.enableDecimal) {
-      gateSize = floorByStep(qty, step);
-      if (gateSize < minGate) gateSize = minGate;
-    } else {
-      const multiplier = Number(gateCfg.quantoMultiplier || 0);
-      if (multiplier > 0) {
-        gateSize = floorByStep(qty / multiplier, step);
-        if (gateSize < minGate) gateSize = minGate;
-        // 按 Gate 合约张数回推 Binance 基础数量，避免两腿对冲量不一致
-        qty = floorByStep(gateSize * multiplier, Number(cfg.binance.stepSize));
-      }
-    }
+    const resolved = resolveMinHedgeQty({
+      orderUsd: minU,
+      aPrice,
+      binanceCfg: cfg.binance,
+      gateCfg: cfg.gate,
+      useLotMinQty
+    });
+    const { qty, gateSize, effectiveMinNotional, qBinance, qGate } = resolved;
 
     if (qty <= 0 || gateSize <= 0) return { qty: 0, gateSize: 0 };
+
+    const gateCfg = cfg.gate;
 
     return {
       qty,
       gateSize,
+      effectiveMinNotional,
+      qBinance,
+      qGate,
       gateDecimalSize: Boolean(gateCfg.enableDecimal || gateCfg.quantityUnit === 'base'),
       gateQuantityUnit: gateCfg.quantityUnit || 'contract',
       gateQuantoMultiplier: Number(gateCfg.quantoMultiplier) || 1,
@@ -133,8 +156,69 @@ export class RiskManager {
   }
 }
 
-export function finalCheckPass(tick, direction, adjSpread, maxPriceAgeMs) {
-  if (tick.priceAgeMs > maxPriceAgeMs) return false;
+/** enforceLatency=false 时上限为 Infinity，检查全部跳过 */
+export function resolveLatencyLimits(strategyConfig, enforceLatency) {
+  if (!enforceLatency) {
+    return { maxPriceAgeMs: Infinity, maxWsLatencyMs: Infinity, signalMaxAgeMs: Infinity };
+  }
+  return {
+    maxPriceAgeMs: strategyConfig.maxPriceAgeMs ?? 1000,
+    maxLegSkewMs: strategyConfig.maxLegSkewMs ?? 2000,
+    maxWsLatencyMs: strategyConfig.maxWsLatencyMs ?? 100,
+    signalMaxAgeMs: strategyConfig.signalMaxAgeMs ?? 50
+  };
+}
+
+/** 组合行情：距最近一次任一侧交易所活动时间（now - max(A_ts,B_ts)） */
+export function tickExchangeAgePass(tick, maxPriceAgeMs) {
+  return tick.priceAgeMs <= maxPriceAgeMs;
+}
+
+/** 两腿交易所时间差过大：一侧刚动、另一侧长期未推送（价可能仍显示在屏幕上） */
+export function tickLegSkewPass(tick, maxLegSkewMs) {
+  const skew = tick.legSkewMs ?? 0;
+  return skew <= maxLegSkewMs;
+}
+
+/** WS 传输延迟：任一端超阈即不通过（对齐 stable _wsDelay > 100） */
+export function tickWsLatencyPass(tick, maxWsLatencyMs) {
+  const ws = tick.maxWsLatencyMs ?? Math.max(tick.aLatencyMs ?? 0, tick.bLatencyMs ?? 0);
+  return ws <= maxWsLatencyMs;
+}
+
+export function tickLatencyPass(tick, limits) {
+  return tickExchangeAgePass(tick, limits.maxPriceAgeMs)
+    && tickLegSkewPass(tick, limits.maxLegSkewMs)
+    && tickWsLatencyPass(tick, limits.maxWsLatencyMs);
+}
+
+/** 本机收到价格后的处理延迟（对齐 stable priceReceiveTime → 执行） */
+export function tickSignalAgePass(tick, signalMaxAgeMs) {
+  const base = tick.priceReceiveMs ?? tick.timestamp;
+  return Date.now() - base <= signalMaxAgeMs;
+}
+
+/** 执行前：bid/ask 与决策时快照一致（对齐 stable price_stale / dedup_price_stale） */
+export function tickPriceSnapshotMatch(snapshot, tick) {
+  if (!snapshot || !tick) return false;
+  return snapshot.aBid === tick.aBid
+    && snapshot.aAsk === tick.aAsk
+    && snapshot.bBid === tick.bBid
+    && snapshot.bAsk === tick.bAsk;
+}
+
+export function tickPriceSnapshot(symbol, tick) {
+  return {
+    symbol,
+    aBid: tick.aBid,
+    aAsk: tick.aAsk,
+    bBid: tick.bBid,
+    bAsk: tick.bAsk
+  };
+}
+
+export function finalCheckPass(tick, direction, adjSpread, limits) {
+  if (!tickLatencyPass(tick, limits)) return false;
   if (adjSpread < 0 || adjSpread > 10) return false;
   return true;
 }

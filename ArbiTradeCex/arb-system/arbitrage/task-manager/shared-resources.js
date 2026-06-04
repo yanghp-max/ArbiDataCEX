@@ -39,6 +39,8 @@ export class SharedResources {
       windowSeconds: strat.windowSeconds,
       minDataPoints: strat.minDataPoints,
       maxPriceAgeMs: strat.maxPriceAgeMs ?? 1000,
+      maxLegSkewMs: strat.maxLegSkewMs ?? 2000,
+      maxWsLatencyMs: strat.maxWsLatencyMs ?? 100,
       symbols: strat.symbols,
       tradingEnabled: this.tradingEnabled,
       enforceLatency: this.enforceLatency,
@@ -84,6 +86,16 @@ export class SharedResources {
       console.log(`[SharedResources] live trade CSV -> ${this.tradeCsvWriter.filePath}`);
     }
     this.resultReporter = new ResultReporter({ tradeCsvWriter: this.tradeCsvWriter });
+
+    this.dashboardBridge.setAccountServices({
+      accountCache: this.accountCache,
+      cexManager: this.cexManager,
+      quoteAggregator: this.quoteAggregator,
+      symbols: strat.symbols
+    });
+    this.dashboardBridge.refreshAccountSnapshot().catch((err) => {
+      console.warn('[Dashboard] initial account snapshot failed:', err.message);
+    });
   }
 
   getAdapter(exchange) {

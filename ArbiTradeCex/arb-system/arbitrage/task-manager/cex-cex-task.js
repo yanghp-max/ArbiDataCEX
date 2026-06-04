@@ -11,7 +11,16 @@ import {
   isFlatPosition,
   inferDirectionFromPosition
 } from '../services/spread-calculator.js';
-import { PrecisionChecker, RiskManager, finalCheckPass } from '../risk/risk-manager.js';
+import {
+  PrecisionChecker,
+  RiskManager,
+  finalCheckPass,
+  resolveLatencyLimits,
+  tickLatencyPass,
+  tickSignalAgePass,
+  tickPriceSnapshot,
+  tickPriceSnapshotMatch
+} from '../risk/risk-manager.js';
 import { calcTradePnl } from '../execution/result-reporter.js';
 
 export class CexCexTask {
@@ -31,6 +40,7 @@ export class CexCexTask {
     this.lockedBranch = new Map();
     this.executingSymbols = new Set();
     this.enforceLatency = sharedResources.enforceLatency;
+    this.latencyLimits = resolveLatencyLimits(this.cfg, this.enforceLatency);
     this.totalCostPct = (strategyConfig.feeBpsTotal + strategyConfig.slippageBpsTotal) / 100;
 
     for (const sym of strategyConfig.symbols) {
@@ -40,10 +50,6 @@ export class CexCexTask {
       }));
       this.lastOrderTs.set(sym, 0);
     }
-  }
-
-  #maxPriceAgeLimit() {
-    return this.enforceLatency ? this.cfg.maxPriceAgeMs : Infinity;
   }
 
   #syncLockState(symbol, signal) {
@@ -114,7 +120,7 @@ export class CexCexTask {
       }
     });
 
-    if (this.enforceLatency && tick.priceAgeMs > this.cfg.maxPriceAgeMs) return;
+    if (this.enforceLatency && !tickLatencyPass(tick, this.latencyLimits)) return;
     if (!signal.windowReady || signal.openZAb == null || signal.openZBa == null) return;
 
     if (tick.fundingA != null && tick.fundingA < this.cfg.fundingMin) return;
@@ -166,7 +172,7 @@ export class CexCexTask {
     const spreadFilterDir = tradePlan.spreadFilterDirection ?? tradePlan.direction;
     const filterSpread = spreadFilterDir === '-a+b' ? spreads.spreadAbAdj : spreads.spreadBaAdj;
 
-    if (!finalCheckPass(tick, spreadFilterDir, filterSpread, this.#maxPriceAgeLimit())) return;
+    if (!finalCheckPass(tick, spreadFilterDir, filterSpread, this.latencyLimits)) return;
 
     const orderBuild = this.precision.buildOrder({
       direction: execDirection,
@@ -183,10 +189,12 @@ export class CexCexTask {
     }
     if (qty <= 0) return;
 
-    if (this.enforceLatency && Date.now() - tick.timestamp > this.cfg.signalMaxAgeMs) {
+    if (this.enforceLatency && !tickSignalAgePass(tick, this.latencyLimits.signalMaxAgeMs)) {
       this.sr.eventBus.emitExecutionStatus({ stage: 'SIGNAL_STALE', symbol });
       return;
     }
+
+    const priceSnapshot = tickPriceSnapshot(symbol, tick);
 
     const posBefore = {
       a: this.sr.accountCache.getPosition('binance', symbol),
@@ -247,6 +255,7 @@ export class CexCexTask {
       execDirection,
       branch: tradePlan.branch,
       tick,
+      priceSnapshot,
       order: { ...orderBuild, qty },
       adjSpread: filterSpread,
       openZ: tradePlan.openZ,
@@ -276,13 +285,27 @@ export class CexCexTask {
       execDirection,
       branch,
       tick,
+      priceSnapshot,
       order,
       adjSpread,
       reservations
     } = ctx;
     const tradeId = reservations?.tradeId;
     try {
-      if (!finalCheckPass(tick, execDirection, adjSpread, this.#maxPriceAgeLimit())) {
+      const freshTick = this.sr.quoteAggregator.buildTick(symbol);
+      if (!freshTick
+        || !tickLatencyPass(freshTick, this.latencyLimits)
+        || !tickPriceSnapshotMatch(priceSnapshot, freshTick)) {
+        this.sr.eventBus.emitExecutionStatus({
+          stage: 'PRICE_STALE',
+          symbol,
+          detail: !freshTick ? 'no_tick' : (!tickPriceSnapshotMatch(priceSnapshot, freshTick) ? 'quote_changed' : 'latency')
+        });
+        this.#releaseSymbolClaim(symbol, { restoreCooldown: true });
+        return;
+      }
+
+      if (!finalCheckPass(freshTick, execDirection, adjSpread, this.latencyLimits)) {
         this.sr.eventBus.emitExecutionStatus({ stage: 'FINAL_SKIP', symbol });
         this.#releaseSymbolClaim(symbol, { restoreCooldown: true });
         return;
@@ -292,7 +315,7 @@ export class CexCexTask {
       try {
         fill = await this.sr.orderExecutor.executeBothLegs({
           direction: execDirection,
-          tick,
+          tick: freshTick,
           order,
           reduceOnly: action === 'close'
         });

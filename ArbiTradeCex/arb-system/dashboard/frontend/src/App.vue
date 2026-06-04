@@ -1,13 +1,21 @@
 <script setup>
 import AppHeader from './components/AppHeader.vue';
 import PnlPanel from './components/PnlPanel.vue';
+import AccountPanel from './components/AccountPanel.vue';
 import ProgressPanel from './components/ProgressPanel.vue';
 import SymbolCard from './components/SymbolCard.vue';
 import LogPanel from './components/LogPanel.vue';
 import { useDashboardWs } from './composables/useDashboardWs.js';
 import { useFormatters } from './composables/useFormatters.js';
 
-const { connected, state, pnlSummary, pnlBySymbolRows, symbolCards } = useDashboardWs();
+const {
+  connected,
+  state,
+  pnlSummary,
+  pnlBySymbolRows,
+  symbolCards,
+  refreshAccount
+} = useDashboardWs();
 const {
   fmt,
   fmtPct,
@@ -36,6 +44,16 @@ const {
     :pnl-by-symbol-rows="pnlBySymbolRows"
     :format-pnl="formatPnl"
     :pnl-class="pnlClass"
+  />
+
+  <AccountPanel
+    :account="state.account"
+    :account-baseline="state.accountBaseline"
+    :realized-pnl="pnlSummary.totalPnl"
+    :format-pnl="formatPnl"
+    :pnl-class="pnlClass"
+    :format-time="formatTime"
+    :on-refresh="refreshAccount"
   />
 
   <ProgressPanel

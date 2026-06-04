@@ -6,6 +6,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import axios from 'axios';
+import { resolveBinanceOrderLimits } from '../ArbiTradeCex/arb-system/common/utils/binance-order-limits.js';
 
 const BINANCE_REST = process.env.BINANCE_REST_URL || 'https://fapi.binance.com';
 const GATE_REST = process.env.GATE_REST_URL || 'https://api.gateio.ws/api/v4';
@@ -76,8 +77,8 @@ function toGateContract(binanceStyleSymbol) {
   return `${binanceStyleSymbol.slice(0, -4)}_USDT`;
 }
 
-function getBinanceLotFilter(symbolInfo) {
-  return (symbolInfo.filters || []).find((f) => f.filterType === 'LOT_SIZE') || null;
+function binanceRefPrice(ticker) {
+  return ticker?.bid ?? ticker?.mid ?? ticker?.ask ?? null;
 }
 
 async function fetchBinanceExchangeInfo() {
@@ -190,22 +191,14 @@ async function main() {
       throw new Error(`symbol not found on Gate futures: ${gateContract}`);
     }
 
-    const lot = getBinanceLotFilter(b);
-    if (!lot) {
-      throw new Error(`LOT_SIZE filter missing on Binance for ${upper}`);
-    }
-
-    const minQty = Number(lot.minQty);
-    const stepSize = Number(lot.stepSize);
+    const bTicker = binanceTickerMap.get(upper) || null;
+    const gTicker = gateTickerMap.get(gateContract) || null;
+    const binanceLimits = resolveBinanceOrderLimits(b, {
+      refPrice: binanceRefPrice(bTicker)
+    });
     const gateMinContracts = Number(g.order_size_min);
     const gateOrderSizeRound = Number(g.order_size_round || 0);
     const gateQuantoMultiplier = Number(g.quanto_multiplier || 0);
-    const bTicker = binanceTickerMap.get(upper) || null;
-    const gTicker = gateTickerMap.get(gateContract) || null;
-
-    if (!Number.isFinite(minQty) || !Number.isFinite(stepSize)) {
-      throw new Error(`invalid Binance minQty/stepSize for ${upper}`);
-    }
     if (!Number.isFinite(gateMinContracts) || gateMinContracts <= 0) {
       throw new Error(`invalid Gate order_size_min for ${gateContract}`);
     }
@@ -213,8 +206,10 @@ async function main() {
     result.symbols[upper] = {
       binance: {
         symbol: upper,
-        minQty,
-        stepSize,
+        lotMinQty: binanceLimits.lotMinQty,
+        minNotional: binanceLimits.minNotional,
+        minQty: binanceLimits.minQty,
+        stepSize: binanceLimits.stepSize,
         priceRef: {
           collectedAt: priceCollectedAt,
           bid: bTicker?.bid ?? null,
