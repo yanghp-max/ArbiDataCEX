@@ -27,6 +27,7 @@ async function main() {
     logPath: strat.processHealthLog || 'logs/process-health.jsonl',
     lastExitPath: strat.processLastExitJson || 'logs/last-exit.json',
     intervalMs: strat.processHealthIntervalMs ?? 30000,
+    persistHeartbeat: strat.processHealthHeartbeat === true,
     meta: { mode: args.mode, symbolCount: symbols.length }
   });
 
