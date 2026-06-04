@@ -22,6 +22,9 @@
     "reservationTtlMs": 30000,
     "maxInFlightTrades": 5,
     "tradeLogCsv": "logs/live-trades.csv",
+    "processHealthLog": "logs/process-health.jsonl",
+    "processLastExitJson": "logs/last-exit.json",
+    "processHealthIntervalMs": 30000,
     "symbolsConfigJson": "config/symbols_config.json",
     "minQtyJson": "config/min-order-qty.json"
   },

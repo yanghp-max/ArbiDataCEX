@@ -3,7 +3,8 @@
  * CEX-CEX 多币种策略入口（对标 strategies/30-token-multi-strategy.js）
  */
 import { startCexCexArbitrage } from '../arbitrage/task-manager/task-sdk.js';
-import { loadConfig } from '../config/global-config.js';
+import { loadConfig, getRootDir } from '../config/global-config.js';
+import { startProcessLifecycleLogging } from '../common/monitoring/process-lifecycle.js';
 
 function parseArgs(argv) {
   let mode = 'dry';
@@ -17,8 +18,17 @@ function parseArgs(argv) {
 async function main() {
   const args = parseArgs(process.argv);
   const config = loadConfig();
+  const strat = config.strategy;
   const tradingEnabled = args.mode === 'live';
-  const symbols = config.strategy.symbols || [];
+  const symbols = strat.symbols || [];
+
+  const lifecycle = startProcessLifecycleLogging({
+    rootDir: getRootDir(),
+    logPath: strat.processHealthLog || 'logs/process-health.jsonl',
+    lastExitPath: strat.processLastExitJson || 'logs/last-exit.json',
+    intervalMs: strat.processHealthIntervalMs ?? 30000,
+    meta: { mode: args.mode, symbolCount: symbols.length }
+  });
 
   if (!symbols.length) {
     throw new Error(
@@ -49,11 +59,13 @@ async function main() {
 
   const shutdown = async (sig) => {
     console.log(`[strategy] ${sig} stopping...`);
+    lifecycle.logEvent('SHUTDOWN_BEGIN', { signal: sig });
     await mgr.stop();
+    lifecycle.markShutdown({ signal: sig });
     process.exit(0);
   };
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  process.once('SIGINT', () => { shutdown('SIGINT').catch((e) => console.error('[strategy] shutdown:', e)); });
+  process.once('SIGTERM', () => { shutdown('SIGTERM').catch((e) => console.error('[strategy] shutdown:', e)); });
 }
 
 main().catch((err) => {
