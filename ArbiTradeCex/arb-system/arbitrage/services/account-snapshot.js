@@ -10,6 +10,18 @@ function midPrice(bid, ask) {
   return (bid + ask) / 2;
 }
 
+/** Gate 单币种等场景可能 total=0 但 available>0；不能用 ?? 否则 0 不会回退 */
+function resolveWalletUsdt(bal) {
+  if (!bal) return { usdt: 0, available: 0 };
+  const available = Number(bal.available ?? 0);
+  const total = Number(bal.total ?? 0);
+  const usdt = Math.max(
+    Number.isFinite(total) ? total : 0,
+    Number.isFinite(available) ? available : 0
+  );
+  return { usdt, available };
+}
+
 /**
  * @param {object} deps
  * @param {import('../cache/account-cache.js').AccountCache} deps.accountCache
@@ -33,10 +45,12 @@ export async function buildAccountSnapshot(deps) {
 
   const binanceBal = accountCache.getBalance('binance');
   const gateBal = accountCache.getBalance('gate');
-  const binanceUsdt = Number(binanceBal?.total ?? binanceBal?.available ?? 0);
-  const gateUsdt = Number(gateBal?.total ?? gateBal?.available ?? 0);
-  const binanceAvail = Number(binanceBal?.available ?? binanceUsdt);
-  const gateAvail = Number(gateBal?.available ?? gateUsdt);
+  const binanceWallet = resolveWalletUsdt(binanceBal);
+  const gateWallet = resolveWalletUsdt(gateBal);
+  const binanceUsdt = binanceWallet.usdt;
+  const gateUsdt = gateWallet.usdt;
+  const binanceAvail = binanceWallet.available;
+  const gateAvail = gateWallet.available;
 
   const positions = [];
   let positionNotionalUsdt = 0;

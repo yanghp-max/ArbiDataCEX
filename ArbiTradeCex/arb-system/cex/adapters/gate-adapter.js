@@ -342,9 +342,14 @@ export class GateAdapter extends BaseAdapter {
     const available = Number(
       data?.available ?? data?.available_margin ?? data?.cross_available ?? 0
     );
-    const total = Number(
-      data?.total ?? data?.margin_balance ?? data?.cross_margin_balance ?? available
+    const rawTotal = Number(
+      data?.total ?? data?.margin_balance ?? data?.cross_margin_balance ?? NaN
     );
+    const equity = Number(data?.equity ?? data?.account_equity ?? NaN);
+    let total = Number.isFinite(equity) && equity > 0
+      ? equity
+      : (Number.isFinite(rawTotal) && rawTotal > 0 ? rawTotal : available);
+    if (total <= 0 && available > 0) total = available;
     const balances = [];
     if (total > 0 || available > 0) {
       balances.push(new Balance({
