@@ -219,7 +219,12 @@ export class RiskManager {
 /** enforceLatency=false 时上限为 Infinity，检查全部跳过 */
 export function resolveLatencyLimits(strategyConfig, enforceLatency) {
   if (!enforceLatency) {
-    return { maxPriceAgeMs: Infinity, maxWsLatencyMs: Infinity, signalMaxAgeMs: Infinity };
+    return {
+      maxPriceAgeMs: Infinity,
+      maxLegSkewMs: Infinity,
+      maxWsLatencyMs: Infinity,
+      signalMaxAgeMs: Infinity
+    };
   }
   return {
     maxPriceAgeMs: strategyConfig.maxPriceAgeMs ?? 1000,
@@ -229,24 +234,34 @@ export function resolveLatencyLimits(strategyConfig, enforceLatency) {
   };
 }
 
+/** 是否启用延迟类检查（enforceLatency=false 或字段缺失时不检查） */
+export function latencyChecksEnabled(limits) {
+  return Number.isFinite(limits?.maxPriceAgeMs)
+    && limits.maxPriceAgeMs !== Infinity;
+}
+
 /** 组合行情：距最近一次任一侧交易所活动时间（now - max(A_ts,B_ts)） */
 export function tickExchangeAgePass(tick, maxPriceAgeMs) {
+  if (!Number.isFinite(maxPriceAgeMs)) return true;
   return tick.priceAgeMs <= maxPriceAgeMs;
 }
 
 /** 两腿交易所时间差过大：一侧刚动、另一侧长期未推送（价可能仍显示在屏幕上） */
 export function tickLegSkewPass(tick, maxLegSkewMs) {
+  if (!Number.isFinite(maxLegSkewMs)) return true;
   const skew = tick.legSkewMs ?? 0;
   return skew <= maxLegSkewMs;
 }
 
 /** WS 传输延迟：任一端超阈即不通过（对齐 stable _wsDelay > 100） */
 export function tickWsLatencyPass(tick, maxWsLatencyMs) {
+  if (!Number.isFinite(maxWsLatencyMs)) return true;
   const ws = tick.maxWsLatencyMs ?? Math.max(tick.aLatencyMs ?? 0, tick.bLatencyMs ?? 0);
   return ws <= maxWsLatencyMs;
 }
 
 export function tickLatencyPass(tick, limits) {
+  if (!latencyChecksEnabled(limits)) return true;
   return tickExchangeAgePass(tick, limits.maxPriceAgeMs)
     && tickLegSkewPass(tick, limits.maxLegSkewMs)
     && tickWsLatencyPass(tick, limits.maxWsLatencyMs);
@@ -254,6 +269,7 @@ export function tickLatencyPass(tick, limits) {
 
 /** 本机收到价格后的处理延迟（对齐 stable priceReceiveTime → 执行） */
 export function tickSignalAgePass(tick, signalMaxAgeMs) {
+  if (!Number.isFinite(signalMaxAgeMs)) return true;
   const base = tick.priceReceiveMs ?? tick.timestamp;
   return Date.now() - base <= signalMaxAgeMs;
 }
@@ -278,7 +294,7 @@ export function tickPriceSnapshot(symbol, tick) {
 }
 
 export function finalCheckPass(tick, direction, adjSpread, limits) {
-  if (!tickLatencyPass(tick, limits)) return false;
+  if (latencyChecksEnabled(limits) && !tickLatencyPass(tick, limits)) return false;
   if (adjSpread < 0 || adjSpread > 10) return false;
   return true;
 }

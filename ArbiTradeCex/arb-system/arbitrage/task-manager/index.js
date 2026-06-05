@@ -8,6 +8,10 @@ import { SharedResources } from './shared-resources.js';
 import { CexCexTask } from './cex-cex-task.js';
 import { PrecisionChecker } from '../risk/risk-manager.js';
 
+function compactSymbol(symbol) {
+  return String(symbol).replace(/-/g, '').toUpperCase();
+}
+
 export class TaskManager {
   constructor(options = {}) {
     this.config = options.config || loadConfig();
@@ -15,7 +19,10 @@ export class TaskManager {
     this.sharedResources = null;
     this.task = null;
     this.fundingTimer = null;
-    this.tickTimer = null;
+    this.maintenanceTimer = null;
+    /** 同 symbol 同一事件循环内合并为一次 onTick（来价驱动，非定频） */
+    this._priceTickCoalesce = new Set();
+    this._symbolSet = new Set();
   }
 
   async start() {
@@ -35,6 +42,7 @@ export class TaskManager {
       minOrderLotQtySymbols: strat.minOrderLotQtySymbols
     });
     this.task = new CexCexTask(this.sharedResources, strat, precision);
+    this._symbolSet = new Set(strat.symbols.map(compactSymbol));
 
     const cexManager = this.sharedResources.cexManager;
     const adapterSymbols = strat.symbols.map((s) => cexManager.normalizeSymbol('binance', s));
@@ -42,14 +50,13 @@ export class TaskManager {
     const binance = cexManager.getAdapter('binance');
     const gate = cexManager.getAdapter('gate');
 
-    // 对齐 ArbiTrade-1：WS 只更新行情缓存；策略 tick 由定时器统一驱动（避免 WS+timer 双触发并发）
-    binance.on(EventTypes.TICKER, (t) => {
-      const symbol = t.symbol.replace('-', '');
-      this.sharedResources.quoteAggregator.onTicker('binance', { ...t, symbol });
-    });
-    gate.on(EventTypes.TICKER, (t) => {
-      this.sharedResources.quoteAggregator.onTicker('gate', t);
-    });
+    // 对齐 ArbiTrade-1 priceUpdateMode=any：任意腿 WS 来价 → 更新缓存 → 触发该 symbol 策略计算
+    const onPriceTicker = (source, ticker) => {
+      this.sharedResources.quoteAggregator.onTicker(source, ticker);
+      this.#schedulePriceTick(ticker.symbol);
+    };
+    binance.on(EventTypes.TICKER, (t) => onPriceTicker('binance', t));
+    gate.on(EventTypes.TICKER, (t) => onPriceTicker('gate', t));
 
     await Promise.all([
       cexManager.subscribe('binance', adapterSymbols, ['bookTicker']),
@@ -70,23 +77,32 @@ export class TaskManager {
       }
     }, 60000);
 
-    this.tickTimer = setInterval(() => {
+    this.maintenanceTimer = setInterval(() => {
       this.sharedResources.reservationManager.purgeExpired();
-      for (const sym of strat.symbols) {
-        this.task.onTick(sym).catch((e) => console.error('[tick]', sym, e.message));
-      }
-    }, 200);
+    }, 1000);
 
     console.log(
       `[TaskManager] started symbols=${strat.symbols.join(',')} trading=${this.tradingEnabled}`
-      + ` windowSeconds=${strat.windowSeconds} minDataPoints=${strat.minDataPoints}`
-      + ` enforceLatency=${this.sharedResources.enforceLatency}`
+      + ` priceMode=ws-driven(any-leg) windowSeconds=${strat.windowSeconds}`
+      + ` minDataPoints=${strat.minDataPoints} enforceLatency=${this.sharedResources.enforceLatency}`
     );
+  }
+
+  /** WS 来价驱动 onTick；同 symbol 同批 WS 合并为一次，避免无意义重入 */
+  #schedulePriceTick(symbol) {
+    const sym = compactSymbol(symbol);
+    if (!this._symbolSet.has(sym)) return;
+    if (this._priceTickCoalesce.has(sym)) return;
+    this._priceTickCoalesce.add(sym);
+    setImmediate(() => {
+      this._priceTickCoalesce.delete(sym);
+      this.task.onTick(sym).catch((e) => console.error('[tick]', sym, e.message));
+    });
   }
 
   async stop() {
     if (this.fundingTimer) clearInterval(this.fundingTimer);
-    if (this.tickTimer) clearInterval(this.tickTimer);
+    if (this.maintenanceTimer) clearInterval(this.maintenanceTimer);
     await this.sharedResources?.shutdown();
   }
 }

@@ -309,13 +309,13 @@ export class CexCexTask {
     const tradeId = reservations?.tradeId;
     try {
       const freshTick = this.sr.quoteAggregator.buildTick(symbol);
-      if (!freshTick
-        || !tickLatencyPass(freshTick, this.latencyLimits)
-        || !tickPriceSnapshotMatch(priceSnapshot, freshTick)) {
+      const latencyOk = !this.enforceLatency || tickLatencyPass(freshTick, this.latencyLimits);
+      const priceOk = freshTick && tickPriceSnapshotMatch(priceSnapshot, freshTick);
+      if (!freshTick || !latencyOk || !priceOk) {
         this.sr.eventBus.emitExecutionStatus({
           stage: 'PRICE_STALE',
           symbol,
-          detail: !freshTick ? 'no_tick' : (!tickPriceSnapshotMatch(priceSnapshot, freshTick) ? 'quote_changed' : 'latency')
+          detail: !freshTick ? 'no_tick' : (!priceOk ? 'quote_changed' : 'latency')
         });
         this.#releaseSymbolClaim(symbol, { restoreCooldown: true });
         return;

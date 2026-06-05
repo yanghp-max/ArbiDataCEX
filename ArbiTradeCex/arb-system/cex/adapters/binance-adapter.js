@@ -172,7 +172,6 @@ export class BinanceAdapter extends BaseAdapter {
         source: 'binance'
       };
       this.emit(EventTypes.TICKER, ticker);
-      this.emit('ticker', ticker);
     } catch {
       // ignore
     }

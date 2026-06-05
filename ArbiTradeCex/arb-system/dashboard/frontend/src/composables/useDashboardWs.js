@@ -1,5 +1,8 @@
 import { computed, onMounted, onUnmounted, reactive, ref } from 'vue';
 
+// dashboard v5 channels — market:update / trades:update / logs:update / account:update
+const DASHBOARD_MARKER = 'dashboard v5 channels';
+
 function emptyState() {
   return {
     startedAt: Date.now(),
@@ -25,6 +28,79 @@ function emptyState() {
     account: null,
     accountBaseline: null
   };
+}
+
+function mergeSnapshot(state, data) {
+  if (!data) return;
+  const topKeys = [
+    'startedAt', 'tradingEnabled', 'enforceLatency', 'useMockAccount',
+    'account', 'accountBaseline'
+  ];
+  for (const key of topKeys) {
+    if (data[key] !== undefined) state[key] = data[key];
+  }
+  if (data.progress) {
+    Object.assign(state.progress, data.progress);
+    if (data.progress.symbols) {
+      for (const [sym, row] of Object.entries(data.progress.symbols)) {
+        state.progress.symbols[sym] = row;
+      }
+    }
+  }
+  if (data.symbols) {
+    for (const [sym, row] of Object.entries(data.symbols)) {
+      state.symbols[sym] = row;
+    }
+  }
+  if (data.trades) state.trades = data.trades;
+  if (data.logs) state.logs = data.logs;
+  if (data.summary) Object.assign(state.summary, data.summary);
+}
+
+function applyMarketPatch(state, data) {
+  if (!data) return;
+  if (data.symbols) {
+    for (const [sym, row] of Object.entries(data.symbols)) {
+      state.symbols[sym] = row;
+    }
+  }
+  if (data.progress) {
+    if (data.progress.overallPct != null) state.progress.overallPct = data.progress.overallPct;
+    if (data.progress.windowSeconds != null) state.progress.windowSeconds = data.progress.windowSeconds;
+    if (data.progress.minDataPoints != null) state.progress.minDataPoints = data.progress.minDataPoints;
+    if (data.progress.symbols) {
+      for (const [sym, row] of Object.entries(data.progress.symbols)) {
+        state.progress.symbols[sym] = row;
+      }
+    }
+  }
+}
+
+function applyTradesPatch(state, data) {
+  if (!data) return;
+  if (data.trade) {
+    const exists = state.trades.some((t) => t.timestamp === data.trade.timestamp && t.symbol === data.trade.symbol);
+    if (!exists) {
+      state.trades.unshift(data.trade);
+      if (state.trades.length > 100) state.trades.length = 100;
+    }
+  }
+  if (data.summary) Object.assign(state.summary, data.summary);
+}
+
+function applyLogsPatch(state, data) {
+  if (!data?.logs?.length) return;
+  const known = new Set(state.logs.map((l) => l.id));
+  const fresh = data.logs.filter((l) => l.id && !known.has(l.id));
+  if (!fresh.length) return;
+  state.logs.unshift(...fresh.reverse());
+  if (state.logs.length > 200) state.logs.length = 200;
+}
+
+function applyAccountPatch(state, data) {
+  if (!data) return;
+  if (data.account !== undefined) state.account = data.account;
+  if (data.accountBaseline !== undefined) state.accountBaseline = data.accountBaseline;
 }
 
 export function useDashboardWs() {
@@ -70,6 +146,31 @@ export function useDashboardWs() {
     return order.map((sym) => state.symbols[sym] || { symbol: sym, status: 'waiting_quotes' });
   });
 
+  function handleWsMessage(msg) {
+    switch (msg.type) {
+      case 'snapshot':
+        mergeSnapshot(state, msg.data);
+        break;
+      case 'update':
+        mergeSnapshot(state, msg.data);
+        break;
+      case 'market:update':
+        applyMarketPatch(state, msg.data);
+        break;
+      case 'trades:update':
+        applyTradesPatch(state, msg.data);
+        break;
+      case 'logs:update':
+        applyLogsPatch(state, msg.data);
+        break;
+      case 'account:update':
+        applyAccountPatch(state, msg.data);
+        break;
+      default:
+        break;
+    }
+  }
+
   function connect() {
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
     ws = new WebSocket(`${proto}://${location.host}`);
@@ -86,9 +187,7 @@ export function useDashboardWs() {
     ws.onmessage = (ev) => {
       try {
         const msg = JSON.parse(ev.data);
-        if (!msg.data) return;
-        if (msg.data.summary) Object.assign(state.summary, msg.data.summary);
-        Object.assign(state, msg.data);
+        handleWsMessage(msg);
       } catch {
         // ignore malformed payloads
       }
@@ -128,6 +227,7 @@ export function useDashboardWs() {
     pnlBySymbolRows,
     symbolCards,
     refreshAccount,
-    setAccountBaseline
+    setAccountBaseline,
+    DASHBOARD_MARKER
   };
 }

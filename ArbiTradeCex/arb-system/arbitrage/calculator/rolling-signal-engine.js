@@ -11,28 +11,59 @@ export class RollingSignalEngine {
     this.windowSeconds = options.windowSeconds ?? 3600;
     this.minDataPoints = options.minDataPoints ?? 50;
     this.buckets = new Map();
+    /** 就绪后锁存，与 ArbiTrade-1 DataManager / demo 文档一致 */
+    this.windowReady = false;
   }
 
   #bucketKey(ts) {
     return Math.floor(ts / 1000);
   }
 
-  updateAndCalc({ timestamp, spreadAb, spreadBa, spreadAbAdj, spreadBaAdj }) {
-    const bk = this.#bucketKey(timestamp);
-    this.buckets.set(bk, { spreadAb, spreadBa, spreadAbAdj, spreadBaAdj, ts: timestamp });
+  #computeWindowMetrics() {
+    const bucketKeys = [...this.buckets.keys()];
+    const samples = bucketKeys.length;
+    if (samples === 0) {
+      return { samples: 0, timeSpanSeconds: 0, timeSpanMs: 0 };
+    }
+    const minBk = Math.min(...bucketKeys);
+    const maxBk = Math.max(...bucketKeys);
+    const timeSpanSeconds = maxBk - minBk + 1;
+    return { samples, timeSpanSeconds, timeSpanMs: timeSpanSeconds * 1000 };
+  }
 
-    const minBk = bk - this.windowSeconds;
+  #checkWindowReady(metrics) {
+    if (this.windowReady) return;
+    const { timeSpanSeconds, samples } = metrics;
+    if (timeSpanSeconds >= this.windowSeconds && samples >= this.minDataPoints) {
+      this.windowReady = true;
+    }
+  }
+
+  updateAndCalc({ timestamp, spreadAb, spreadBa, spreadAbAdj, spreadBaAdj }) {
+    const currentSecond = this.#bucketKey(timestamp);
+    this.buckets.set(currentSecond, {
+      spreadAb,
+      spreadBa,
+      spreadAbAdj,
+      spreadBaAdj,
+      ts: timestamp
+    });
+
+    const cutoffTime = currentSecond - this.windowSeconds;
     for (const k of this.buckets.keys()) {
-      if (k < minBk) this.buckets.delete(k);
+      if (k < cutoffTime) this.buckets.delete(k);
     }
 
-    const entries = [...this.buckets.values()].sort((a, b) => a.ts - b.ts);
-    const samples = entries.length;
-    const timeSpanMs = samples >= 2 ? entries[samples - 1].ts - entries[0].ts : 0;
-    const windowReady = timeSpanMs >= this.windowSeconds * 1000 && samples >= this.minDataPoints;
+    const metrics = this.#computeWindowMetrics();
+    if (!this.windowReady) {
+      this.#checkWindowReady(metrics);
+    }
+
+    const { samples, timeSpanMs, timeSpanSeconds } = metrics;
+    const windowReady = this.windowReady;
 
     const baseProgress = () => {
-      const timeProgressPct = Math.min(100, (timeSpanMs / (this.windowSeconds * 1000)) * 100);
+      const timeProgressPct = Math.min(100, (timeSpanSeconds / this.windowSeconds) * 100);
       const sampleProgressPct = Math.min(100, (samples / this.minDataPoints) * 100);
       const collectProgressPct = windowReady
         ? 100
@@ -40,11 +71,14 @@ export class RollingSignalEngine {
       return {
         samples,
         timeSpanMs,
+        timeSpanSeconds,
         timeProgressPct: Math.round(timeProgressPct * 10) / 10,
         sampleProgressPct: Math.round(sampleProgressPct * 10) / 10,
         collectProgressPct: Math.round(collectProgressPct * 10) / 10
       };
     };
+
+    const entries = [...this.buckets.values()].sort((a, b) => a.ts - b.ts);
 
     if (!windowReady || samples < 2) {
       const progress = baseProgress();

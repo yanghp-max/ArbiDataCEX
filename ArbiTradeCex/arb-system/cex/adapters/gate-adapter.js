@@ -261,17 +261,9 @@ export class GateAdapter extends BaseAdapter {
         ? (Number(serverTimestamp) > 1e12 ? Number(serverTimestamp) : Number(serverTimestamp) * 1000)
         : Date.now();
 
+      const symbol = this.normalizeSymbol(this.toCompactSymbol(contract));
       this.emit(EventTypes.TICKER, {
-        symbol: this.normalizeSymbol(this.toCompactSymbol(contract)),
-        bid,
-        ask,
-        timestamp,
-        serverTimestamp,
-        localTimestamp: Date.now(),
-        source: 'gate'
-      });
-      this.emit('ticker', {
-        symbol: this.normalizeSymbol(this.toCompactSymbol(contract)),
+        symbol,
         bid,
         ask,
         timestamp,

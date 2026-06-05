@@ -1,5 +1,11 @@
 /**
  * Dashboard 状态桥：收集 tick / 进度 / 成交，推送给 WebSocket 客户端
+ *
+ * 推送策略（对齐 ArbiTrade-1）：
+ * - 行情/进度：定频合并推送，仅含本周期变更的 symbol（market:update）
+ * - 成交/账户：事件触发、小 payload 即时推送
+ * - 日志：定频批量推送新增条目
+ * - 新连接：全量 snapshot
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -8,12 +14,15 @@ import { resolveLatencyLimits, tickLatencyPass } from '../risk/risk-manager.js';
 import { buildAccountSnapshot } from '../services/account-snapshot.js';
 import { DashboardServer } from './dashboard-server.js';
 
-const DASHBOARD_MARKER = 'dashboard v4 account';
+const DASHBOARD_MARKER = 'dashboard v5 channels';
 
 export class DashboardBridge {
   constructor(options = {}) {
     this.enabled = options.enabled !== false;
     this.port = options.port ?? 3456;
+    this.broadcastIntervalMs = Number(options.broadcastIntervalMs) > 0
+      ? Number(options.broadcastIntervalMs)
+      : 1000;
     this.windowSeconds = options.windowSeconds ?? 3600;
     this.minDataPoints = options.minDataPoints ?? 50;
     this.enforceLatency = options.enforceLatency ?? options.tradingEnabled ?? false;
@@ -28,6 +37,11 @@ export class DashboardBridge {
     this.symbols = options.symbols ?? [];
     this.server = null;
     this.accountServices = null;
+    this._flushInterval = null;
+    this._dirtySymbols = new Set();
+    this._dirtyProgress = false;
+    this._dirtyLogs = false;
+    this._pendingLogs = [];
     this.state = {
       startedAt: Date.now(),
       tradingEnabled: options.tradingEnabled ?? false,
@@ -132,7 +146,8 @@ export class DashboardBridge {
       level: 'info',
       message: `[ACCOUNT] 总 U ${snap.totalUsdt.toFixed(2)} (Binance ${snap.binance.usdt.toFixed(2)} + Gate ${snap.gate.usdt.toFixed(2)}) · ${baselineNote} ${snap.vsBaselineUsdt >= 0 ? '+' : ''}${snap.vsBaselineUsdt.toFixed(2)}`
     });
-    this.#broadcast();
+    this.#flushAccountUpdate();
+    this.#flushLogsUpdate();
     return snap;
   }
 
@@ -149,7 +164,8 @@ export class DashboardBridge {
       level: 'info',
       message: `[ACCOUNT] 基准已设为 ${total.toFixed(2)} USDT`
     });
-    this.#broadcast();
+    this.#flushAccountUpdate();
+    this.#flushLogsUpdate();
     return this.state.accountBaseline;
   }
 
@@ -166,10 +182,23 @@ export class DashboardBridge {
       setBaseline: () => this.setAccountBaseline()
     };
     await this.server.start();
-    console.log(`[Dashboard] http://localhost:${this.port}`);
+    this._flushInterval = setInterval(() => {
+      this.#flushPendingUpdates();
+    }, this.broadcastIntervalMs);
+    if (typeof this._flushInterval.unref === 'function') {
+      this._flushInterval.unref();
+    }
+    console.log(
+      `[Dashboard] http://localhost:${this.port}`
+      + ` · push interval ${this.broadcastIntervalMs}ms (market/logs channels)`
+    );
   }
 
   async stop() {
+    if (this._flushInterval) {
+      clearInterval(this._flushInterval);
+      this._flushInterval = null;
+    }
     await this.server?.stop();
   }
 
@@ -197,18 +226,25 @@ export class DashboardBridge {
     for (const file of files) {
       if (!file.endsWith('.js')) continue;
       const text = await fs.readFile(path.join(assetsDir, file), 'utf8');
-      if (text.includes(DASHBOARD_MARKER) || text.includes('pnl-banner')) return true;
+      if (text.includes(DASHBOARD_MARKER) || text.includes('market:update')) return true;
     }
     return false;
   }
 
   #pushLog(entry) {
-    this.state.logs.unshift({
+    const row = {
       id: `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
       timestamp: Date.now(),
       ...entry
-    });
+    };
+    this.state.logs.unshift(row);
     if (this.state.logs.length > 200) this.state.logs.length = 200;
+    this._pendingLogs.push(row);
+    if (this._pendingLogs.length > 50) {
+      this._pendingLogs.splice(0, this._pendingLogs.length - 50);
+    }
+    this._dirtyLogs = true;
+    return row;
   }
 
   #recalcOverallProgress() {
@@ -221,6 +257,16 @@ export class DashboardBridge {
     this.state.progress.overallPct = Math.round((sum / rows.length) * 10) / 10;
   }
 
+  #markMarketDirty(symbol, { progress = false } = {}) {
+    this._dirtySymbols.add(symbol);
+    if (progress) this._dirtyProgress = true;
+  }
+
+  #clearMarketDirty() {
+    this._dirtySymbols.clear();
+    this._dirtyProgress = false;
+  }
+
   updateMarketSnapshot({ symbol, tick, spreads, signal, lock }) {
     if (!this.enabled) return;
 
@@ -229,7 +275,7 @@ export class DashboardBridge {
       sym.status = 'waiting_quotes';
       sym.updatedAt = Date.now();
       this.state.symbols[symbol] = sym;
-      this.#broadcast();
+      this.#markMarketDirty(symbol);
       return;
     }
 
@@ -272,9 +318,11 @@ export class DashboardBridge {
       prog.windowReady = Boolean(signal.windowReady);
       this.state.progress.symbols[symbol] = prog;
       this.#recalcOverallProgress();
+      this.#markMarketDirty(symbol, { progress: true });
+      return;
     }
 
-    this.#broadcast();
+    this.#markMarketDirty(symbol);
   }
 
   recordTrade(tradeRow, summary = null) {
@@ -298,7 +346,7 @@ export class DashboardBridge {
       this.state.summary.bySymbol[tradeRow.symbol] =
         (this.state.summary.bySymbol[tradeRow.symbol] ?? 0) + net;
     }
-    this.#broadcast();
+    this.#flushTradesUpdate(tradeRow);
   }
 
   recordExecutionStatus(payload) {
@@ -323,11 +371,86 @@ export class DashboardBridge {
       message: `[${payload.stage}] ${payload.symbol}${payload.direction ? ` ${payload.direction}` : ''}${payload.detail ? `: ${payload.detail}` : ''}`,
       detail: payload
     });
-    this.#broadcast();
   }
 
-  #broadcast() {
-    this.server?.broadcast({ type: 'update', data: this.state });
+  #flushPendingUpdates() {
+    if (!this.server?.hasClients?.()) {
+      this.#clearMarketDirty();
+      this._dirtyLogs = false;
+      this._pendingLogs.length = 0;
+      return;
+    }
+    this.#flushMarketUpdate();
+    this.#flushLogsUpdate();
+  }
+
+  #flushMarketUpdate() {
+    if (this._dirtySymbols.size === 0 && !this._dirtyProgress) return;
+
+    const data = {};
+    if (this._dirtySymbols.size > 0) {
+      data.symbols = {};
+      for (const sym of this._dirtySymbols) {
+        if (this.state.symbols[sym]) {
+          data.symbols[sym] = this.state.symbols[sym];
+        }
+      }
+    }
+    if (this._dirtyProgress) {
+      data.progress = {
+        overallPct: this.state.progress.overallPct,
+        windowSeconds: this.state.progress.windowSeconds,
+        minDataPoints: this.state.progress.minDataPoints,
+        symbols: {}
+      };
+      for (const sym of this._dirtySymbols) {
+        if (this.state.progress.symbols[sym]) {
+          data.progress.symbols[sym] = this.state.progress.symbols[sym];
+        }
+      }
+    }
+
+    if (data.symbols || data.progress) {
+      this.server.broadcast({ type: 'market:update', data });
+    }
+    this.#clearMarketDirty();
+  }
+
+  #flushLogsUpdate() {
+    if (!this._dirtyLogs || this._pendingLogs.length === 0) return;
+    if (!this.server?.hasClients?.()) {
+      this._dirtyLogs = false;
+      this._pendingLogs.length = 0;
+      return;
+    }
+    this.server.broadcast({
+      type: 'logs:update',
+      data: { logs: [...this._pendingLogs] }
+    });
+    this._pendingLogs.length = 0;
+    this._dirtyLogs = false;
+  }
+
+  #flushTradesUpdate(tradeRow) {
+    if (!this.server?.hasClients?.()) return;
+    this.server.broadcast({
+      type: 'trades:update',
+      data: {
+        trade: tradeRow,
+        summary: this.state.summary
+      }
+    });
+  }
+
+  #flushAccountUpdate() {
+    if (!this.server?.hasClients?.()) return;
+    this.server.broadcast({
+      type: 'account:update',
+      data: {
+        account: this.state.account,
+        accountBaseline: this.state.accountBaseline
+      }
+    });
   }
 }
 

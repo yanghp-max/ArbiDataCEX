@@ -36,6 +36,7 @@ export class SharedResources {
     this.dashboardBridge = new DashboardBridge({
       enabled: dashCfg.enabled !== false,
       port: dashCfg.port ?? 3456,
+      broadcastIntervalMs: dashCfg.broadcastIntervalMs ?? 1000,
       windowSeconds: strat.windowSeconds,
       minDataPoints: strat.minDataPoints,
       maxPriceAgeMs: strat.maxPriceAgeMs ?? 1000,

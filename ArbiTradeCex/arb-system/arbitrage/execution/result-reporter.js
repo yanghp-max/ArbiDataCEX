@@ -122,6 +122,9 @@ export class ResultReporter {
       bPosQty: accountCache.getPosition('gate', symbol)
     };
     this.trades.push(row);
+    if (this.trades.length > 500) {
+      this.trades.splice(0, this.trades.length - 500);
+    }
     console.log('[TRADE]', JSON.stringify(row));
     console.log(
       `[PNL] total=${this.cumPnl.toFixed(4)} USDT · trades=${this.tradeCount} · latest=${netPnl.toFixed(4)} (${symbol})`

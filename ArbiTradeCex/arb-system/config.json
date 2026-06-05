@@ -1,6 +1,5 @@
 {
   "strategy": {
-    "windowSeconds": 3600,
     "minDataPoints": 50,
     "zOpen": 1.0,
     "zClose": 2.0,
@@ -12,11 +11,9 @@
     "maxLegSkewMs": 2000,
     "maxWsLatencyMs": 100,
     "signalMaxAgeMs": 50,
-    "enforceLatency": true,
     "fundingMin": -0.1,
     "feeBpsTotal": 4,
     "slippageBpsTotal": 4,
-    "useMockAccount": false,
     "mockBalanceUsdt": 10000,
     "minAvailableUsdt": 6,
     "balanceCheckRate": 0.1,
@@ -30,11 +27,17 @@
     "processLastExitJson": "logs/last-exit.json",
     "processHealthIntervalMs": 30000,
     "symbolsConfigJson": "config/symbols_config.json",
-    "minQtyJson": "config/min-order-qty.json"
+    "minQtyJson": "config/min-order-qty.json",
+    
+    "windowSeconds": 600,
+    "enforceLatency": true,
+    "useMockAccount": false
+
   },
   "dashboard": {
     "enabled": true,
-    "port": 3456
+    "port": 3456,
+    "broadcastIntervalMs": 1000
   },
   "adapters": {
     "A": { "provider": "binance" },

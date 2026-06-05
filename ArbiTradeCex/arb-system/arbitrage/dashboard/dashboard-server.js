@@ -40,8 +40,22 @@ export class DashboardServer {
     });
 
     await new Promise((resolve, reject) => {
-      this.httpServer.listen(this.port, resolve);
-      this.httpServer.on('error', reject);
+      const onError = (err) => {
+        if (err?.code === 'EADDRINUSE') {
+          reject(new Error(
+            `Dashboard port ${this.port} already in use (EADDRINUSE). `
+            + `Stop the other process or change dashboard.port in config.json. `
+            + `Windows: netstat -ano | findstr :${this.port}  then  taskkill /PID <pid> /F`
+          ));
+          return;
+        }
+        reject(err);
+      };
+      this.httpServer.once('error', onError);
+      this.httpServer.listen(this.port, () => {
+        this.httpServer.removeListener('error', onError);
+        resolve();
+      });
     });
   }
 
@@ -56,10 +70,18 @@ export class DashboardServer {
     });
   }
 
+  hasClients() {
+    return this.clients.size > 0;
+  }
+
   broadcast(msg) {
+    if (!this.clients.size) return;
     const raw = JSON.stringify(msg);
     for (const ws of this.clients) {
-      if (ws.readyState === ws.OPEN) ws.send(raw);
+      if (ws.readyState !== ws.OPEN) continue;
+      // 客户端消费不过来时跳过推送，避免 ws 内部队列无限膨胀
+      if (ws.bufferedAmount > 2_000_000) continue;
+      ws.send(raw);
     }
   }
 
