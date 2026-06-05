@@ -126,7 +126,8 @@ export class CexCexTask {
     if (tick.fundingA != null && tick.fundingA < this.cfg.fundingMin) return;
     if (tick.fundingB != null && tick.fundingB < this.cfg.fundingMin) return;
 
-    if (Date.now() - this.lastOrderTs.get(symbol) < this.cfg.cooldownMs) return;
+    const sinceOrder = Date.now() - this.lastOrderTs.get(symbol);
+    if (sinceOrder < this.cfg.cooldownMs) return;
     if (this.executingSymbols.has(symbol)) return;
     if (this.sr.inFlightCount >= this.cfg.maxInFlightTrades) return;
 
@@ -197,18 +198,12 @@ export class CexCexTask {
         clippedQty: clipped,
         orderUsd: this.cfg.orderUsd
       });
-      if (!finalized) {
-        this.sr.eventBus.emitExecutionStatus({ stage: 'MIN_QTY_SKIP', symbol });
-        return;
-      }
+      if (!finalized) return;
       orderForExec = finalized;
       qty = finalized.qty;
     }
 
-    if (this.enforceLatency && !tickSignalAgePass(tick, this.latencyLimits.signalMaxAgeMs)) {
-      this.sr.eventBus.emitExecutionStatus({ stage: 'SIGNAL_STALE', symbol });
-      return;
-    }
+    if (this.enforceLatency && !tickSignalAgePass(tick, this.latencyLimits.signalMaxAgeMs)) return;
 
     const priceSnapshot = tickPriceSnapshot(symbol, tick);
 
@@ -223,8 +218,7 @@ export class CexCexTask {
     if (!this.sr.useMockAccount) {
       try {
         await this.sr.accountCache.ensureFresh(this.sr.cexManager);
-      } catch (err) {
-        console.warn(`[CexCexTask] account cache refresh failed ${symbol}:`, err.message);
+      } catch {
         return;
       }
     }
@@ -258,7 +252,6 @@ export class CexCexTask {
 
     if (!reservations) {
       this.#releaseSymbolClaim(symbol, { restoreCooldown: true });
-      this.sr.eventBus.emitExecutionStatus({ stage: 'RESERVE_FAILED', symbol, direction: execDirection });
       return;
     }
 
@@ -312,17 +305,11 @@ export class CexCexTask {
       const latencyOk = !this.enforceLatency || tickLatencyPass(freshTick, this.latencyLimits);
       const priceOk = freshTick && tickPriceSnapshotMatch(priceSnapshot, freshTick);
       if (!freshTick || !latencyOk || !priceOk) {
-        this.sr.eventBus.emitExecutionStatus({
-          stage: 'PRICE_STALE',
-          symbol,
-          detail: !freshTick ? 'no_tick' : (!priceOk ? 'quote_changed' : 'latency')
-        });
         this.#releaseSymbolClaim(symbol, { restoreCooldown: true });
         return;
       }
 
       if (!finalCheckPass(freshTick, execDirection, adjSpread, this.latencyLimits)) {
-        this.sr.eventBus.emitExecutionStatus({ stage: 'FINAL_SKIP', symbol });
         this.#releaseSymbolClaim(symbol, { restoreCooldown: true });
         return;
       }
@@ -337,34 +324,15 @@ export class CexCexTask {
         });
       } catch (err) {
         await this.sr.accountCache.refreshFromCexManager(this.sr.cexManager).catch(() => {});
-        this.sr.eventBus.emitExecutionStatus({
-          stage: err.message?.startsWith('LEG_EXPOSURE') ? 'LEG_EXPOSURE' : 'EXEC_FAILED',
-          symbol,
-          direction: execDirection,
-          detail: err.message
-        });
+        console.error(`[CexCexTask] ${symbol} 下单失败:`, err.message);
         this.#releaseSymbolClaim(symbol, { restoreCooldown: true });
         return;
       }
 
-      if (!fill.simulated && fill.qty <= 0) {
-        this.sr.eventBus.emitExecutionStatus({
-          stage: 'ZERO_FILL',
-          symbol,
-          direction: execDirection,
-          detail: `A=${fill.aFilledQty} B=${fill.bFilledQty}`
-        });
+      const hasAnyFill = fill.aFilledQty > 0 || fill.bFilledQty > 0;
+      if (!fill.simulated && !hasAnyFill) {
         this.#releaseSymbolClaim(symbol, { restoreCooldown: true });
         return;
-      }
-
-      if (fill.legMismatch) {
-        this.sr.eventBus.emitExecutionStatus({
-          stage: 'LEG_MISMATCH',
-          symbol,
-          direction: execDirection,
-          detail: `A=${fill.aFilledQty} B(base)=${fill.bFilledQty} matched=${fill.qty}`
-        });
       }
 
       if (fill.simulated) {
@@ -400,6 +368,14 @@ export class CexCexTask {
         this.lockedBranch.delete(symbol);
       }
 
+      if (this.sr.tradingEnabled) {
+        const legTag = fill.legExposure ? '单腿' : '双腿';
+        console.log(
+          `[实盘·成交·${legTag}] ${symbol} ${action} ${execDirection}`
+          + ` A=${fill.aFilledQty} B=${fill.bFilledQty}`
+          + ` pnl=${netPnl.toFixed(4)} USDT`
+        );
+      }
       this.sr.eventBus.emitExecutionStatus({
         stage: 'TRADE_DONE',
         symbol,

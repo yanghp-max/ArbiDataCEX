@@ -14,37 +14,44 @@ function legLine(exchange, side, price, fmt) {
   return `${exchange} ${side} @${fmt(price, 6)}`;
 }
 
-const combinedLogs = computed(() =>
-  (props.state.trades || [])
-    .map((t) => ({
-      id: `trade_${t.timestamp}_${t.symbol}`,
-      timestamp: t.timestamp,
-      level: 'trade',
-      symbol: t.symbol,
-      message: [
-        `${t.symbol} ${t.action || 'trade'} ${t.direction}`,
-        legLine('A', t.aSide, t.aPrice ?? t.aPriceUsed, props.fmt),
-        legLine('B', t.bSide, t.bPrice ?? t.bPriceUsed, props.fmt),
-        `qty ${props.fmt(t.qty, 4)}`,
-        `pnl ${props.fmt(t.netPnl, 4)} USDT${t.simulated ? ' (sim)' : ''}`
-      ].join(' · ')
-    }))
+const combinedLogs = computed(() => {
+  const runtimeLogs = (props.state.logs || []).map((l) => ({
+    id: l.id || `log_${l.timestamp}`,
+    timestamp: l.timestamp,
+    level: l.level || 'info',
+    symbol: l.symbol || '-',
+    message: l.message || ''
+  }));
+  const tradeLogs = (props.state.trades || []).map((t) => ({
+    id: `trade_${t.timestamp}_${t.symbol}`,
+    timestamp: t.timestamp,
+    level: 'trade',
+    symbol: t.symbol,
+    message: [
+      `${t.symbol} ${t.action || 'trade'} ${t.direction}${t.legExposure ? ' [单腿]' : ''}`,
+      legLine('A', t.aSide, t.aPrice ?? t.aPriceUsed, props.fmt) + (t.aFilledQty != null ? ` fill=${props.fmt(t.aFilledQty, 4)}` : ''),
+      legLine('B', t.bSide, t.bPrice ?? t.bPriceUsed, props.fmt) + (t.bFilledQty != null ? ` fill=${props.fmt(t.bFilledQty, 4)}` : ''),
+      `qty ${props.fmt(t.qty, 4)}`,
+      `pnl ${props.fmt(t.netPnl, 4)} USDT${t.simulated ? ' (sim)' : ''}`
+    ].join(' · ')
+  }));
+  return [...runtimeLogs, ...tradeLogs]
     .sort((a, b) => b.timestamp - a.timestamp)
-    .slice(0, 100)
-);
+    .slice(0, 100);
+});
 </script>
 
 <template>
   <section class="log-panel">
     <div class="log-head">
-      <h2>成交日志</h2>
+      <h2>运行日志</h2>
       <span>
         总 PnL {{ formatPnl(pnlSummary.totalPnl) }} USDT ·
         {{ pnlSummary.tradeCount }} 笔成交
       </span>
     </div>
     <div class="log-list">
-      <div v-if="combinedLogs.length === 0" class="log-empty">暂无成交记录</div>
+      <div v-if="combinedLogs.length === 0" class="log-empty">暂无日志</div>
       <article v-for="log in combinedLogs" :key="log.id" class="log-item" :class="log.level">
         <div class="log-top">
           <span class="log-time">{{ formatTime(log.timestamp) }}</span>

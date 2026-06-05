@@ -6,6 +6,8 @@ import axios from 'axios';
 import { BaseAdapter } from './base-adapter.js';
 import { Balance, Order, Position, OrderStatus, EventTypes } from '../types.js';
 import { cryptoUtils } from '../utils.js';
+import { formatQtyByStep } from '../../common/utils/format-exchange-qty.js';
+import { describeBinanceApiError } from '../utils/binance-api-error.js';
 
 export class BinanceAdapter extends BaseAdapter {
   constructor(config = {}) {
@@ -31,6 +33,7 @@ export class BinanceAdapter extends BaseAdapter {
     this.listenKeyKeepaliveMin = Number(config.listenKeyKeepaliveMin) || 60;
     this._listenKeyTimer = null;
     this.pmWsUrl = process.env.BINANCE_PM_WS_URL || 'wss://fstream.binance.com/pm/ws';
+    this._dualSidePosition = null;
   }
 
   toCompactSymbol(symbol) {
@@ -194,13 +197,33 @@ export class BinanceAdapter extends BaseAdapter {
   async #signedRequest(method, path, params = {}) {
     const query = this.#signQuery(params);
     const url = `${this.config.papiRestUrl}${path}?${query}`;
-    const { data } = await axios({
-      method,
-      url,
-      headers: { 'X-MBX-APIKEY': process.env.BINANCE_API_KEY },
-      timeout: 15000
-    });
-    return data;
+    try {
+      const { data } = await axios({
+        method,
+        url,
+        headers: { 'X-MBX-APIKEY': process.env.BINANCE_API_KEY },
+        timeout: 15000
+      });
+      return data;
+    } catch (err) {
+      throw new Error(describeBinanceApiError(err));
+    }
+  }
+
+  async #resolvePositionSide(side) {
+    if (this._dualSidePosition == null) {
+      try {
+        const r = await this.#signedRequest('GET', '/papi/v1/um/positionSide/dual');
+        this._dualSidePosition = Boolean(r?.dualSidePosition);
+        if (this._dualSidePosition) {
+          console.warn('[Binance] 检测到双向持仓模式，下单将自动带 positionSide');
+        }
+      } catch {
+        this._dualSidePosition = false;
+      }
+    }
+    if (!this._dualSidePosition) return null;
+    return String(side).toUpperCase() === 'BUY' ? 'LONG' : 'SHORT';
   }
 
   async getBalance(options = {}) {
@@ -291,11 +314,15 @@ export class BinanceAdapter extends BaseAdapter {
     this.validateOrderData(orderData);
     const side = String(orderData.side).toUpperCase();
     const type = String(orderData.type).toUpperCase();
+    const qtyStr = formatQtyByStep(
+      Number(orderData.amount),
+      orderData.stepSize ?? orderData.binanceStepSize
+    );
     const params = {
       symbol: this.toExchangeSymbol(orderData.symbol),
       side,
       type,
-      quantity: String(orderData.amount),
+      quantity: qtyStr,
       newClientOrderId: orderData.clientOrderId || this.generateClientOrderId()
     };
     if (type === 'LIMIT' && orderData.price) {
@@ -304,6 +331,10 @@ export class BinanceAdapter extends BaseAdapter {
     }
     if (orderData.reduceOnly) {
       params.reduceOnly = 'true';
+    }
+    const positionSide = await this.#resolvePositionSide(side);
+    if (positionSide) {
+      params.positionSide = positionSide;
     }
     const response = await this.#signedRequest('POST', '/papi/v1/um/order', params);
     return new Order({

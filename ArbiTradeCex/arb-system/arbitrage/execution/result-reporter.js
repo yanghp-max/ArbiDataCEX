@@ -16,11 +16,19 @@
  * 累计 PnL：cumPnl = Σ 每笔 netPnl（开/加/平全部累加）
  */
 
-function feeCost(qty, aPx, bPx, feeBpsTotal, slippageBpsTotal) {
+function feeCost(aQty, bQty, aPx, bPx, feeBpsTotal, slippageBpsTotal) {
   const perLeg = (feeBpsTotal + slippageBpsTotal) / 10000 / 2;
-  const aLeg = qty * aPx;
-  const bLeg = qty * bPx;
+  const aLeg = aQty * aPx;
+  const bLeg = bQty * bPx;
   return Math.abs(aLeg) * perLeg + Math.abs(bLeg) * perLeg;
+}
+
+function fillLegQtys(fill) {
+  const qty = fill.qty ?? 0;
+  return {
+    aQty: Number.isFinite(fill.aFilledQty) ? fill.aFilledQty : qty,
+    bQty: Number.isFinite(fill.bFilledQty) ? fill.bFilledQty : qty
+  };
 }
 
 /** 开仓 / 加仓 PnL（同 backtest execute_open） */
@@ -32,22 +40,22 @@ function fillLegPrices(fill) {
 }
 
 export function calcOpenPnl(fill, direction, feeBpsTotal = 4, slippageBpsTotal = 4) {
-  const qty = fill.qty;
+  const { aQty, bQty } = fillLegQtys(fill);
   const { aPx, bPx } = fillLegPrices(fill);
   const gross = direction === '-a+b'
-    ? qty * aPx - qty * bPx
-    : qty * bPx - qty * aPx;
-  return gross - feeCost(qty, aPx, bPx, feeBpsTotal, slippageBpsTotal);
+    ? aQty * aPx - bQty * bPx
+    : bQty * bPx - aQty * aPx;
+  return gross - feeCost(aQty, bQty, aPx, bPx, feeBpsTotal, slippageBpsTotal);
 }
 
 /** 平仓 PnL（同 backtest calc_close_profit，按 lockedDirection） */
 export function calcClosePnl(fill, lockedDirection, feeBpsTotal = 4, slippageBpsTotal = 4) {
-  const qty = fill.qty;
+  const { aQty, bQty } = fillLegQtys(fill);
   const { aPx, bPx } = fillLegPrices(fill);
   const gross = lockedDirection === '-a+b'
-    ? qty * bPx - qty * aPx
-    : qty * aPx - qty * bPx;
-  return gross - feeCost(qty, aPx, bPx, feeBpsTotal, slippageBpsTotal);
+    ? bQty * bPx - aQty * aPx
+    : aQty * aPx - bQty * bPx;
+  return gross - feeCost(aQty, bQty, aPx, bPx, feeBpsTotal, slippageBpsTotal);
 }
 
 /**
@@ -118,6 +126,9 @@ export class ResultReporter {
       cumPnl: this.cumPnl,
       simulated: Boolean(fill.simulated),
       legMismatch: Boolean(fill.legMismatch),
+      legExposure: Boolean(fill.legExposure),
+      failedLeg: fill.failedLeg ?? null,
+      failReason: fill.failReason ?? null,
       aPosQty: accountCache.getPosition('binance', symbol),
       bPosQty: accountCache.getPosition('gate', symbol)
     };
@@ -151,7 +162,10 @@ export class ResultReporter {
         cum_pnl: row.cumPnl,
         a_pos_qty: row.aPosQty,
         b_pos_qty: row.bPosQty,
-        leg_mismatch: row.legMismatch
+        leg_mismatch: row.legMismatch,
+        leg_exposure: row.legExposure,
+        failed_leg: row.failedLeg,
+        fail_reason: row.failReason
       }).catch((err) => {
         console.error('[ResultReporter] failed to write trade CSV:', err.message);
       });

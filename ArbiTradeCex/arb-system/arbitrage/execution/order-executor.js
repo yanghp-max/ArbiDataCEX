@@ -42,6 +42,7 @@ export class OrderExecutor {
     const { aPrice, bPrice } = legPricesForDirection(direction, tick);
     const binanceSide = aSide;
     const gateSide = bSide;
+    const binanceStepSize = order.cfg?.binance?.stepSize;
 
     if (!this.tradingEnabled) {
       return {
@@ -55,7 +56,8 @@ export class OrderExecutor {
         qty,
         aFilledQty: qty,
         bFilledQty: qty,
-        legMismatch: false
+        legMismatch: false,
+        legExposure: false
       };
     }
 
@@ -66,6 +68,7 @@ export class OrderExecutor {
         side: binanceSide,
         type: 'market',
         amount: qty,
+        stepSize: binanceStepSize,
         reduceOnly
       }),
       this.cexManager.placeOrder('gate', {
@@ -79,32 +82,61 @@ export class OrderExecutor {
     ]);
 
     if (aResult.status === 'rejected' && bResult.status === 'rejected') {
-      throw new Error(`both legs failed: A=${aResult.reason?.message}; B=${bResult.reason?.message}`);
-    }
-    if (aResult.status === 'rejected' || bResult.status === 'rejected') {
-      const okLeg = aResult.status === 'fulfilled' ? 'binance' : 'gate';
-      const failLeg = aResult.status === 'rejected' ? 'binance' : 'gate';
-      const failMsg = (aResult.status === 'rejected' ? aResult.reason : bResult.reason)?.message;
-      throw new Error(`LEG_EXPOSURE: ${okLeg} placed, ${failLeg} failed: ${failMsg}`);
+      throw new Error(
+        `两腿都失败: Binance=${aResult.reason?.message}; Gate=${bResult.reason?.message}`
+      );
     }
 
-    let aOrder = aResult.value;
-    let bOrder = bResult.value;
+    let aOrder = aResult.status === 'fulfilled' ? aResult.value : null;
+    let bOrder = bResult.status === 'fulfilled' ? bResult.value : null;
+    const failedLeg = aResult.status === 'rejected'
+      ? 'binance'
+      : bResult.status === 'rejected'
+        ? 'gate'
+        : null;
+    const failReason = failedLeg === 'binance'
+      ? aResult.reason?.message
+      : failedLeg === 'gate'
+        ? bResult.reason?.message
+        : null;
 
-    aOrder = await this.#ensureOrderFill('binance', aOrder, tick.symbol, qty);
-    bOrder = await this.#ensureOrderFill('gate', bOrder, tick.symbol, gateSize, gateDecimalSize);
+    if (aOrder) {
+      aOrder = await this.#ensureOrderFill('binance', aOrder, tick.symbol, qty);
+    }
+    if (bOrder) {
+      bOrder = await this.#ensureOrderFill('gate', bOrder, tick.symbol, gateSize, gateDecimalSize);
+    }
 
-    const aFilled = readFilled(aOrder, qty);
-    const bFilledBase = gateFillToBaseQty(readFilled(bOrder, gateSize), order);
-    const matchedQty = Math.min(aFilled, bFilledBase, qty);
+    const aFilled = aOrder ? readFilled(aOrder, qty) : 0;
+    const bFilledBase = bOrder ? gateFillToBaseQty(readFilled(bOrder, gateSize), order) : 0;
+
+    if (aFilled <= 0 && bFilledBase <= 0) {
+      const detail = failedLeg
+        ? `${failedLeg === 'binance' ? 'Binance' : 'Gate'}拒单: ${failReason}`
+        : '两腿都没成交';
+      throw new Error(detail);
+    }
+
     const legMismatch = aFilled > 0 && bFilledBase > 0 && Math.abs(aFilled - bFilledBase) > 1e-6;
-    const aPricePost = Number(aOrder.avgPrice || aOrder.price || fallback.aPrice);
-    const bPricePost = Number(bOrder.avgPrice || bOrder.price || fallback.bPrice);
+    const legExposure = Boolean(failedLeg)
+      || (aFilled > 0 && bFilledBase <= 0)
+      || (bFilledBase > 0 && aFilled <= 0)
+      || legMismatch;
+    const matchedQty = aFilled > 0 && bFilledBase > 0
+      ? Math.min(aFilled, bFilledBase, qty)
+      : Math.max(aFilled, bFilledBase);
+
+    const aPricePost = aOrder
+      ? Number(aOrder.avgPrice || aOrder.price || fallback.aPrice)
+      : fallback.aPrice;
+    const bPricePost = bOrder
+      ? Number(bOrder.avgPrice || bOrder.price || fallback.bPrice)
+      : fallback.bPrice;
 
     return {
       simulated: false,
-      aOrderId: String(aOrder.orderId),
-      bOrderId: String(bOrder.orderId),
+      aOrderId: aOrder ? String(aOrder.orderId) : null,
+      bOrderId: bOrder ? String(bOrder.orderId) : null,
       aSide,
       bSide,
       aPrice: aPricePost,
@@ -112,7 +144,10 @@ export class OrderExecutor {
       qty: matchedQty,
       aFilledQty: aFilled,
       bFilledQty: bFilledBase,
-      legMismatch
+      legMismatch,
+      legExposure,
+      failedLeg,
+      failReason
     };
   }
 

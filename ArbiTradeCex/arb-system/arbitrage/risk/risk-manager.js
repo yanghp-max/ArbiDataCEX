@@ -298,3 +298,35 @@ export function finalCheckPass(tick, direction, adjSpread, limits) {
   if (adjSpread < 0 || adjSpread > 10) return false;
   return true;
 }
+
+/** 延迟检查未通过时的通俗说明（供实盘日志） */
+export function describeLatencyFail(tick, limits) {
+  if (!tick) return '没有可用行情';
+  if (!latencyChecksEnabled(limits)) return null;
+  if (!tickExchangeAgePass(tick, limits.maxPriceAgeMs)) {
+    return `行情太旧（${tick.priceAgeMs}ms，上限${limits.maxPriceAgeMs}ms）`;
+  }
+  if (!tickLegSkewPass(tick, limits.maxLegSkewMs)) {
+    return `两腿不同步（时间差${tick.legSkewMs}ms，上限${limits.maxLegSkewMs}ms）`;
+  }
+  const ws = tick.maxWsLatencyMs ?? Math.max(tick.aLatencyMs ?? 0, tick.bLatencyMs ?? 0);
+  if (!tickWsLatencyPass(tick, limits.maxWsLatencyMs)) {
+    return `网络延迟过高（${ws}ms，上限${limits.maxWsLatencyMs}ms）`;
+  }
+  return '延迟检查未通过';
+}
+
+/** 最终校验未通过时的通俗说明 */
+export function describeFinalCheckFail(tick, adjSpread, limits) {
+  const latency = describeLatencyFail(tick, limits);
+  if (latency && latencyChecksEnabled(limits) && !tickLatencyPass(tick, limits)) {
+    return latency;
+  }
+  if (adjSpread < 0) {
+    return `扣费后价差为负（${adjSpread.toFixed(4)}%），做了也亏`;
+  }
+  if (adjSpread > 10) {
+    return `扣费后价差异常偏大（${adjSpread.toFixed(4)}%）`;
+  }
+  return '最终校验未通过';
+}
