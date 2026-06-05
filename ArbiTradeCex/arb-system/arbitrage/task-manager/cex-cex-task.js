@@ -181,13 +181,29 @@ export class CexCexTask {
     });
     if (orderBuild.qty <= 0) return;
 
+    let orderForExec = orderBuild;
     let qty = orderBuild.qty;
     if (isClose) {
-      qty = this.risk.clipCloseQty(qty, tick, this.sr.accountCache);
+      const clipped = this.risk.clipCloseQty(qty, tick, this.sr.accountCache);
+      const aligned = this.precision.alignHedgeFromBaseQty(tick, clipped);
+      if (aligned.qty <= 0) return;
+      orderForExec = { ...orderBuild, qty: aligned.qty, gateSize: aligned.gateSize };
+      qty = aligned.qty;
     } else {
-      qty = this.risk.clipQty(qty, tick, execDirection, this.sr.accountCache);
+      const clipped = this.risk.clipQty(qty, tick, execDirection, this.sr.accountCache);
+      const finalized = this.precision.finalizeOpenOrder({
+        direction: execDirection,
+        tick,
+        clippedQty: clipped,
+        orderUsd: this.cfg.orderUsd
+      });
+      if (!finalized) {
+        this.sr.eventBus.emitExecutionStatus({ stage: 'MIN_QTY_SKIP', symbol });
+        return;
+      }
+      orderForExec = finalized;
+      qty = finalized.qty;
     }
-    if (qty <= 0) return;
 
     if (this.enforceLatency && !tickSignalAgePass(tick, this.latencyLimits.signalMaxAgeMs)) {
       this.sr.eventBus.emitExecutionStatus({ stage: 'SIGNAL_STALE', symbol });
@@ -256,7 +272,7 @@ export class CexCexTask {
       branch: tradePlan.branch,
       tick,
       priceSnapshot,
-      order: { ...orderBuild, qty },
+      order: orderForExec,
       adjSpread: filterSpread,
       openZ: tradePlan.openZ,
       closeZ: tradePlan.closeZ,

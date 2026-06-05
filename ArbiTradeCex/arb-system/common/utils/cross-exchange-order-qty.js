@@ -121,10 +121,39 @@ export function resolveMinHedgeQty({ orderUsd, aPrice, binanceCfg, gateCfg, useL
   return { qty, gateSize, effectiveMinNotional, qBinance, qGate };
 }
 
+/** 按已有基础币数量向下对齐两腿步进，并回推 Gate 张数 */
+export function resolveHedgeQtyFromBaseQty({ baseQty, binanceCfg, gateCfg }) {
+  const stepSize = Number(binanceCfg?.stepSize);
+  if (!Number.isFinite(stepSize) || stepSize <= 0 || !(baseQty > 0)) {
+    return { qty: 0, gateSize: 0 };
+  }
+
+  let qty = floorByStep(baseQty, stepSize);
+  if (qty <= 0) return { qty: 0, gateSize: 0 };
+
+  const gateStep = Number(gateCfg?.stepSize || 1);
+  let gateSize = 0;
+
+  if (gateCfg?.quantityUnit === 'base' || gateCfg?.enableDecimal) {
+    gateSize = floorByStep(qty, gateStep);
+    qty = gateSize;
+  } else {
+    const multiplier = Number(gateCfg?.quantoMultiplier || 0);
+    if (multiplier > 0) {
+      gateSize = floorByStep(qty / multiplier, gateStep);
+      qty = floorByStep(gateSize * multiplier, stepSize);
+    }
+  }
+
+  if (qty <= 0 || gateSize <= 0) return { qty: 0, gateSize: 0 };
+  return { qty, gateSize };
+}
+
 export default {
   resolveGateMinBaseQty,
   resolveAlignStep,
   resolveEffectiveMinNotional,
   resolveBinanceMinBaseQty,
-  resolveMinHedgeQty
+  resolveMinHedgeQty,
+  resolveHedgeQtyFromBaseQty
 };

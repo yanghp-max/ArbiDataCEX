@@ -1,6 +1,9 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { resolveMinHedgeQty } from '../../common/utils/cross-exchange-order-qty.js';
+import {
+  resolveMinHedgeQty,
+  resolveHedgeQtyFromBaseQty
+} from '../../common/utils/cross-exchange-order-qty.js';
 import { legPricesForDirection } from '../services/spread-calculator.js';
 
 export class PrecisionChecker {
@@ -79,6 +82,63 @@ export class PrecisionChecker {
       effectiveMinNotional,
       qBinance,
       qGate,
+      gateDecimalSize: Boolean(gateCfg.enableDecimal || gateCfg.quantityUnit === 'base'),
+      gateQuantityUnit: gateCfg.quantityUnit || 'contract',
+      gateQuantoMultiplier: Number(gateCfg.quantoMultiplier) || 1,
+      direction,
+      aPrice,
+      cfg
+    };
+  }
+
+  alignHedgeFromBaseQty(tick, baseQty) {
+    const cfg = this.minQtyBySymbol[tick.symbol];
+    if (!cfg || !(baseQty > 0)) return { qty: 0, gateSize: 0 };
+    return resolveHedgeQtyFromBaseQty({
+      baseQty,
+      binanceCfg: cfg.binance,
+      gateCfg: cfg.gate
+    });
+  }
+
+  /**
+   * 开仓：持仓上限截取后，对齐 qty/gateSize 且必须 ≥ 两腿最小可成交量。
+   * 不满足则返回 null（避免单腿或低于交易所最小量下单）。
+   */
+  finalizeOpenOrder({ direction, tick, clippedQty, orderUsd }) {
+    const cfg = this.minQtyBySymbol[tick.symbol];
+    if (!cfg) return null;
+
+    const { aPrice } = legPricesForDirection(direction, tick);
+    const useLotMinQty = this.minOrderLotQtySymbols.has(String(tick.symbol).toUpperCase());
+    const minU = Number(orderUsd ?? this.orderUsd);
+
+    const min = resolveMinHedgeQty({
+      orderUsd: minU,
+      aPrice,
+      binanceCfg: cfg.binance,
+      gateCfg: cfg.gate,
+      useLotMinQty
+    });
+    const aligned = resolveHedgeQtyFromBaseQty({
+      baseQty: clippedQty,
+      binanceCfg: cfg.binance,
+      gateCfg: cfg.gate
+    });
+
+    if (min.qty <= 0 || min.gateSize <= 0) return null;
+    if (aligned.qty <= 0 || aligned.gateSize <= 0) return null;
+    if (aligned.qty + 1e-12 < min.qty || aligned.gateSize + 1e-12 < min.gateSize) {
+      return null;
+    }
+
+    const gateCfg = cfg.gate;
+    return {
+      qty: aligned.qty,
+      gateSize: aligned.gateSize,
+      effectiveMinNotional: min.effectiveMinNotional,
+      qBinance: min.qBinance,
+      qGate: min.qGate,
       gateDecimalSize: Boolean(gateCfg.enableDecimal || gateCfg.quantityUnit === 'base'),
       gateQuantityUnit: gateCfg.quantityUnit || 'contract',
       gateQuantoMultiplier: Number(gateCfg.quantoMultiplier) || 1,
