@@ -120,7 +120,9 @@ export class CexManager {
     const binance = new BinanceAdapter({
       listenKeyKeepaliveMin: strategyConfig.listenKeyKeepaliveMin ?? 60
     });
-    const gate = new GateAdapter();
+    const gate = new GateAdapter({
+      accountMode: strategyConfig.gateAccountMode
+    });
     await Promise.all([binance.connect(), gate.connect()]);
     mgr.register('binance', binance);
     mgr.register('gate', gate);

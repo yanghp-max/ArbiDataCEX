@@ -21,6 +21,7 @@
     "minAvailableUsdt": 6,
     "balanceCheckRate": 0.1,
     "accountCacheMaxAgeMs": 5000,
+    "gateAccountMode": "single",
     "listenKeyKeepaliveMin": 60,
     "reservationTtlMs": 30000,
     "maxInFlightTrades": 5,

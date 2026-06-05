@@ -1,5 +1,7 @@
 /**
- * Gate 统一账户 + USDT 永续适配器
+ * Gate USDT 永续适配器
+ * - single（默认）：单币种保证金，余额走 /futures/usdt/accounts + futures.balances WS
+ * - unified：跨币种统一账户，余额走 /unified/accounts + unified.asset_detail WS
  */
 import WebSocket from 'ws';
 import axios from 'axios';
@@ -20,6 +22,9 @@ export class GateAdapter extends BaseAdapter {
     });
 
     this.id = 'gate';
+    this.accountMode = String(
+      config.accountMode || process.env.GATE_ACCOUNT_MODE || 'single'
+    ).toLowerCase();
     this.subscribed = [];
     this.subscribedChannels = ['book_ticker'];
     this._balanceCache = null;
@@ -28,7 +33,13 @@ export class GateAdapter extends BaseAdapter {
     this.unifiedWs = null;
     this.unifiedWsConnected = false;
     this.privatePositionsSubscribed = false;
+    this.privateBalancesSubscribed = false;
     this._userId = null;
+  }
+
+  #isUnifiedMode() {
+    const mode = this.accountMode;
+    return mode === 'unified' || mode === 'cross' || mode === 'multi';
   }
 
   toCompactSymbol(symbol) {
@@ -60,6 +71,10 @@ export class GateAdapter extends BaseAdapter {
       this.authenticated = true;
     }
     await super.connect();
+    if (this.authenticated) {
+      const modeLabel = this.#isUnifiedMode() ? 'unified (cross-currency)' : 'single (USDT futures)';
+      console.log(`[Gate] account mode: ${modeLabel}`);
+    }
   }
 
   async disconnect() {
@@ -156,12 +171,20 @@ export class GateAdapter extends BaseAdapter {
         if (this.subscribed.length > 0) {
           await this.subscribe(this.subscribed, this.subscribedChannels);
         }
-        if (this.privatePositionsSubscribed || this.unifiedWsConnected) {
+        if (this.privatePositionsSubscribed || this.privateBalancesSubscribed || this.unifiedWsConnected) {
           await this.#subscribePositions(this.subscribed).catch((err) => {
             console.warn('[Gate] resubscribe positions failed:', err.message);
           });
-          if (this.privatePositionsSubscribed) {
-            this.emit('PRIVATE_WS_CONNECTED', { exchange: 'gate', positionsReady: true });
+          if (this.privateBalancesSubscribed) {
+            await this.#subscribeBalances().catch((err) => {
+              console.warn('[Gate] resubscribe balances failed:', err.message);
+            });
+          }
+          if (this.privatePositionsSubscribed || this.privateBalancesSubscribed || this.unifiedWsConnected) {
+            this.emit('PRIVATE_WS_CONNECTED', {
+              exchange: 'gate',
+              positionsReady: this.privatePositionsSubscribed
+            });
           }
         }
         resolve();
@@ -217,6 +240,10 @@ export class GateAdapter extends BaseAdapter {
       const msg = JSON.parse(raw.toString());
       if (msg.channel === 'futures.positions' && msg.event === 'update') {
         this.#handlePositionsUpdate(msg.result);
+        return;
+      }
+      if (msg.channel === 'futures.balances' && msg.event === 'update') {
+        this.#handleFuturesBalancesUpdate(msg.result);
         return;
       }
       if (msg.channel !== 'futures.book_ticker' || msg.event !== 'update') return;
@@ -280,6 +307,13 @@ export class GateAdapter extends BaseAdapter {
   }
 
   async getBalance(options = {}) {
+    if (this.#isUnifiedMode()) {
+      return this.#getUnifiedBalance(options);
+    }
+    return this.#getSingleFuturesBalance(options);
+  }
+
+  async #getUnifiedBalance(options = {}) {
     const data = await this.#signedRequest('GET', '/unified/accounts');
     const balances = [];
     const map = data?.balances || data?.details || {};
@@ -289,6 +323,32 @@ export class GateAdapter extends BaseAdapter {
       if (total <= 0 && available <= 0) continue;
       balances.push(new Balance({
         currency,
+        exchange: this.config.name,
+        total,
+        available,
+        frozen: Math.max(0, total - available),
+        timestamp: Date.now()
+      }));
+    }
+    this._balanceCache = balances;
+    if (!options.silent) {
+      this.emitBalanceUpdate(balances);
+    }
+    return balances;
+  }
+
+  async #getSingleFuturesBalance(options = {}) {
+    const data = await this.#signedRequest('GET', '/futures/usdt/accounts');
+    const available = Number(
+      data?.available ?? data?.available_margin ?? data?.cross_available ?? 0
+    );
+    const total = Number(
+      data?.total ?? data?.margin_balance ?? data?.cross_margin_balance ?? available
+    );
+    const balances = [];
+    if (total > 0 || available > 0) {
+      balances.push(new Balance({
+        currency: 'USDT',
         exchange: this.config.name,
         total,
         available,
@@ -476,13 +536,35 @@ export class GateAdapter extends BaseAdapter {
 
   async #fetchUserId() {
     if (this._userId) return this._userId;
-    const data = await this.#signedRequest('GET', '/unified/accounts');
-    const uid = data?.user_id ?? data?.user ?? data?.uid ?? data?.id;
+
+    if (this.#isUnifiedMode()) {
+      const data = await this.#signedRequest('GET', '/unified/accounts');
+      const uid = data?.user_id ?? data?.user ?? data?.uid ?? data?.id;
+      if (uid != null && String(uid)) {
+        this._userId = String(uid);
+        return this._userId;
+      }
+      throw new Error('Gate user_id not found in /unified/accounts');
+    }
+
+    try {
+      const wallet = await this.#signedRequest('GET', '/wallet/user_id');
+      const uid = wallet?.user_id ?? wallet?.user_id_str ?? wallet?.id;
+      if (uid != null && String(uid)) {
+        this._userId = String(uid);
+        return this._userId;
+      }
+    } catch {
+      // fallback below
+    }
+
+    const futures = await this.#signedRequest('GET', '/futures/usdt/accounts');
+    const uid = futures?.user ?? futures?.user_id ?? futures?.uid;
     if (uid != null && String(uid)) {
       this._userId = String(uid);
       return this._userId;
     }
-    throw new Error('Gate user_id not found in /unified/accounts');
+    throw new Error('Gate user_id not found for single-currency account');
   }
 
   #handlePositionsUpdate(result) {
@@ -519,6 +601,22 @@ export class GateAdapter extends BaseAdapter {
     await this.startPrivateAccountStream(symbols);
   }
 
+  #handleFuturesBalancesUpdate(result) {
+    const rows = Array.isArray(result) ? result : (result ? [result] : []);
+    if (!rows.length) return;
+    const latest = rows[rows.length - 1];
+    const balance = Number(latest.balance ?? 0);
+    if (!Number.isFinite(balance)) return;
+    this.emitBalanceUpdate([new Balance({
+      currency: 'USDT',
+      exchange: this.config.name,
+      total: balance,
+      available: balance,
+      frozen: 0,
+      timestamp: Date.now()
+    })]);
+  }
+
   #handleUnifiedMessage(raw) {
     try {
       const msg = JSON.parse(raw.toString());
@@ -552,6 +650,22 @@ export class GateAdapter extends BaseAdapter {
     } catch {
       // ignore
     }
+  }
+
+  async #subscribeBalances() {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    const userId = await this.#fetchUserId();
+    const time = Math.floor(Date.now() / 1000);
+    const channel = 'futures.balances';
+    const event = 'subscribe';
+    this.ws.send(JSON.stringify({
+      time,
+      channel,
+      event,
+      auth: this.#wsAuth(channel, event, time),
+      payload: [userId]
+    }));
+    this.privateBalancesSubscribed = true;
   }
 
   async #subscribePositions(symbols) {
@@ -615,27 +729,38 @@ export class GateAdapter extends BaseAdapter {
     if (!process.env.GATE_API_KEY || !process.env.GATE_API_SECRET) return;
 
     await this.syncAccountSnapshot({ silent: true });
-    await this.#connectUnifiedWs();
+
+    if (this.#isUnifiedMode()) {
+      await this.#connectUnifiedWs();
+    }
 
     if (this.ws?.readyState !== WebSocket.OPEN) {
       await new Promise((r) => setTimeout(r, 500));
     }
     if (this.ws?.readyState === WebSocket.OPEN) {
+      if (!this.#isUnifiedMode()) {
+        await this.#subscribeBalances();
+      }
       await this.#subscribePositions(symbols);
     } else {
-      console.warn('[Gate] public fx-ws not open; futures.positions subscription skipped');
+      console.warn('[Gate] public fx-ws not open; private futures subscriptions skipped');
     }
 
     this.emit('PRIVATE_WS_CONNECTED', {
       exchange: 'gate',
       positionsReady: this.privatePositionsSubscribed
     });
+    const modeNote = this.#isUnifiedMode() ? 'unified USDT' : 'single USDT futures';
+    const balNote = this.#isUnifiedMode()
+      ? (this.unifiedWsConnected ? 'unified.asset_detail' : 'unified pending')
+      : (this.privateBalancesSubscribed ? 'futures.balances' : 'balances pending');
     const posNote = this.privatePositionsSubscribed ? 'futures.positions' : 'positions pending';
-    console.log(`[Gate] private account streams started (unified USDT + ${posNote})`);
+    console.log(`[Gate] private streams (${modeNote}: ${balNote} + ${posNote})`);
   }
 
   async stopPrivateAccountStream() {
     this.privatePositionsSubscribed = false;
+    this.privateBalancesSubscribed = false;
     if (this.unifiedWs) {
       this.unifiedWs.removeAllListeners();
       this.unifiedWs.close();
