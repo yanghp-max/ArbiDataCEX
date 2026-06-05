@@ -5,7 +5,7 @@
  *   +a-b: A@ask, B@bid
  */
 import { OrderStatus } from '../../cex/types.js';
-import { legPricesForDirection } from '../services/spread-calculator.js';
+import { legPricesForDirection, tradeLegSides } from '../services/spread-calculator.js';
 
 const POLL_ATTEMPTS = 5;
 const POLL_INTERVAL_MS = 150;
@@ -38,25 +38,20 @@ export class OrderExecutor {
 
   async executeBothLegs({ direction, tick, order, reduceOnly = false }) {
     const { qty, gateSize, gateDecimalSize } = order;
+    const { aSide, bSide } = tradeLegSides(direction);
     const { aPrice, bPrice } = legPricesForDirection(direction, tick);
-    const binanceSide = direction === '-a+b' ? 'sell' : 'buy';
-    const gateSide = direction === '-a+b' ? 'buy' : 'sell';
+    const binanceSide = aSide;
+    const gateSide = bSide;
 
     if (!this.tradingEnabled) {
       return {
         simulated: true,
         aOrderId: `SIM_A_${Date.now()}`,
         bOrderId: `SIM_B_${Date.now()}`,
-        aBidPre: tick.aBid,
-        aAskPre: tick.aAsk,
-        bBidPre: tick.bBid,
-        bAskPre: tick.bAsk,
-        aPricePre: aPrice,
-        bPricePre: bPrice,
-        aPriceUsed: aPrice,
-        bPriceUsed: bPrice,
-        aPricePost: aPrice,
-        bPricePost: bPrice,
+        aSide,
+        bSide,
+        aPrice,
+        bPrice,
         qty,
         aFilledQty: qty,
         bFilledQty: qty,
@@ -110,22 +105,14 @@ export class OrderExecutor {
       simulated: false,
       aOrderId: String(aOrder.orderId),
       bOrderId: String(bOrder.orderId),
-      aBidPre: tick.aBid,
-      aAskPre: tick.aAsk,
-      bBidPre: tick.bBid,
-      bAskPre: tick.bAsk,
-      aPricePre: aPrice,
-      bPricePre: bPrice,
-      aPriceUsed: aPricePost,
-      bPriceUsed: bPricePost,
-      aPricePost,
-      bPricePost,
+      aSide,
+      bSide,
+      aPrice: aPricePost,
+      bPrice: bPricePost,
       qty: matchedQty,
       aFilledQty: aFilled,
       bFilledQty: bFilledBase,
-      legMismatch,
-      rawA: aOrder,
-      rawB: bOrder
+      legMismatch
     };
   }
 

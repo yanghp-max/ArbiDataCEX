@@ -6,6 +6,14 @@ export function legPricesForDirection(direction, tick) {
   return { aPrice: tick.aAsk, bPrice: tick.bBid };
 }
 
+/** 本笔交易各腿实际买卖侧（只记录成交用到的一侧） */
+export function tradeLegSides(direction) {
+  if (direction === '-a+b') {
+    return { aSide: 'sell', bSide: 'buy' };
+  }
+  return { aSide: 'buy', bSide: 'sell' };
+}
+
 export function calcSpreads(tick, totalCostPct) {
   const spreadAb = ((tick.aBid - tick.bAsk) / tick.bAsk) * 100;
   const spreadBa = ((tick.bBid - tick.aAsk) / tick.aAsk) * 100;

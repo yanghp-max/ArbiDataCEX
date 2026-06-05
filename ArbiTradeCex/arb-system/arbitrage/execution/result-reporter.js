@@ -24,10 +24,16 @@ function feeCost(qty, aPx, bPx, feeBpsTotal, slippageBpsTotal) {
 }
 
 /** 开仓 / 加仓 PnL（同 backtest execute_open） */
+function fillLegPrices(fill) {
+  return {
+    aPx: fill.aPrice ?? fill.aPriceUsed,
+    bPx: fill.bPrice ?? fill.bPriceUsed
+  };
+}
+
 export function calcOpenPnl(fill, direction, feeBpsTotal = 4, slippageBpsTotal = 4) {
   const qty = fill.qty;
-  const aPx = fill.aPriceUsed;
-  const bPx = fill.bPriceUsed;
+  const { aPx, bPx } = fillLegPrices(fill);
   const gross = direction === '-a+b'
     ? qty * aPx - qty * bPx
     : qty * bPx - qty * aPx;
@@ -37,8 +43,7 @@ export function calcOpenPnl(fill, direction, feeBpsTotal = 4, slippageBpsTotal =
 /** 平仓 PnL（同 backtest calc_close_profit，按 lockedDirection） */
 export function calcClosePnl(fill, lockedDirection, feeBpsTotal = 4, slippageBpsTotal = 4) {
   const qty = fill.qty;
-  const aPx = fill.aPriceUsed;
-  const bPx = fill.bPriceUsed;
+  const { aPx, bPx } = fillLegPrices(fill);
   const gross = lockedDirection === '-a+b'
     ? qty * bPx - qty * aPx
     : qty * aPx - qty * bPx;
@@ -100,16 +105,10 @@ export class ResultReporter {
       direction,
       action,
       lockedDirection: lockedDirection ?? direction,
-      aBidPre: fill.aBidPre,
-      aAskPre: fill.aAskPre,
-      bBidPre: fill.bBidPre,
-      bAskPre: fill.bAskPre,
-      aPricePre: fill.aPricePre,
-      bPricePre: fill.bPricePre,
-      aPriceUsed: fill.aPriceUsed,
-      bPriceUsed: fill.bPriceUsed,
-      aPricePost: fill.aPricePost ?? fill.aPriceUsed,
-      bPricePost: fill.bPricePost ?? fill.bPriceUsed,
+      aSide: fill.aSide,
+      aPrice: fill.aPrice ?? fill.aPriceUsed,
+      bSide: fill.bSide,
+      bPrice: fill.bPrice ?? fill.bPriceUsed,
       qty: fill.qty,
       aFilledQty: fill.aFilledQty,
       bFilledQty: fill.bFilledQty,
@@ -136,14 +135,10 @@ export class ResultReporter {
         action: row.action,
         direction: row.direction,
         locked_direction: row.lockedDirection,
-        a_bid_pre: row.aBidPre,
-        a_ask_pre: row.aAskPre,
-        b_bid_pre: row.bBidPre,
-        b_ask_pre: row.bAskPre,
-        a_price_pre: row.aPricePre,
-        b_price_pre: row.bPricePre,
-        a_price_post: row.aPricePost,
-        b_price_post: row.bPricePost,
+        a_side: row.aSide,
+        a_price: row.aPrice,
+        b_side: row.bSide,
+        b_price: row.bPrice,
         qty: row.qty,
         a_filled_qty: row.aFilledQty,
         b_filled_qty: row.bFilledQty,

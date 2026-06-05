@@ -22,7 +22,6 @@ const {
   spreadClass,
   formatTime,
   formatDuration,
-  formatDetail,
   statusLabel,
   pnlClass,
   formatPnl
@@ -83,6 +82,5 @@ const {
     :fmt="fmt"
     :format-pnl="formatPnl"
     :format-time="formatTime"
-    :format-detail="formatDetail"
   />
 </template>

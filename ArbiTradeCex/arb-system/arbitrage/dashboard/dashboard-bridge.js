@@ -303,7 +303,15 @@ export class DashboardBridge {
 
   recordExecutionStatus(payload) {
     if (!this.enabled) return;
-    if (payload.stage === 'TRADE_DONE' || payload.stage === 'FINAL_SKIP') return;
+    const silentStages = new Set([
+      'TRADE_DONE',
+      'FINAL_SKIP',
+      'MIN_QTY_SKIP',
+      'SIGNAL_STALE',
+      'RESERVE_FAILED',
+      'PRICE_STALE'
+    ]);
+    if (silentStages.has(payload.stage)) return;
     const level = ['RESERVE_FAILED', 'SIGNAL_STALE', 'ZERO_FILL'].includes(payload.stage)
       ? 'warn'
       : ['LEG_EXPOSURE', 'LEG_MISMATCH', 'EXEC_FAILED'].includes(payload.stage)
