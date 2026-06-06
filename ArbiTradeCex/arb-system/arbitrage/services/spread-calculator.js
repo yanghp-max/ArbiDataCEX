@@ -14,44 +14,57 @@ export function tradeLegSides(direction) {
   return { aSide: 'buy', bSide: 'sell' };
 }
 
-/** 默认与 ArbiTrade-1 CEX 腿一致：卖 ×0.9998、买 ×1.0002（各 ~2bps） */
+/** PnL 估算 fallback（真实 fee 优先）；与信号 bps 无关 */
 export const DEFAULT_CEX_FEE_BPS_PER_LEG = 2;
+/** 信号：A=Binance，对齐 ArbiTrade-1 DEX 侧 ~5bps（0.9995 / 1.0005） */
+export const DEFAULT_BINANCE_BPS_PER_LEG = 5;
+/** 信号：B=Gate，对齐 ArbiTrade-1 CEX 侧 ~2bps（0.9998 / 1.0002） */
+export const DEFAULT_GATE_BPS_PER_LEG = 2;
 
-/** 信号 spread + PnL 共用（对齐 ArbiTrade-1，仅 per-leg 手续费） */
-export function resolveCexCostConfig(strategyConfig = {}) {
-  const bps = Number(strategyConfig.cexFeeBpsPerLeg ?? DEFAULT_CEX_FEE_BPS_PER_LEG);
-  return {
-    cexFeeBpsPerLeg: Number.isFinite(bps) && bps >= 0 ? bps : DEFAULT_CEX_FEE_BPS_PER_LEG
-  };
+function clampBps(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 
-function cexLegMultipliers(options = {}) {
-  const bps = Number(options.cexFeeBpsPerLeg ?? DEFAULT_CEX_FEE_BPS_PER_LEG);
-  if (options.cexSellMult != null && options.cexBuyMult != null) {
-    return { sellMult: Number(options.cexSellMult), buyMult: Number(options.cexBuyMult) };
-  }
-  const rate = Number.isFinite(bps) ? bps / 10000 : DEFAULT_CEX_FEE_BPS_PER_LEG / 10000;
-  return { sellMult: 1 - rate, buyMult: 1 + rate };
+/** 单所：卖 ×(1−bps/1e4)，买 ×(1+bps/1e4) */
+function exchangeMults(bps) {
+  const r = bps / 10000;
+  return { sell: 1 - r, buy: 1 + r };
 }
 
 /**
- * 价差计算（对齐 ArbiTrade-1 data-manager：手续费乘在每条腿价格上）
- * - spreadAb/Ba：WS 顶档 raw（展示用）
- * - spreadAbAdj/BaAdj：扣费后 spread（Z 分数 / 开平仓门槛）
+ * binanceBpsPerLeg / gateBpsPerLeg：信号 spread 用（fee+滑点写进这一个数里即可）
+ * cexFeeBpsPerLeg：仅 dry-run（tradingEnabled=false）模拟成交 PnL 时估算手续费
+ */
+export function resolveCexCostConfig(strategyConfig = {}) {
+  return {
+    binanceBpsPerLeg: clampBps(strategyConfig.binanceBpsPerLeg, DEFAULT_BINANCE_BPS_PER_LEG),
+    gateBpsPerLeg: clampBps(strategyConfig.gateBpsPerLeg, DEFAULT_GATE_BPS_PER_LEG),
+    cexFeeBpsPerLeg: clampBps(strategyConfig.cexFeeBpsPerLeg, DEFAULT_CEX_FEE_BPS_PER_LEG)
+  };
+}
+
+/**
+ * 对齐 ArbiTrade-1 data-manager（A↔dex，B↔cex）：
  *
- * -a+b: A 卖 bid × sellMult, B 买 ask × buyMult
- * +a-b: B 卖 bid × sellMult, A 买 ask × buyMult
+ *   spread_ab = (A_bid×(1−bn/1e4) − B_ask×(1+gt/1e4)) / (B_ask×(1+gt/1e4)) × 100
+ *   spread_ba = (B_bid×(1−gt/1e4) − A_ask×(1+bn/1e4)) / (A_ask×(1+bn/1e4)) × 100
+ *
+ * bn = binanceBpsPerLeg，gt = gateBpsPerLeg
  */
 export function calcSpreads(tick, options = {}) {
-  const { sellMult, buyMult } = cexLegMultipliers(options);
+  const bn = clampBps(options.binanceBpsPerLeg, DEFAULT_BINANCE_BPS_PER_LEG);
+  const gt = clampBps(options.gateBpsPerLeg, DEFAULT_GATE_BPS_PER_LEG);
+  const a = exchangeMults(bn);
+  const b = exchangeMults(gt);
 
   const spreadAb = ((tick.aBid - tick.bAsk) / tick.bAsk) * 100;
   const spreadBa = ((tick.bBid - tick.aAsk) / tick.aAsk) * 100;
 
-  const aBidEff = tick.aBid * sellMult;
-  const aAskEff = tick.aAsk * buyMult;
-  const bBidEff = tick.bBid * sellMult;
-  const bAskEff = tick.bAsk * buyMult;
+  const aBidEff = tick.aBid * a.sell;
+  const aAskEff = tick.aAsk * a.buy;
+  const bBidEff = tick.bBid * b.sell;
+  const bAskEff = tick.bAsk * b.buy;
 
   const spreadAbAdj = ((aBidEff - bAskEff) / bAskEff) * 100;
   const spreadBaAdj = ((bBidEff - aAskEff) / aAskEff) * 100;

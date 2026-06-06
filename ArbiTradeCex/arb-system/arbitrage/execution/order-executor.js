@@ -6,7 +6,7 @@
  */
 import { OrderStatus } from '../../cex/types.js';
 import { calcSpreads, legPricesForDirection, tradeLegSides } from '../services/spread-calculator.js';
-import { buildLegPnl } from './cex-leg-pnl.js';
+import { buildLegPnl, isFillPnlComplete } from './cex-leg-pnl.js';
 import { markLatency } from '../monitoring/trade-latency.js';
 
 function quoteSnapshot(direction, tick, spreadOptions = {}) {
@@ -26,6 +26,8 @@ function quoteSnapshot(direction, tick, spreadOptions = {}) {
 
 const POLL_ATTEMPTS = 5;
 const POLL_INTERVAL_MS = 150;
+const TRADE_FETCH_ATTEMPTS = 8;
+const TRADE_FETCH_INTERVAL_MS = 250;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -102,6 +104,7 @@ export class OrderExecutor {
         bFilledQty: qty,
         aLeg,
         bLeg,
+        pnlComplete: true,
         legMismatch: false,
         legExposure: false
       };
@@ -187,10 +190,20 @@ export class OrderExecutor {
       : null;
 
     if (aOrder && aFilled > 0) {
-      aOrder.fee = await this.#fetchOrderFee('binance', aOrder, tick.symbol);
+      if (!(Number(aOrder.cumQuote) > 0) && aPricePost > 0) {
+        aOrder = { ...aOrder, cumQuote: aFilled * aPricePost };
+      }
+      const aTrades = await this.#fetchOrderTradesWithRetry('binance', aOrder.orderId, tick.symbol);
+      aOrder = { ...aOrder, trades: aTrades };
     }
     if (bOrder && bFilledBase > 0) {
-      bOrder.fee = await this.#fetchOrderFee('gate', bOrder, tick.symbol);
+      if (!(Number(bOrder.cumQuote) > 0) && bPricePost > 0) {
+        bOrder = { ...bOrder, cumQuote: bFilledBase * bPricePost };
+      }
+      const bTrades = await this.#fetchOrderTradesWithRetry('gate', bOrder.orderId, tick.symbol, {
+        decimalSize: gateDecimalSize
+      });
+      bOrder = { ...bOrder, trades: bTrades };
     }
 
     const aLeg = aFilled > 0
@@ -199,20 +212,23 @@ export class OrderExecutor {
         side: aSide,
         filledQty: aFilled,
         order: aOrder,
-        feeBpsFallback: cexFeeBpsPerLeg
+        trades: aOrder?.trades,
+        requireRealFee: true
       })
-      : { exchange: 'binance', side: aSide, filledQty: 0, usdtChange: 0, quoteVolume: 0, fee: 0, filled: false };
+      : { exchange: 'binance', side: aSide, filledQty: 0, usdtChange: 0, quoteVolume: 0, fee: 0, filled: false, pnlComplete: false };
     const bLeg = bFilledBase > 0
       ? buildLegPnl({
         exchange: 'gate',
         side: bSide,
         filledQty: bFilledBase,
         order: bOrder,
-        feeBpsFallback: cexFeeBpsPerLeg
+        trades: bOrder?.trades,
+        quantoMultiplier: order.gateQuantoMultiplier,
+        requireRealFee: true
       })
-      : { exchange: 'gate', side: bSide, filledQty: 0, usdtChange: 0, quoteVolume: 0, fee: 0, filled: false };
+      : { exchange: 'gate', side: bSide, filledQty: 0, usdtChange: 0, quoteVolume: 0, fee: 0, filled: false, pnlComplete: false };
 
-    return {
+    const fill = {
       simulated: false,
       aOrderId: aOrder ? String(aOrder.orderId) : null,
       bOrderId: bOrder ? String(bOrder.orderId) : null,
@@ -228,22 +244,41 @@ export class OrderExecutor {
       bFilledQty: bFilledBase,
       aLeg,
       bLeg,
+      pnlComplete: isFillPnlComplete({ aLeg, bLeg }),
       legMismatch,
       legExposure,
       failedLeg,
       failReason,
       latencyTrace
     };
+
+    if (!fill.pnlComplete) {
+      const missing = [];
+      if (aLeg.filled && aLeg.pnlComplete === false) missing.push('Binance');
+      if (bLeg.filled && bLeg.pnlComplete === false) missing.push('Gate');
+      console.warn(
+        `[OrderExecutor] 真实 PnL 不完整（未拿到成交 fee）: ${tick.symbol} ${missing.join(', ')}`
+      );
+    }
+
+    return fill;
   }
 
-  async #fetchOrderFee(exchange, order, symbol) {
-    try {
-      const fee = await this.cexManager.getOrderCommission(exchange, order.orderId, symbol);
-      if (Number.isFinite(fee) && fee >= 0) return fee;
-    } catch (err) {
-      console.warn(`[OrderExecutor] ${exchange} fee fetch failed order=${order.orderId}: ${err.message}`);
+  async #fetchOrderTradesWithRetry(exchange, orderId, symbol, options = {}) {
+    for (let i = 0; i < TRADE_FETCH_ATTEMPTS; i += 1) {
+      try {
+        const trades = await this.cexManager.getOrderTrades(exchange, orderId, symbol, options);
+        if (Array.isArray(trades) && trades.length > 0) {
+          return trades;
+        }
+      } catch (err) {
+        console.warn(`[OrderExecutor] ${exchange} trades fetch failed order=${orderId}: ${err.message}`);
+      }
+      if (i < TRADE_FETCH_ATTEMPTS - 1) {
+        await sleep(TRADE_FETCH_INTERVAL_MS);
+      }
     }
-    return null;
+    return [];
   }
 
   async #ensureOrderFill(exchange, order, symbol, requestedQty, gateDecimalSize = false) {

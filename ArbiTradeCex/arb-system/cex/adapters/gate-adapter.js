@@ -534,6 +534,7 @@ export class GateAdapter extends BaseAdapter {
     }
     const headers = orderData.decimalSize ? { 'X-Gate-Size-Decimal': '1' } : {};
     const response = await this.#signedRequest('POST', '/futures/usdt/orders', body, headers);
+    const filled = this.#parseGateFilled(response);
     return new Order({
       orderId: String(response.id),
       clientOrderId: response.text,
@@ -544,9 +545,10 @@ export class GateAdapter extends BaseAdapter {
       amount: Math.abs(Number(orderData.amount)),
       price: Number(response.price || orderData.price || 0),
       status: this.#mapOrderStatus(response.status),
-      filled: this.#parseGateFilled(response),
+      filled,
       timestamp: Date.now(),
-      avgPrice: Number(response.fill_price || 0)
+      avgPrice: Number(response.fill_price || 0),
+      cumQuote: this.#gateOrderCumQuote(response, contract, filled, orderData.decimalSize)
     });
   }
 
@@ -573,6 +575,7 @@ export class GateAdapter extends BaseAdapter {
     if (response?.contract && response.contract !== contract) {
       throw new Error(`Order ${orderId} contract mismatch`);
     }
+    const filled = this.#parseGateFilled(response);
     return new Order({
       orderId: String(response.id),
       clientOrderId: response.text,
@@ -583,9 +586,10 @@ export class GateAdapter extends BaseAdapter {
       amount: Math.abs(Number(response.size || 0)),
       price: Number(response.price || 0),
       status: this.#mapOrderStatus(response.status),
-      filled: this.#parseGateFilled(response),
+      filled,
       timestamp: Number(response.create_time || Date.now()) * 1000,
-      avgPrice: Number(response.fill_price || 0)
+      avgPrice: Number(response.fill_price || 0),
+      cumQuote: this.#gateOrderCumQuote(response, contract, filled, false)
     });
   }
 
@@ -608,18 +612,43 @@ export class GateAdapter extends BaseAdapter {
     }));
   }
 
-  /** 汇总订单成交手续费（USDT） */
-  async getOrderCommission(orderId, symbol) {
+  #gateOrderCumQuote(response, contract, filledContracts, decimalSize = false) {
+    const filled = Number(filledContracts);
+    const avgPrice = Number(response.fill_price || 0);
+    if (!(filled > 0) || !(avgPrice > 0)) return 0;
+    if (decimalSize) return filled * avgPrice;
+    const mult = this.#getContractMultiplier(contract);
+    return filled * mult * avgPrice;
+  }
+
+  /** 订单成交明细（PnL 真实 quote / fee 来源） */
+  async getOrderTrades(orderId, symbol, options = {}) {
     const contract = this.toGateContract(symbol);
     const rows = await this.#signedRequest('GET', '/futures/usdt/my_trades', {
       contract,
       order: orderId
     });
-    let fee = 0;
-    for (const row of rows || []) {
-      fee += Math.abs(Number(row.fee || 0));
-    }
-    return fee;
+    const mult = this.#getContractMultiplier(contract);
+    const decimalSize = Boolean(options.decimalSize);
+    return (rows || []).map((row) => {
+      const contracts = Math.abs(Number(row.size || 0));
+      const price = Number(row.price || 0);
+      const baseQty = decimalSize ? contracts : contracts * mult;
+      return {
+        contracts,
+        price,
+        baseQty,
+        quoteQty: baseQty * price,
+        fee: Math.abs(Number(row.fee || 0)) + Math.abs(Number(row.point_fee || 0)),
+        feeAsset: 'USDT'
+      };
+    });
+  }
+
+  /** 汇总订单成交手续费（USDT） */
+  async getOrderCommission(orderId, symbol, options = {}) {
+    const trades = await this.getOrderTrades(orderId, symbol, options);
+    return trades.reduce((sum, row) => sum + row.fee, 0);
   }
 
   async checkOrder(orderData) {

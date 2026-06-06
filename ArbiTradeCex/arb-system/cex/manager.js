@@ -72,12 +72,20 @@ export class CexManager {
     return this.#requireAdapter(exchange).getOrderHistory(symbol, limit);
   }
 
-  async getOrderCommission(exchange, orderId, symbol) {
+  async getOrderCommission(exchange, orderId, symbol, options = {}) {
     const adapter = this.#requireAdapter(exchange);
     if (typeof adapter.getOrderCommission !== 'function') {
       return null;
     }
-    return adapter.getOrderCommission(orderId, symbol);
+    return adapter.getOrderCommission(orderId, symbol, options);
+  }
+
+  async getOrderTrades(exchange, orderId, symbol, options = {}) {
+    const adapter = this.#requireAdapter(exchange);
+    if (typeof adapter.getOrderTrades !== 'function') {
+      return [];
+    }
+    return adapter.getOrderTrades(orderId, symbol, options);
   }
 
   async getBalance(exchange, options = {}) {

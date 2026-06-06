@@ -7,8 +7,8 @@ import {
 
 /**
  * PnL — 对齐 ArbiTrade-1 pnl-csv-manager：
- *   netPnL = legA.usdtChange + legB.usdtChange
- * 手续费、滑点已体现在各腿 usdtChange（来自成交价 + 真实/估算 fee）
+ *   netPnL = legA.usdtChange + legB.usdtChange（仅真实成交 fee 确认后计入累计）
+ * 手续费、滑点已体现在各腿 usdtChange（来自成交价 + 交易所成交回执）
  */
 
 export function calcTradePnl(fill) {
@@ -55,11 +55,14 @@ export class ResultReporter {
     dashboardBridge,
     latencyTrace = null
   }) {
-    this.cumPnl += netPnl;
+    const pnlComplete = fill?.pnlComplete !== false && netPnl != null && Number.isFinite(netPnl);
+    if (pnlComplete) {
+      this.cumPnl += netPnl;
+      if (netPnl >= 0) this.winCount += 1;
+      else this.lossCount += 1;
+      this.bySymbol[symbol] = (this.bySymbol[symbol] ?? 0) + netPnl;
+    }
     this.tradeCount += 1;
-    if (netPnl >= 0) this.winCount += 1;
-    else this.lossCount += 1;
-    this.bySymbol[symbol] = (this.bySymbol[symbol] ?? 0) + netPnl;
 
     const ts = Date.now();
     const quote = fill.quote ?? {};
@@ -110,6 +113,7 @@ export class ResultReporter {
       feeCost,
       netPnl,
       cumPnl: this.cumPnl,
+      pnlComplete,
       simulated: Boolean(fill.simulated),
       legMismatch: Boolean(fill.legMismatch),
       legExposure: Boolean(fill.legExposure),
@@ -124,9 +128,15 @@ export class ResultReporter {
       this.trades.splice(0, this.trades.length - 500);
     }
     console.log('[TRADE]', JSON.stringify(row));
-    console.log(
-      `[PNL] total=${this.cumPnl.toFixed(4)} USDT · trades=${this.tradeCount} · latest=${netPnl.toFixed(4)} (${symbol})`
-    );
+    if (pnlComplete) {
+      console.log(
+        `[PNL] total=${this.cumPnl.toFixed(4)} USDT · trades=${this.tradeCount} · latest=${netPnl.toFixed(4)} (${symbol})`
+      );
+    } else {
+      console.warn(
+        `[PNL] 跳过累计（fee 未确认）· trades=${this.tradeCount} · ${symbol} quote=${(aLeg.quoteVolume ?? 0).toFixed(4)}/${(bLeg.quoteVolume ?? 0).toFixed(4)}`
+      );
+    }
     dashboardBridge?.recordTrade(row, this.getSummary());
     if (this.tradeCsvWriter && !row.simulated) {
       this.tradeCsvWriter.appendRow({
@@ -161,6 +171,7 @@ export class ResultReporter {
         fee_cost: row.feeCost,
         net_pnl: row.netPnl,
         cum_pnl: row.cumPnl,
+        pnl_complete: row.pnlComplete,
         a_pos_qty: row.aPosQty,
         b_pos_qty: row.bPosQty,
         leg_mismatch: row.legMismatch,

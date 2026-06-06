@@ -26,7 +26,8 @@ import {
 import { calcTradePnl, calcTradeGross } from '../execution/result-reporter.js';
 import {
   createTradeLatencyTrace,
-  formatLatencyLogLines
+  formatLatencyLogLines,
+  setFreshTickOnLatencyTrace
 } from '../monitoring/trade-latency.js';
 
 function formatFilledLegLine(exchange, side, quoteBid, quoteAsk, fillPrice, qty) {
@@ -371,6 +372,8 @@ export class CexCexTask {
         return;
       }
 
+      setFreshTickOnLatencyTrace(latencyTrace, freshTick);
+
       let fill;
       try {
         fill = await this.sr.orderExecutor.executeBothLegs({
@@ -450,32 +453,40 @@ export class CexCexTask {
             fill.bFilledQty
           ));
         }
+        const pnlTag = fill.pnlComplete === false || netPnl == null
+          ? 'pnl=待确认(未拿到成交fee)'
+          : `pnl=${netPnl.toFixed(4)} USDT`;
         console.log(
-          `[实盘·成交·${legTag}] ${symbol} ${action} ${execDirection}`
-          + ` pnl=${netPnl.toFixed(4)} USDT`
+          `[实盘·成交·${legTag}] ${symbol} ${action} ${execDirection} ${pnlTag}`
         );
         for (const line of legLines) {
           console.log(line);
         }
         const gross = calcTradeGross(fill);
-        if (gross != null && Number.isFinite(gross)) {
-          console.log(
-            `  实际利润 毛${gross >= 0 ? '+' : ''}${gross.toFixed(4)}`
-            + ` · 净${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(4)} USDT`
-          );
+        if (netPnl != null && Number.isFinite(netPnl)) {
+          if (gross != null && Number.isFinite(gross)) {
+            console.log(
+              `  实际利润 毛${gross >= 0 ? '+' : ''}${gross.toFixed(4)}`
+              + ` · 净${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(4)} USDT（回执）`
+            );
+          } else {
+            console.log(`  实际利润 净${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(4)} USDT（回执·单腿）`);
+          }
         } else {
-          console.log(`  实际利润 净${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(4)} USDT（单腿）`);
+          console.warn(`  实际利润 未计入累计：成交 fee 回执未就绪，请稍后查交易所 my_trades`);
         }
         if (fill.aLeg?.filled) {
+          const feeTag = fill.aLeg.pnlComplete === false ? 'fee待确认' : `fee ${Number(fill.aLeg.fee || 0).toFixed(4)}`;
           console.log(
             `  Binance USDT ${fill.aLeg.usdtChange >= 0 ? '+' : ''}${fill.aLeg.usdtChange.toFixed(4)}`
-            + ` (fee ${Number(fill.aLeg.fee || 0).toFixed(4)})`
+            + ` (${feeTag} · quote ${Number(fill.aLeg.quoteVolume || 0).toFixed(4)})`
           );
         }
         if (fill.bLeg?.filled) {
+          const feeTag = fill.bLeg.pnlComplete === false ? 'fee待确认' : `fee ${Number(fill.bLeg.fee || 0).toFixed(4)}`;
           console.log(
             `  Gate USDT ${fill.bLeg.usdtChange >= 0 ? '+' : ''}${fill.bLeg.usdtChange.toFixed(4)}`
-            + ` (fee ${Number(fill.bLeg.fee || 0).toFixed(4)})`
+            + ` (${feeTag} · quote ${Number(fill.bLeg.quoteVolume || 0).toFixed(4)})`
           );
         }
         if (fill.legExposure) {

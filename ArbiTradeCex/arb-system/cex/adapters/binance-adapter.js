@@ -464,18 +464,27 @@ export class BinanceAdapter extends BaseAdapter {
     }));
   }
 
-  /** 汇总订单成交手续费（USDT） */
-  async getOrderCommission(orderId, symbol) {
+  /** 订单成交明细（PnL 真实 quote / fee 来源） */
+  async getOrderTrades(orderId, symbol) {
     const rows = await this.#signedRequest('GET', '/papi/v1/um/userTrades', {
       symbol: this.toExchangeSymbol(symbol),
       orderId
     });
+    return (rows || []).map((row) => ({
+      qty: Math.abs(Number(row.qty || 0)),
+      price: Number(row.price || 0),
+      quoteQty: Math.abs(Number(row.quoteQty || 0)),
+      fee: Math.abs(Number(row.commission || 0)),
+      feeAsset: String(row.commissionAsset || 'USDT').toUpperCase()
+    }));
+  }
+
+  /** 汇总订单成交手续费（USDT） */
+  async getOrderCommission(orderId, symbol) {
+    const trades = await this.getOrderTrades(orderId, symbol);
     let fee = 0;
-    for (const row of rows || []) {
-      const asset = String(row.commissionAsset || 'USDT').toUpperCase();
-      if (asset === 'USDT') {
-        fee += Math.abs(Number(row.commission || 0));
-      }
+    for (const row of trades) {
+      if (row.feeAsset === 'USDT') fee += row.fee;
     }
     return fee;
   }
