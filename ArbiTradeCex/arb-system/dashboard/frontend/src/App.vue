@@ -24,7 +24,9 @@ const {
   formatDuration,
   statusLabel,
   pnlClass,
-  formatPnl
+  formatPnl,
+  formatTotalPnl,
+  totalPnlClass
 } = useFormatters();
 </script>
 
@@ -35,6 +37,8 @@ const {
     :use-mock-account="state.useMockAccount"
     :pnl-summary="pnlSummary"
     :format-pnl="formatPnl"
+    :format-total-pnl="formatTotalPnl"
+    :total-pnl-class="totalPnlClass"
     :pnl-class="pnlClass"
   />
 
@@ -42,6 +46,8 @@ const {
     :pnl-summary="pnlSummary"
     :pnl-by-symbol-rows="pnlBySymbolRows"
     :format-pnl="formatPnl"
+    :format-total-pnl="formatTotalPnl"
+    :total-pnl-class="totalPnlClass"
     :pnl-class="pnlClass"
   />
 
@@ -60,6 +66,8 @@ const {
     :pnl-summary="pnlSummary"
     :format-duration="formatDuration"
     :format-pnl="formatPnl"
+    :format-total-pnl="formatTotalPnl"
+    :total-pnl-class="totalPnlClass"
     :pnl-class="pnlClass"
   />
 
@@ -82,6 +90,7 @@ const {
     :fmt="fmt"
     :fmt-pct="fmtPct"
     :format-pnl="formatPnl"
+    :format-total-pnl="formatTotalPnl"
     :format-time="formatTime"
     :pnl-class="pnlClass"
   />

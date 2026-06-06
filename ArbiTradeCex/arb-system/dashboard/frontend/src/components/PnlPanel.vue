@@ -3,6 +3,8 @@ defineProps({
   pnlSummary: { type: Object, required: true },
   pnlBySymbolRows: { type: Array, required: true },
   formatPnl: { type: Function, required: true },
+  formatTotalPnl: { type: Function, required: true },
+  totalPnlClass: { type: Function, required: true },
   pnlClass: { type: Function, required: true }
 });
 </script>
@@ -11,8 +13,8 @@ defineProps({
   <section class="pnl-panel">
     <div class="pnl-main">
       <div class="pnl-label">累计 PnL</div>
-      <div class="pnl-value" :class="pnlClass(pnlSummary.totalPnl)">
-        {{ formatPnl(pnlSummary.totalPnl) }} <small>USDT</small>
+      <div class="pnl-value" :class="totalPnlClass(pnlSummary)">
+        {{ formatTotalPnl(pnlSummary) }} <small>USDT</small>
       </div>
     </div>
     <div class="pnl-stats">
@@ -23,6 +25,10 @@ defineProps({
       <div class="pnl-stat">
         <span class="pnl-stat-label">盈利 / 亏损</span>
         <strong>{{ pnlSummary.winCount }} / {{ pnlSummary.lossCount }}</strong>
+      </div>
+      <div v-if="pnlSummary.pendingCount > 0" class="pnl-stat">
+        <span class="pnl-stat-label">待确认</span>
+        <strong>{{ pnlSummary.pendingCount }}</strong>
       </div>
     </div>
     <div v-if="pnlBySymbolRows.length" class="pnl-by-symbol">

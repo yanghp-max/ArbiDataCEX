@@ -58,6 +58,30 @@ export function useFormatters() {
     return `${sign}${fmt(n, 4)}`;
   }
 
+  /** 顶部/日志汇总：有待确认时不显示假 0 */
+  function formatTotalPnl(summary) {
+    const pending = Number(summary?.pendingCount) || 0;
+    const confirmed = Number(summary?.confirmedCount);
+    const total = summary?.totalPnl;
+    const hasConfirmed = Number.isFinite(confirmed)
+      ? confirmed > 0
+      : Number.isFinite(Number(total)) && pending < (Number(summary?.tradeCount) || 0);
+    if (pending > 0 && !hasConfirmed) return '待确认';
+    const base = formatPnl(total ?? 0);
+    if (pending > 0) return `${base}（${pending}笔待确认）`;
+    return base;
+  }
+
+  function totalPnlClass(summary) {
+    const pending = Number(summary?.pendingCount) || 0;
+    const confirmed = Number(summary?.confirmedCount);
+    const hasConfirmed = Number.isFinite(confirmed)
+      ? confirmed > 0
+      : Number.isFinite(Number(summary?.totalPnl)) && pending < (Number(summary?.tradeCount) || 0);
+    if (pending > 0 && !hasConfirmed) return 'flat';
+    return pnlClass(summary?.totalPnl);
+  }
+
   return {
     fmt,
     fmtPct,
@@ -67,6 +91,8 @@ export function useFormatters() {
     formatDetail,
     statusLabel,
     pnlClass,
-    formatPnl
+    formatPnl,
+    formatTotalPnl,
+    totalPnlClass
   };
 }

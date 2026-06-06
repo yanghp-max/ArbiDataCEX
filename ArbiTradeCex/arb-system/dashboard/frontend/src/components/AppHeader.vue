@@ -5,6 +5,8 @@ defineProps({
   useMockAccount: { type: Boolean, required: true },
   pnlSummary: { type: Object, required: true },
   formatPnl: { type: Function, required: true },
+  formatTotalPnl: { type: Function, required: true },
+  totalPnlClass: { type: Function, required: true },
   pnlClass: { type: Function, required: true }
 });
 </script>
@@ -19,8 +21,8 @@ defineProps({
       <span class="badge" :class="connected ? 'ok' : 'err'">{{ connected ? 'WS 已连接' : 'WS 断开' }}</span>
       <span class="badge" :class="tradingEnabled ? 'warn' : 'muted'">{{ tradingEnabled ? 'LIVE' : 'DRY-RUN' }}</span>
       <span v-if="useMockAccount" class="badge muted">Mock 余额</span>
-      <span class="badge pnl" :class="pnlClass(pnlSummary.totalPnl)">
-        总 PnL {{ formatPnl(pnlSummary.totalPnl) }} USDT
+      <span class="badge pnl" :class="totalPnlClass(pnlSummary)">
+        总 PnL {{ formatTotalPnl(pnlSummary) }} USDT
       </span>
     </div>
   </header>

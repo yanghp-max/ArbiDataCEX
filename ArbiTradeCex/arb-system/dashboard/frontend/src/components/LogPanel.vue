@@ -6,6 +6,7 @@ const props = defineProps({
   pnlSummary: { type: Object, required: true },
   fmt: { type: Function, required: true },
   formatPnl: { type: Function, required: true },
+  formatTotalPnl: { type: Function, required: true },
   formatTime: { type: Function, required: true },
   fmtPct: { type: Function, required: true },
   pnlClass: { type: Function, required: true }
@@ -124,7 +125,7 @@ const combinedLogs = computed(() => {
     <div class="log-head">
       <h2>运行日志</h2>
       <span>
-        总 PnL {{ formatPnl(pnlSummary.totalPnl) }} USDT ·
+        总 PnL {{ formatTotalPnl(pnlSummary) }} USDT ·
         {{ pnlSummary.tradeCount }} 笔成交
       </span>
     </div>

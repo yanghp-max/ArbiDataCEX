@@ -30,6 +30,7 @@ export class ResultReporter {
     this.tradeCount = 0;
     this.winCount = 0;
     this.lossCount = 0;
+    this.pendingPnlCount = 0;
     this.bySymbol = {};
     this.trades = [];
   }
@@ -40,6 +41,8 @@ export class ResultReporter {
       tradeCount: this.tradeCount,
       winCount: this.winCount,
       lossCount: this.lossCount,
+      pendingCount: this.pendingPnlCount,
+      confirmedCount: this.winCount + this.lossCount,
       bySymbol: { ...this.bySymbol }
     };
   }
@@ -63,6 +66,7 @@ export class ResultReporter {
       this.bySymbol[symbol] = (this.bySymbol[symbol] ?? 0) + netPnl;
     }
     this.tradeCount += 1;
+    if (!pnlComplete) this.pendingPnlCount += 1;
 
     const ts = Date.now();
     const quote = fill.quote ?? {};

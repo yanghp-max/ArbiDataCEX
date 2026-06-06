@@ -111,28 +111,53 @@ export function useDashboardWs() {
 
   const pnlSummary = computed(() => {
     const s = state.summary || {};
+    const trades = state.trades || [];
+    const pendingFromTrades = trades.filter(
+      (t) => t.pnlComplete === false || t.netPnl == null
+    ).length;
+
     if (Number.isFinite(Number(s.totalPnl))) {
+      const pendingCount = s.pendingCount ?? pendingFromTrades;
+      const confirmedCount = s.confirmedCount ?? Math.max(0, (s.tradeCount ?? trades.length) - pendingCount);
       return {
         totalPnl: Number(s.totalPnl),
-        tradeCount: s.tradeCount ?? 0,
+        tradeCount: s.tradeCount ?? trades.length,
         winCount: s.winCount ?? 0,
         lossCount: s.lossCount ?? 0,
+        pendingCount,
+        confirmedCount,
         bySymbol: s.bySymbol ?? {}
       };
     }
-    const trades = state.trades || [];
     let totalPnl = 0;
     let winCount = 0;
     let lossCount = 0;
+    let pendingCount = 0;
     const bySymbol = {};
     for (const t of trades) {
-      const net = Number(t.netPnl) || 0;
+      if (t.pnlComplete === false || t.netPnl == null) {
+        pendingCount += 1;
+        continue;
+      }
+      const net = Number(t.netPnl);
+      if (!Number.isFinite(net)) {
+        pendingCount += 1;
+        continue;
+      }
       totalPnl += net;
       if (net >= 0) winCount += 1;
       else lossCount += 1;
       bySymbol[t.symbol] = (bySymbol[t.symbol] ?? 0) + net;
     }
-    return { totalPnl, tradeCount: trades.length, winCount, lossCount, bySymbol };
+    return {
+      totalPnl,
+      tradeCount: trades.length,
+      winCount,
+      lossCount,
+      pendingCount,
+      confirmedCount: winCount + lossCount,
+      bySymbol
+    };
   });
 
   const pnlBySymbolRows = computed(() =>

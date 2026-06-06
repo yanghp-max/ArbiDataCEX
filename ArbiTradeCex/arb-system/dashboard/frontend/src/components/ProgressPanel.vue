@@ -4,6 +4,8 @@ defineProps({
   pnlSummary: { type: Object, required: true },
   formatDuration: { type: Function, required: true },
   formatPnl: { type: Function, required: true },
+  formatTotalPnl: { type: Function, required: true },
+  totalPnlClass: { type: Function, required: true },
   pnlClass: { type: Function, required: true }
 });
 </script>
@@ -13,12 +15,13 @@ defineProps({
     <div class="pnl-banner">
       <div class="pnl-banner-main">
         <span class="pnl-banner-label">累计 PnL</span>
-        <strong class="pnl-banner-value" :class="pnlClass(pnlSummary.totalPnl)">
-          {{ formatPnl(pnlSummary.totalPnl) }} USDT
+        <strong class="pnl-banner-value" :class="totalPnlClass(pnlSummary)">
+          {{ formatTotalPnl(pnlSummary) }} USDT
         </strong>
       </div>
       <div class="pnl-banner-meta">
         {{ pnlSummary.tradeCount }} 笔成交 · 赢 {{ pnlSummary.winCount }} / 亏 {{ pnlSummary.lossCount }}
+        <template v-if="pnlSummary.pendingCount > 0"> · {{ pnlSummary.pendingCount }} 笔待确认</template>
       </div>
     </div>
 
