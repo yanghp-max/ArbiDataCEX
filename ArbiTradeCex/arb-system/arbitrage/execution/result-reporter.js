@@ -1,3 +1,5 @@
+import { latencyCsvFields } from '../monitoring/trade-latency.js';
+
 /**
  * PnL 计算 — 与 backtest_cex_cex_open_only.py 完全一致
  *
@@ -132,7 +134,8 @@ export class ResultReporter {
     feeBpsTotal = 4,
     slippageBpsTotal = 4,
     accountCache,
-    dashboardBridge
+    dashboardBridge,
+    latencyTrace = null
   }) {
     this.cumPnl += netPnl;
     this.tradeCount += 1;
@@ -194,7 +197,8 @@ export class ResultReporter {
       failedLeg: fill.failedLeg ?? null,
       failReason: fill.failReason ?? null,
       aPosQty: accountCache.getPosition('binance', symbol),
-      bPosQty: accountCache.getPosition('gate', symbol)
+      bPosQty: accountCache.getPosition('gate', symbol),
+      latency: latencyCsvFields(latencyTrace)
     };
     this.trades.push(row);
     if (this.trades.length > 500) {
@@ -239,7 +243,8 @@ export class ResultReporter {
         leg_mismatch: row.legMismatch,
         leg_exposure: row.legExposure,
         failed_leg: row.failedLeg,
-        fail_reason: row.failReason
+        fail_reason: row.failReason,
+        ...(row.latency ?? {})
       }).catch((err) => {
         console.error('[ResultReporter] failed to write trade CSV:', err.message);
       });

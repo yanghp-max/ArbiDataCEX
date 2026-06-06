@@ -6,6 +6,7 @@
  */
 import { OrderStatus } from '../../cex/types.js';
 import { calcSpreads, legPricesForDirection, tradeLegSides } from '../services/spread-calculator.js';
+import { markLatency, setLegLatency } from '../monitoring/trade-latency.js';
 
 function quoteSnapshot(direction, tick, totalCostPct = 0) {
   const nominal = legPricesForDirection(direction, tick);
@@ -51,7 +52,14 @@ export class OrderExecutor {
     this.tradingEnabled = tradingEnabled;
   }
 
-  async executeBothLegs({ direction, tick, order, reduceOnly = false, lockedDirection = null }) {
+  async executeBothLegs({
+    direction,
+    tick,
+    order,
+    reduceOnly = false,
+    lockedDirection = null,
+    latencyTrace = null
+  }) {
     const { qty, gateSize, gateDecimalSize } = order;
     const { aSide, bSide } = tradeLegSides(direction);
     const positionDirection = lockedDirection ?? direction;
@@ -82,26 +90,50 @@ export class OrderExecutor {
     }
 
     const fallback = legPricesForDirection(direction, tick);
-    const [aResult, bResult] = await Promise.allSettled([
-      this.cexManager.placeOrder('binance', {
-        symbol: tick.symbol,
-        side: binanceSide,
-        type: 'market',
-        amount: qty,
-        stepSize: binanceStepSize,
-        reduceOnly,
-        positionDirection,
-        positionSide: binancePositionSide
-      }),
-      this.cexManager.placeOrder('gate', {
-        symbol: tick.symbol,
-        side: gateSide,
-        type: 'market',
-        amount: gateSize,
-        decimalSize: gateDecimalSize,
-        reduceOnly
-      })
-    ]);
+    markLatency(latencyTrace, 'order_send_start');
+
+    const placeBinance = async () => {
+      const t0 = Date.now();
+      try {
+        const orderResult = await this.cexManager.placeOrder('binance', {
+          symbol: tick.symbol,
+          side: binanceSide,
+          type: 'market',
+          amount: qty,
+          stepSize: binanceStepSize,
+          reduceOnly,
+          positionDirection,
+          positionSide: binancePositionSide
+        });
+        setLegLatency(latencyTrace, 'binance', { placeMs: Date.now() - t0 });
+        return orderResult;
+      } catch (err) {
+        setLegLatency(latencyTrace, 'binance', { placeMs: Date.now() - t0 });
+        throw err;
+      }
+    };
+
+    const placeGate = async () => {
+      const t0 = Date.now();
+      try {
+        const orderResult = await this.cexManager.placeOrder('gate', {
+          symbol: tick.symbol,
+          side: gateSide,
+          type: 'market',
+          amount: gateSize,
+          decimalSize: gateDecimalSize,
+          reduceOnly
+        });
+        setLegLatency(latencyTrace, 'gate', { placeMs: Date.now() - t0 });
+        return orderResult;
+      } catch (err) {
+        setLegLatency(latencyTrace, 'gate', { placeMs: Date.now() - t0 });
+        throw err;
+      }
+    };
+
+    const [aResult, bResult] = await Promise.allSettled([placeBinance(), placeGate()]);
+    markLatency(latencyTrace, 'order_place_done');
 
     if (aResult.status === 'rejected' && bResult.status === 'rejected') {
       throw new Error(
@@ -123,11 +155,16 @@ export class OrderExecutor {
         : null;
 
     if (aOrder) {
-      aOrder = await this.#ensureOrderFill('binance', aOrder, tick.symbol, qty);
+      const polled = await this.#ensureOrderFill('binance', aOrder, tick.symbol, qty);
+      aOrder = polled.order;
+      setLegLatency(latencyTrace, 'binance', { pollMs: polled.pollMs });
     }
     if (bOrder) {
-      bOrder = await this.#ensureOrderFill('gate', bOrder, tick.symbol, gateSize, gateDecimalSize);
+      const polled = await this.#ensureOrderFill('gate', bOrder, tick.symbol, gateSize, gateDecimalSize);
+      bOrder = polled.order;
+      setLegLatency(latencyTrace, 'gate', { pollMs: polled.pollMs });
     }
+    markLatency(latencyTrace, 'order_poll_done');
 
     const aFilled = aOrder ? readFilled(aOrder, qty) : 0;
     const bFilledBase = bOrder ? gateFillToBaseQty(readFilled(bOrder, gateSize), order) : 0;
@@ -172,12 +209,15 @@ export class OrderExecutor {
       legMismatch,
       legExposure,
       failedLeg,
-      failReason
+      failReason,
+      latencyTrace
     };
   }
 
   async #ensureOrderFill(exchange, order, symbol, requestedQty, gateDecimalSize = false) {
+    const pollStart = Date.now();
     let current = order;
+    let polled = false;
     const needsPoll = () => {
       const filled = readFilled(current, requestedQty);
       const avg = Number(current.avgPrice || current.price || 0);
@@ -185,14 +225,17 @@ export class OrderExecutor {
       return filled <= 0 || avg <= 0 || (!terminal && filled < requestedQty);
     };
 
-    if (!needsPoll()) return current;
+    if (!needsPoll()) {
+      return { order: current, pollMs: 0 };
+    }
 
     for (let i = 0; i < POLL_ATTEMPTS; i += 1) {
+      polled = true;
       await sleep(POLL_INTERVAL_MS);
       current = await this.cexManager.getOrderStatus(exchange, current.orderId, symbol);
       if (!needsPoll()) break;
     }
-    return current;
+    return { order: current, pollMs: polled ? Date.now() - pollStart : 0 };
   }
 }
 

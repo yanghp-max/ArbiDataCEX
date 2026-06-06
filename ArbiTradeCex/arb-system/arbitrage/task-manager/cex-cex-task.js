@@ -23,6 +23,12 @@ import {
   tickPriceSnapshotMatch
 } from '../risk/risk-manager.js';
 import { calcTradePnl, calcTradeGross } from '../execution/result-reporter.js';
+import {
+  createTradeLatencyTrace,
+  markLatency,
+  finalizeTradeLatency,
+  formatLatencyLogLines
+} from '../monitoring/trade-latency.js';
 
 function formatFilledLegLine(exchange, side, quoteBid, quoteAsk, fillPrice, qty) {
   const quoteTag = side === 'sell' ? 'bid' : side === 'buy' ? 'ask' : '名义';
@@ -200,6 +206,9 @@ export class CexCexTask {
 
     if (!tradePlan) return;
 
+    const latencyTrace = createTradeLatencyTrace(tick);
+    markLatency(latencyTrace, 'trade_plan');
+
     const isClose = tradePlan.action === 'close';
     const execDirection = isClose ? closeTradeDirection(tradePlan.direction) : tradePlan.direction;
     const spreadFilterDir = tradePlan.spreadFilterDirection ?? tradePlan.direction;
@@ -235,7 +244,11 @@ export class CexCexTask {
       qty = finalized.qty;
     }
 
+    markLatency(latencyTrace, 'order_built');
+
     if (this.enforceLatency && !tickSignalAgePass(tick, this.latencyLimits.signalMaxAgeMs)) return;
+
+    markLatency(latencyTrace, 'pre_order_gate');
 
     const priceSnapshot = tickPriceSnapshot(symbol, tick);
 
@@ -254,6 +267,8 @@ export class CexCexTask {
         return;
       }
     }
+
+    markLatency(latencyTrace, 'account_fresh');
 
     // 在 await 之前占位（对齐 ArbiTrade-1 预占前互斥 + 单路径 tick）
     if (this.executingSymbols.has(symbol)) return;
@@ -287,6 +302,8 @@ export class CexCexTask {
       return;
     }
 
+    markLatency(latencyTrace, 'reserve_done');
+
     this.sr.inFlightCount += 1;
     this.sr.reservationManager.markExecuting(tradeId);
     this.executeAsync({
@@ -301,8 +318,20 @@ export class CexCexTask {
       adjSpread: filterSpread,
       openZ: tradePlan.openZ,
       closeZ: tradePlan.closeZ,
-      reservations
+      reservations,
+      latencyTrace
     }).catch((err) => console.error(`[CexCexTask] execute error ${symbol}:`, err.message));
+  }
+
+  #logLatency(trace, { reason = null } = {}) {
+    if (!trace) return;
+    if (reason) {
+      finalizeTradeLatency(trace);
+      console.warn(`[延迟·中止] ${reason}`);
+    }
+    for (const line of formatLatencyLogLines(trace)) {
+      console.log(line);
+    }
   }
 
   #releaseSymbolClaim(symbol, { restoreCooldown = false } = {}) {
@@ -329,22 +358,30 @@ export class CexCexTask {
       priceSnapshot,
       order,
       adjSpread,
-      reservations
+      reservations,
+      latencyTrace
     } = ctx;
     const tradeId = reservations?.tradeId;
+    markLatency(latencyTrace, 'execute_start');
     try {
       const freshTick = this.sr.quoteAggregator.buildTick(symbol);
       const latencyOk = !this.enforceLatency || tickLatencyPass(freshTick, this.latencyLimits);
       const priceOk = freshTick && tickPriceSnapshotMatch(priceSnapshot, freshTick);
       if (!freshTick || !latencyOk || !priceOk) {
+        this.#logLatency(latencyTrace, {
+          reason: !freshTick ? '无行情' : !latencyOk ? '延迟检查未过' : '价格快照不一致'
+        });
         this.#releaseSymbolClaim(symbol, { restoreCooldown: true });
         return;
       }
 
       if (!finalCheckPass(freshTick, execDirection, adjSpread, this.latencyLimits)) {
+        this.#logLatency(latencyTrace, { reason: '最终价差校验未过' });
         this.#releaseSymbolClaim(symbol, { restoreCooldown: true });
         return;
       }
+
+      markLatency(latencyTrace, 'recheck_pass');
 
       let fill;
       try {
@@ -353,10 +390,12 @@ export class CexCexTask {
           tick: freshTick,
           order,
           reduceOnly: action === 'close',
-          lockedDirection
+          lockedDirection,
+          latencyTrace
         });
       } catch (err) {
         await this.sr.accountCache.refreshFromCexManager(this.sr.cexManager).catch(() => {});
+        this.#logLatency(latencyTrace, { reason: `下单失败: ${err.message}` });
         console.error(`[CexCexTask] ${symbol} 下单失败:`, err.message);
         this.#releaseSymbolClaim(symbol, { restoreCooldown: true });
         return;
@@ -364,6 +403,7 @@ export class CexCexTask {
 
       const hasAnyFill = fill.aFilledQty > 0 || fill.bFilledQty > 0;
       if (!fill.simulated && !hasAnyFill) {
+        this.#logLatency(latencyTrace, { reason: '两腿均未成交' });
         this.#releaseSymbolClaim(symbol, { restoreCooldown: true });
         return;
       }
@@ -374,12 +414,16 @@ export class CexCexTask {
         await this.sr.accountCache.refreshFromCexManager(this.sr.cexManager);
       }
 
+      markLatency(latencyTrace, 'pos_refresh');
+
       const netPnl = calcTradePnl(
         fill,
         { action, direction: execDirection, lockedDirection },
         this.cfg.feeBpsTotal,
         this.cfg.slippageBpsTotal
       );
+
+      finalizeTradeLatency(latencyTrace);
 
       this.sr.resultReporter.recordTrade({
         symbol,
@@ -391,7 +435,8 @@ export class CexCexTask {
         feeBpsTotal: this.cfg.feeBpsTotal,
         slippageBpsTotal: this.cfg.slippageBpsTotal,
         accountCache: this.sr.accountCache,
-        dashboardBridge: this.sr.dashboardBridge
+        dashboardBridge: this.sr.dashboardBridge,
+        latencyTrace
       });
       const aQty = this.sr.accountCache.getPosition('binance', symbol);
       const bQty = this.sr.accountCache.getPosition('gate', symbol);
@@ -454,6 +499,9 @@ export class CexCexTask {
               ? `Gate未成交: ${fill.failReason || '成交量为0'}`
               : `A=${fill.aFilledQty} B=${fill.bFilledQty}`;
           console.warn(`[实盘·单腿风险] ${symbol} ${why}`);
+        }
+        for (const line of formatLatencyLogLines(latencyTrace)) {
+          console.log(line);
         }
       }
       this.sr.eventBus.emitExecutionStatus({
