@@ -25,6 +25,8 @@ const CSV_COLUMNS = [
   'b_filled_qty',
   'a_order_id',
   'b_order_id',
+  'gross_pnl',
+  'fee_cost',
   'net_pnl',
   'cum_pnl',
   'a_pos_qty',

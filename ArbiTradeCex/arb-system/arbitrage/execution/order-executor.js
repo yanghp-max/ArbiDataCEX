@@ -51,9 +51,11 @@ export class OrderExecutor {
     this.tradingEnabled = tradingEnabled;
   }
 
-  async executeBothLegs({ direction, tick, order, reduceOnly = false }) {
+  async executeBothLegs({ direction, tick, order, reduceOnly = false, lockedDirection = null }) {
     const { qty, gateSize, gateDecimalSize } = order;
     const { aSide, bSide } = tradeLegSides(direction);
+    const positionDirection = lockedDirection ?? direction;
+    const binancePositionSide = positionDirection === '-a+b' ? 'SHORT' : 'LONG';
     const quote = quoteSnapshot(direction, tick);
     const binanceSide = aSide;
     const gateSide = bSide;
@@ -87,7 +89,9 @@ export class OrderExecutor {
         type: 'market',
         amount: qty,
         stepSize: binanceStepSize,
-        reduceOnly
+        reduceOnly,
+        positionDirection,
+        positionSide: binancePositionSide
       }),
       this.cexManager.placeOrder('gate', {
         symbol: tick.symbol,
@@ -144,12 +148,12 @@ export class OrderExecutor {
       ? Math.min(aFilled, bFilledBase, qty)
       : Math.max(aFilled, bFilledBase);
 
-    const aPricePost = aOrder
+    const aPricePost = aFilled > 0 && aOrder
       ? Number(aOrder.avgPrice || aOrder.price || fallback.aPrice)
-      : fallback.aPrice;
-    const bPricePost = bOrder
+      : null;
+    const bPricePost = bFilledBase > 0 && bOrder
       ? Number(bOrder.avgPrice || bOrder.price || fallback.bPrice)
-      : fallback.bPrice;
+      : null;
 
     return {
       simulated: false,

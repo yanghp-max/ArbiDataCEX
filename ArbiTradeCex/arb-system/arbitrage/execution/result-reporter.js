@@ -16,46 +16,71 @@
  * 累计 PnL：cumPnl = Σ 每笔 netPnl（开/加/平全部累加）
  */
 
-function feeCost(aQty, bQty, aPx, bPx, feeBpsTotal, slippageBpsTotal) {
-  const perLeg = (feeBpsTotal + slippageBpsTotal) / 10000 / 2;
-  const aLeg = aQty * aPx;
-  const bLeg = bQty * bPx;
-  return Math.abs(aLeg) * perLeg + Math.abs(bLeg) * perLeg;
+function fillLegPrices(fill) {
+  return {
+    aPx: fill.aFillPrice ?? fill.aPrice ?? fill.aPriceUsed,
+    bPx: fill.bFillPrice ?? fill.bPrice ?? fill.bPriceUsed
+  };
 }
 
-function fillLegQtys(fill) {
-  const qty = fill.qty ?? 0;
+function filledLegNotional(fill) {
+  const { aPx, bPx } = fillLegPrices(fill);
+  const aQty = Number(fill.aFilledQty) > 0 ? Number(fill.aFilledQty) : 0;
+  const bQty = Number(fill.bFilledQty) > 0 ? Number(fill.bFilledQty) : 0;
   return {
-    aQty: Number.isFinite(fill.aFilledQty) ? fill.aFilledQty : qty,
-    bQty: Number.isFinite(fill.bFilledQty) ? fill.bFilledQty : qty
+    aQty,
+    bQty,
+    aPx: Number(aPx),
+    bPx: Number(bPx)
   };
+}
+
+/** 按实际成交价计算毛利润（两腿都成交时才有意义） */
+export function calcTradeGross(fill, ctx) {
+  const { aQty, bQty, aPx, bPx } = filledLegNotional(fill);
+  if (!(aQty > 0 && bQty > 0) || !Number.isFinite(aPx) || !Number.isFinite(bPx)) {
+    return null;
+  }
+  const { action, direction, lockedDirection } = ctx;
+  if (action === 'close') {
+    const locked = lockedDirection ?? direction;
+    return locked === '-a+b'
+      ? bQty * bPx - aQty * aPx
+      : aQty * aPx - bQty * bPx;
+  }
+  return direction === '-a+b'
+    ? aQty * aPx - bQty * bPx
+    : bQty * bPx - aQty * aPx;
+}
+
+export function calcTradeFeeCost(fill, feeBpsTotal = 4, slippageBpsTotal = 4) {
+  const { aQty, bQty, aPx, bPx } = filledLegNotional(fill);
+  const perLeg = (feeBpsTotal + slippageBpsTotal) / 10000 / 2;
+  const aLeg = Number.isFinite(aPx) ? Math.abs(aQty * aPx) : 0;
+  const bLeg = Number.isFinite(bPx) ? Math.abs(bQty * bPx) : 0;
+  return aLeg * perLeg + bLeg * perLeg;
 }
 
 /** 开仓 / 加仓 PnL（同 backtest execute_open） */
-function fillLegPrices(fill) {
-  return {
-    aPx: fill.aPrice ?? fill.aPriceUsed,
-    bPx: fill.bPrice ?? fill.bPriceUsed
-  };
-}
-
 export function calcOpenPnl(fill, direction, feeBpsTotal = 4, slippageBpsTotal = 4) {
-  const { aQty, bQty } = fillLegQtys(fill);
-  const { aPx, bPx } = fillLegPrices(fill);
-  const gross = direction === '-a+b'
-    ? aQty * aPx - bQty * bPx
-    : bQty * bPx - aQty * aPx;
-  return gross - feeCost(aQty, bQty, aPx, bPx, feeBpsTotal, slippageBpsTotal);
+  const gross = calcTradeGross(fill, { action: 'open', direction, lockedDirection: direction });
+  if (gross == null) {
+    return -calcTradeFeeCost(fill, feeBpsTotal, slippageBpsTotal);
+  }
+  return gross - calcTradeFeeCost(fill, feeBpsTotal, slippageBpsTotal);
 }
 
 /** 平仓 PnL（同 backtest calc_close_profit，按 lockedDirection） */
 export function calcClosePnl(fill, lockedDirection, feeBpsTotal = 4, slippageBpsTotal = 4) {
-  const { aQty, bQty } = fillLegQtys(fill);
-  const { aPx, bPx } = fillLegPrices(fill);
-  const gross = lockedDirection === '-a+b'
-    ? bQty * bPx - aQty * aPx
-    : aQty * aPx - bQty * bPx;
-  return gross - feeCost(aQty, bQty, aPx, bPx, feeBpsTotal, slippageBpsTotal);
+  const gross = calcTradeGross(fill, {
+    action: 'close',
+    direction: lockedDirection,
+    lockedDirection
+  });
+  if (gross == null) {
+    return -calcTradeFeeCost(fill, feeBpsTotal, slippageBpsTotal);
+  }
+  return gross - calcTradeFeeCost(fill, feeBpsTotal, slippageBpsTotal);
 }
 
 /**
@@ -97,7 +122,18 @@ export class ResultReporter {
     };
   }
 
-  recordTrade({ symbol, direction, action = 'open', lockedDirection, fill, netPnl, accountCache, dashboardBridge }) {
+  recordTrade({
+    symbol,
+    direction,
+    action = 'open',
+    lockedDirection,
+    fill,
+    netPnl,
+    feeBpsTotal = 4,
+    slippageBpsTotal = 4,
+    accountCache,
+    dashboardBridge
+  }) {
     this.cumPnl += netPnl;
     this.tradeCount += 1;
     if (netPnl >= 0) this.winCount += 1;
@@ -106,6 +142,13 @@ export class ResultReporter {
 
     const ts = Date.now();
     const quote = fill.quote ?? {};
+    const pnlCtx = {
+      action,
+      direction,
+      lockedDirection: lockedDirection ?? direction
+    };
+    const grossPnl = calcTradeGross(fill, pnlCtx);
+    const feeCost = calcTradeFeeCost(fill, feeBpsTotal, slippageBpsTotal);
     const row = {
       symbol,
       timestamp: ts,
@@ -123,16 +166,26 @@ export class ResultReporter {
       aSide: fill.aSide,
       aPriceNominal: quote.aPriceNominal ?? null,
       bPriceNominal: quote.bPriceNominal ?? null,
-      aFillPrice: fill.aFillPrice ?? fill.aPrice ?? fill.aPriceUsed ?? null,
-      bFillPrice: fill.bFillPrice ?? fill.bPrice ?? fill.bPriceUsed ?? null,
-      aPrice: fill.aFillPrice ?? fill.aPrice ?? fill.aPriceUsed,
+      aFillPrice: fill.aFilledQty > 0
+        ? (fill.aFillPrice ?? fill.aPrice ?? fill.aPriceUsed ?? null)
+        : null,
+      bFillPrice: fill.bFilledQty > 0
+        ? (fill.bFillPrice ?? fill.bPrice ?? fill.bPriceUsed ?? null)
+        : null,
+      aPrice: fill.aFilledQty > 0
+        ? (fill.aFillPrice ?? fill.aPrice ?? fill.aPriceUsed ?? null)
+        : null,
       bSide: fill.bSide,
-      bPrice: fill.bFillPrice ?? fill.bPrice ?? fill.bPriceUsed,
+      bPrice: fill.bFilledQty > 0
+        ? (fill.bFillPrice ?? fill.bPrice ?? fill.bPriceUsed ?? null)
+        : null,
       qty: fill.qty,
       aFilledQty: fill.aFilledQty,
       bFilledQty: fill.bFilledQty,
       aOrderId: fill.aOrderId,
       bOrderId: fill.bOrderId,
+      grossPnl,
+      feeCost,
       netPnl,
       cumPnl: this.cumPnl,
       simulated: Boolean(fill.simulated),
@@ -177,6 +230,8 @@ export class ResultReporter {
         b_filled_qty: row.bFilledQty,
         a_order_id: row.aOrderId,
         b_order_id: row.bOrderId,
+        gross_pnl: row.grossPnl,
+        fee_cost: row.feeCost,
         net_pnl: row.netPnl,
         cum_pnl: row.cumPnl,
         a_pos_qty: row.aPosQty,

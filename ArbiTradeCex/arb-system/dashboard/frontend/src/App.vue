@@ -83,5 +83,6 @@ const {
     :fmt-pct="fmtPct"
     :format-pnl="formatPnl"
     :format-time="formatTime"
+    :pnl-class="pnlClass"
   />
 </template>

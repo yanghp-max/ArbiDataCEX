@@ -132,6 +132,14 @@ export function isFlatPosition(aQty, bQty, eps = 1e-12) {
   return Math.abs(aQty) <= eps && Math.abs(bQty) <= eps;
 }
 
+/** 两腿对冲且数量对齐（失衡时禁止加仓） */
+export function isHedgedPosition(aQty, bQty, eps = 1e-6) {
+  if (isFlatPosition(aQty, bQty, eps)) return true;
+  const dir = inferDirectionFromPosition(aQty, bQty, eps);
+  if (!dir) return false;
+  return Math.abs(Math.abs(aQty) - Math.abs(bQty)) <= eps;
+}
+
 export function heldQty(aQty, bQty) {
   return Math.min(Math.abs(aQty), Math.abs(bQty));
 }

@@ -9,6 +9,7 @@ import {
   decideAddOrClose,
   closeTradeDirection,
   isFlatPosition,
+  isHedgedPosition,
   inferDirectionFromPosition
 } from '../services/spread-calculator.js';
 import {
@@ -21,7 +22,30 @@ import {
   tickPriceSnapshot,
   tickPriceSnapshotMatch
 } from '../risk/risk-manager.js';
-import { calcTradePnl } from '../execution/result-reporter.js';
+import { calcTradePnl, calcTradeGross } from '../execution/result-reporter.js';
+
+function formatFilledLegLine(exchange, side, quoteBid, quoteAsk, fillPrice, qty) {
+  const quoteTag = side === 'sell' ? 'bid' : side === 'buy' ? 'ask' : '名义';
+  const quotePx = side === 'sell'
+    ? quoteBid
+    : side === 'buy'
+      ? quoteAsk
+      : (quoteBid ?? quoteAsk);
+  const quote = quotePx != null && Number.isFinite(Number(quotePx))
+    ? Number(quotePx).toFixed(6)
+    : '—';
+  const fill = fillPrice != null && Number.isFinite(Number(fillPrice))
+    ? Number(fillPrice).toFixed(6)
+    : '—';
+  let slip = '';
+  if (quotePx != null && fillPrice != null && Number(quotePx) !== 0) {
+    const raw = ((Number(fillPrice) - Number(quotePx)) / Number(quotePx)) * 10000;
+    const bps = side === 'sell' ? -raw : raw;
+    slip = ` 滑点${bps >= 0 ? '+' : ''}${bps.toFixed(2)}bps`;
+  }
+  const sideCn = side === 'buy' ? '买' : side === 'sell' ? '卖' : String(side || '-');
+  return `  ${exchange} ${sideCn} 盘口 ${quoteTag} ${quote} → 成交价 ${fill} qty=${qty}${slip}`;
+}
 
 export class CexCexTask {
   constructor(sharedResources, strategyConfig, precisionChecker) {
@@ -143,6 +167,14 @@ export class CexCexTask {
       const execDirection = lock.direction;
       const adjSpread = execDirection === '-a+b' ? spreads.spreadAbAdj : spreads.spreadBaAdj;
       if (decision.action === 'add') {
+        const aQty = this.sr.accountCache.getPosition('binance', symbol);
+        const bQty = this.sr.accountCache.getPosition('gate', symbol);
+        if (!isHedgedPosition(aQty, bQty)) {
+          console.warn(
+            `[CexCexTask] ${symbol} 持仓失衡(A=${aQty} B=${bQty})，跳过加仓直至对冲恢复`
+          );
+          return;
+        }
         tradePlan = {
           action: 'add',
           direction: execDirection,
@@ -320,7 +352,8 @@ export class CexCexTask {
           direction: execDirection,
           tick: freshTick,
           order,
-          reduceOnly: action === 'close'
+          reduceOnly: action === 'close',
+          lockedDirection
         });
       } catch (err) {
         await this.sr.accountCache.refreshFromCexManager(this.sr.cexManager).catch(() => {});
@@ -355,6 +388,8 @@ export class CexCexTask {
         lockedDirection,
         fill,
         netPnl,
+        feeBpsTotal: this.cfg.feeBpsTotal,
+        slippageBpsTotal: this.cfg.slippageBpsTotal,
         accountCache: this.sr.accountCache,
         dashboardBridge: this.sr.dashboardBridge
       });
@@ -370,11 +405,48 @@ export class CexCexTask {
 
       if (this.sr.tradingEnabled) {
         const legTag = fill.legExposure ? '单腿' : '双腿';
+        const quote = fill.quote ?? {};
+        const legLines = [];
+        if (fill.aFilledQty > 0) {
+          legLines.push(formatFilledLegLine(
+            'Binance',
+            fill.aSide,
+            quote.aBid,
+            quote.aAsk,
+            fill.aFillPrice ?? fill.aPrice,
+            fill.aFilledQty
+          ));
+        }
+        if (fill.bFilledQty > 0) {
+          legLines.push(formatFilledLegLine(
+            'Gate',
+            fill.bSide,
+            quote.bBid,
+            quote.bAsk,
+            fill.bFillPrice ?? fill.bPrice,
+            fill.bFilledQty
+          ));
+        }
         console.log(
           `[实盘·成交·${legTag}] ${symbol} ${action} ${execDirection}`
-          + ` A=${fill.aFilledQty} B=${fill.bFilledQty}`
           + ` pnl=${netPnl.toFixed(4)} USDT`
         );
+        for (const line of legLines) {
+          console.log(line);
+        }
+        const gross = calcTradeGross(fill, {
+          action,
+          direction: execDirection,
+          lockedDirection
+        });
+        if (gross != null && Number.isFinite(gross)) {
+          console.log(
+            `  实际利润 毛${gross >= 0 ? '+' : ''}${gross.toFixed(4)}`
+            + ` · 净${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(4)} USDT`
+          );
+        } else {
+          console.log(`  实际利润 净${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(4)} USDT（单腿）`);
+        }
         if (fill.legExposure) {
           const why = fill.failedLeg === 'binance'
             ? `Binance未成交: ${fill.failReason || '成交量为0'}`

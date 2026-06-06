@@ -224,20 +224,26 @@ export class BinanceAdapter extends BaseAdapter {
     }
   }
 
-  async #resolvePositionSide(side) {
+  async #getDualSidePosition() {
     if (this._dualSidePosition == null) {
       try {
         const r = await this.#signedRequest('GET', '/papi/v1/um/positionSide/dual');
         this._dualSidePosition = Boolean(r?.dualSidePosition);
         if (this._dualSidePosition) {
-          console.warn('[Binance] 检测到双向持仓模式，下单将自动带 positionSide');
+          console.warn('[Binance] 检测到双向持仓模式，下单将自动带 positionSide（平仓不传 reduceOnly）');
         }
       } catch {
         this._dualSidePosition = false;
       }
     }
-    if (!this._dualSidePosition) return null;
-    return String(side).toUpperCase() === 'BUY' ? 'LONG' : 'SHORT';
+    return this._dualSidePosition;
+  }
+
+  /** Hedge 模式：-a+b → A 腿 SHORT，+a-b → A 腿 LONG（与 side 无关，开/平共用） */
+  #positionSideFromDirection(positionDirection) {
+    if (positionDirection === '-a+b') return 'SHORT';
+    if (positionDirection === '+a-b') return 'LONG';
+    return null;
   }
 
   async getBalance(options = {}) {
@@ -365,11 +371,17 @@ export class BinanceAdapter extends BaseAdapter {
       params.price = String(orderData.price);
       params.timeInForce = orderData.timeInForce || 'GTC';
     }
-    if (orderData.reduceOnly) {
+    const dualSide = await this.#getDualSidePosition();
+    // 双向持仓模式：用 positionSide 区分多/空，禁止传 reduceOnly（会报 -1106）
+    if (orderData.reduceOnly && !dualSide) {
       params.reduceOnly = 'true';
     }
-    const positionSide = await this.#resolvePositionSide(side);
-    if (positionSide) {
+    if (dualSide) {
+      const positionSide = orderData.positionSide
+        ?? this.#positionSideFromDirection(orderData.positionDirection);
+      if (!positionSide) {
+        throw new Error('双向持仓下单缺少 positionDirection/positionSide');
+      }
       params.positionSide = positionSide;
     }
     const response = await this.#signedRequest('POST', '/papi/v1/um/order', params);

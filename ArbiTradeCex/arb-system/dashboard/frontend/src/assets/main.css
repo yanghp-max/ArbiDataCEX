@@ -531,6 +531,59 @@ body {
 .log-item.trade .trade-spread {
   color: var(--muted);
 }
+.log-item.trade .trade-leg-block {
+  margin: 6px 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #0b1016;
+  border-left: 3px solid var(--border);
+}
+.log-item.trade .trade-leg-binance { border-left-color: var(--binance); }
+.log-item.trade .trade-leg-gate { border-left-color: var(--gate); }
+.log-item.trade .trade-leg-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.log-item.trade .trade-leg-qty {
+  margin-left: 8px;
+  font-weight: 400;
+  color: var(--muted);
+  font-size: 12px;
+}
+.log-item.trade .trade-leg-prices {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.log-item.trade .trade-leg-arrow {
+  color: var(--muted);
+}
+.log-item.trade .trade-leg-quote,
+.log-item.trade .trade-leg-order,
+.log-item.trade .trade-leg-fee {
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.log-item.trade .trade-leg-fee {
+  color: var(--warn);
+}
+.log-item.trade .trade-profit {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(77, 163, 255, 0.08);
+  border: 1px solid rgba(77, 163, 255, 0.2);
+  font-size: 13px;
+}
+.log-item.trade .trade-profit.pos { color: var(--ok); }
+.log-item.trade .trade-profit.neg { color: var(--err); }
+.log-item.trade .trade-profit.flat { color: var(--muted); }
+.log-item.trade .trade-profit strong {
+  margin-right: 8px;
+  color: var(--text);
+}
 .log-item.trade .trade-slip {
   color: var(--accent);
   font-size: 12px;
