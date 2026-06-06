@@ -24,7 +24,8 @@ export class AccountStreamBridge {
       this.accountCache.mergeBalance(ex, {
         currency: 'USDT',
         total: row.total,
-        available: row.available
+        available: row.available,
+        marginUsed: row.marginUsed ?? row.frozen
       });
     }
   }

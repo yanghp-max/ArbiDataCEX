@@ -8,10 +8,18 @@ const CSV_COLUMNS = [
   'action',
   'direction',
   'locked_direction',
+  'a_bid',
+  'a_ask',
+  'b_bid',
+  'b_ask',
+  'spread_ab_pct',
+  'spread_ba_pct',
   'a_side',
-  'a_price',
+  'a_price_nominal',
   'b_side',
-  'b_price',
+  'b_price_nominal',
+  'a_fill_price',
+  'b_fill_price',
   'qty',
   'a_filled_qty',
   'b_filled_qty',
@@ -21,7 +29,10 @@ const CSV_COLUMNS = [
   'cum_pnl',
   'a_pos_qty',
   'b_pos_qty',
-  'leg_mismatch'
+  'leg_mismatch',
+  'leg_exposure',
+  'failed_leg',
+  'fail_reason'
 ];
 
 function csvEscape(value) {

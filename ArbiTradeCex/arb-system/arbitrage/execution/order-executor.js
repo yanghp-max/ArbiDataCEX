@@ -5,7 +5,22 @@
  *   +a-b: A@ask, B@bid
  */
 import { OrderStatus } from '../../cex/types.js';
-import { legPricesForDirection, tradeLegSides } from '../services/spread-calculator.js';
+import { calcSpreads, legPricesForDirection, tradeLegSides } from '../services/spread-calculator.js';
+
+function quoteSnapshot(direction, tick, totalCostPct = 0) {
+  const nominal = legPricesForDirection(direction, tick);
+  const spreads = calcSpreads(tick, totalCostPct);
+  return {
+    aBid: tick.aBid,
+    aAsk: tick.aAsk,
+    bBid: tick.bBid,
+    bAsk: tick.bAsk,
+    aPriceNominal: nominal.aPrice,
+    bPriceNominal: nominal.bPrice,
+    spreadAbPct: spreads.spreadAb,
+    spreadBaPct: spreads.spreadBa
+  };
+}
 
 const POLL_ATTEMPTS = 5;
 const POLL_INTERVAL_MS = 150;
@@ -39,7 +54,7 @@ export class OrderExecutor {
   async executeBothLegs({ direction, tick, order, reduceOnly = false }) {
     const { qty, gateSize, gateDecimalSize } = order;
     const { aSide, bSide } = tradeLegSides(direction);
-    const { aPrice, bPrice } = legPricesForDirection(direction, tick);
+    const quote = quoteSnapshot(direction, tick);
     const binanceSide = aSide;
     const gateSide = bSide;
     const binanceStepSize = order.cfg?.binance?.stepSize;
@@ -51,8 +66,11 @@ export class OrderExecutor {
         bOrderId: `SIM_B_${Date.now()}`,
         aSide,
         bSide,
-        aPrice,
-        bPrice,
+        aPrice: quote.aPriceNominal,
+        bPrice: quote.bPriceNominal,
+        aFillPrice: quote.aPriceNominal,
+        bFillPrice: quote.bPriceNominal,
+        quote,
         qty,
         aFilledQty: qty,
         bFilledQty: qty,
@@ -141,6 +159,9 @@ export class OrderExecutor {
       bSide,
       aPrice: aPricePost,
       bPrice: bPricePost,
+      aFillPrice: aPricePost,
+      bFillPrice: bPricePost,
+      quote,
       qty: matchedQty,
       aFilledQty: aFilled,
       bFilledQty: bFilledBase,

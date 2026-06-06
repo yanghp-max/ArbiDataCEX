@@ -80,6 +80,7 @@ const {
     :state="state"
     :pnl-summary="pnlSummary"
     :fmt="fmt"
+    :fmt-pct="fmtPct"
     :format-pnl="formatPnl"
     :format-time="formatTime"
   />

@@ -35,6 +35,39 @@ export class GateAdapter extends BaseAdapter {
     this.privatePositionsSubscribed = false;
     this.privateBalancesSubscribed = false;
     this._userId = null;
+    /** contract -> quanto_multiplier（WS 持仓推送不含 multiplier） */
+    this._contractMultipliers = new Map();
+  }
+
+  #getContractMultiplier(contract) {
+    const key = String(contract || '');
+    if (this._contractMultipliers.has(key)) {
+      return this._contractMultipliers.get(key);
+    }
+    const compact = this.toCompactSymbol(key.replace('_USDT', 'USDT'));
+    for (const [name, mult] of this._contractMultipliers) {
+      if (this.toCompactSymbol(name) === compact) return mult;
+    }
+    return 1;
+  }
+
+  #contractsToBaseQty(contract, contractSize) {
+    return Number(contractSize) * this.#getContractMultiplier(contract);
+  }
+
+  async #refreshContractMultipliers() {
+    try {
+      const { data } = await axios.get(`${this.config.restUrl}/futures/usdt/contracts`, {
+        timeout: this.config.timeout
+      });
+      for (const c of data || []) {
+        const name = c.name || c.contract;
+        if (!name) continue;
+        this._contractMultipliers.set(String(name), Number(c.quanto_multiplier || 1));
+      }
+    } catch (err) {
+      console.warn('[Gate] load contract multipliers failed:', err.message);
+    }
   }
 
   #isUnifiedMode() {
@@ -72,6 +105,7 @@ export class GateAdapter extends BaseAdapter {
     }
     await super.connect();
     if (this.authenticated) {
+      await this.#refreshContractMultipliers();
       const modeLabel = this.#isUnifiedMode() ? 'unified (cross-currency)' : 'single (USDT futures)';
       console.log(`[Gate] account mode: ${modeLabel}`);
     }
@@ -343,25 +377,30 @@ export class GateAdapter extends BaseAdapter {
 
   async #getSingleFuturesBalance(options = {}) {
     const data = await this.#signedRequest('GET', '/futures/usdt/accounts');
+    const unrealised = Number(data?.unrealised_pnl ?? 0);
     const available = Number(
       data?.available ?? data?.available_margin ?? data?.cross_available ?? 0
     );
     const rawTotal = Number(
       data?.total ?? data?.margin_balance ?? data?.cross_margin_balance ?? NaN
     );
-    const equity = Number(data?.equity ?? data?.account_equity ?? NaN);
-    let total = Number.isFinite(equity) && equity > 0
-      ? equity
-      : (Number.isFinite(rawTotal) && rawTotal > 0 ? rawTotal : available);
-    if (total <= 0 && available > 0) total = available;
+    const equityField = Number(data?.equity ?? data?.account_equity ?? NaN);
+    let equity = Number.isFinite(equityField) && equityField > 0
+      ? equityField
+      : (Number.isFinite(rawTotal) && rawTotal > 0 ? rawTotal + unrealised : available);
+    if (equity <= 0 && available > 0) equity = available;
+    const positionMargin = Number(data?.position_margin ?? 0);
+    const orderMargin = Number(data?.order_margin ?? 0);
+    const marginUsed = Math.max(0, positionMargin + orderMargin, equity - available);
     const balances = [];
-    if (total > 0 || available > 0) {
+    if (equity > 0 || available > 0) {
       balances.push(new Balance({
         currency: 'USDT',
         exchange: this.config.name,
-        total,
+        total: equity,
         available,
-        frozen: Math.max(0, total - available),
+        marginUsed,
+        frozen: marginUsed,
         timestamp: Date.now()
       }));
     }
@@ -384,11 +423,15 @@ export class GateAdapter extends BaseAdapter {
     const positions = (rows || [])
       .filter((r) => Math.abs(Number(r.size)) > 0)
       .map((r) => {
+        const contract = String(r.contract || '');
         const size = Number(r.size);
-        const multiplier = Number(r.quanto_multiplier || 1);
+        const multiplier = Number(r.quanto_multiplier || this.#getContractMultiplier(contract));
+        if (Number.isFinite(multiplier) && multiplier > 0) {
+          this._contractMultipliers.set(contract, multiplier);
+        }
         const baseQty = size * multiplier;
         const pos = new Position({
-          symbol: this.toCompactSymbol(r.contract || ''),
+          symbol: this.toCompactSymbol(contract),
           exchange: this.config.name,
           side: size >= 0 ? 'long' : 'short',
           size: Math.abs(baseQty),
@@ -396,7 +439,11 @@ export class GateAdapter extends BaseAdapter {
           entryPrice: Number(r.entry_price || 0),
           markPrice: Number(r.mark_price || 0),
           unrealizedPnl: Number(r.unrealised_pnl || 0),
-          leverage: Number(r.leverage || 1),
+          leverage: Number(r.leverage || 0) > 0
+            ? Number(r.leverage)
+            : Number(r.cross_leverage_limit || r.lever || 1),
+          initialMargin: Number(r.initial_margin || 0),
+          maintMargin: Number(r.maintenance_margin || r.maint_margin || 0),
           timestamp: Date.now()
         });
         pos.contracts = size;
@@ -583,8 +630,7 @@ export class GateAdapter extends BaseAdapter {
       const contract = String(r.contract || r.s || '');
       if (!contract) continue;
       const size = Number(r.size ?? 0);
-      const multiplier = Number(r.quanto_multiplier || 1);
-      const baseQty = size * multiplier;
+      const baseQty = this.#contractsToBaseQty(contract, size);
       positions.push(new Position({
         symbol: this.toCompactSymbol(contract),
         exchange: this.config.name,
@@ -594,7 +640,11 @@ export class GateAdapter extends BaseAdapter {
         entryPrice: Number(r.entry_price || 0),
         markPrice: Number(r.mark_price || 0),
         unrealizedPnl: Number(r.unrealised_pnl || 0),
-        leverage: Number(r.leverage || 1),
+        leverage: Number(r.leverage || 0) > 0
+          ? Number(r.leverage)
+          : Number(r.cross_leverage_limit || r.lever || 1),
+        initialMargin: Number(r.initial_margin || 0),
+        maintMargin: Number(r.maintenance_margin || r.maint_margin || 0),
         timestamp: Date.now()
       }));
     }
@@ -611,19 +661,15 @@ export class GateAdapter extends BaseAdapter {
   }
 
   #handleFuturesBalancesUpdate(result) {
-    const rows = Array.isArray(result) ? result : (result ? [result] : []);
-    if (!rows.length) return;
-    const latest = rows[rows.length - 1];
-    const balance = Number(latest.balance ?? 0);
-    if (!Number.isFinite(balance)) return;
-    this.emitBalanceUpdate([new Balance({
-      currency: 'USDT',
-      exchange: this.config.name,
-      total: balance,
-      available: balance,
-      frozen: 0,
-      timestamp: Date.now()
-    })]);
+    /** WS 只有 balance 增量，不含 equity/unrealised_pnl；改走 REST 全量同步 */
+    this.#scheduleBalanceRestSync();
+  }
+
+  #scheduleBalanceRestSync() {
+    if (this._balanceSyncTimer) clearTimeout(this._balanceSyncTimer);
+    this._balanceSyncTimer = setTimeout(() => {
+      this.#getSingleFuturesBalance({ silent: true }).catch(() => {});
+    }, 300);
   }
 
   #handleUnifiedMessage(raw) {

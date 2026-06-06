@@ -241,18 +241,38 @@ export class BinanceAdapter extends BaseAdapter {
   }
 
   async getBalance(options = {}) {
-    const rows = await this.#signedRequest('GET', '/papi/v1/balance');
+    const [rows, accountInfo] = await Promise.all([
+      this.#signedRequest('GET', '/papi/v1/balance'),
+      this.#signedRequest('GET', '/papi/v1/account').catch(() => null)
+    ]);
+    const accountAvail = Number(accountInfo?.totalAvailableBalance ?? NaN);
+    const accountMargin = Number(accountInfo?.accountInitialMargin ?? NaN);
     const balances = (rows || [])
       .map((row) => {
-        const total = Number(row.totalWalletBalance || 0);
-        if (total <= 0) return null;
-        const available = Number(row.umWalletBalance || 0) + Number(row.crossMarginFree || 0);
+        const asset = String(row.asset || '').toUpperCase();
+        if (!asset) return null;
+        const wallet = Number(row.totalWalletBalance || 0);
+        const umPnl = Number(row.umUnrealizedPNL || 0);
+        const cmPnl = Number(row.cmUnrealizedPNL || 0);
+        const crossFree = Number(row.crossMarginFree || 0);
+        const umWallet = Number(row.umWalletBalance || 0);
+        const crossLocked = Number(row.crossMarginLocked || 0);
+        const equity = wallet + umPnl + cmPnl;
+        const usdtAvailable = crossFree + umWallet;
+        const available = asset === 'USDT' && Number.isFinite(accountAvail) && accountAvail >= 0
+          ? accountAvail
+          : usdtAvailable;
+        const marginUsed = asset === 'USDT' && Number.isFinite(accountMargin) && accountMargin >= 0
+          ? accountMargin
+          : Math.max(0, equity - usdtAvailable, crossLocked);
+        if (equity <= 1e-12 && available <= 1e-12) return null;
         return new Balance({
-          currency: row.asset,
+          currency: asset,
           exchange: this.config.name,
-          total,
+          total: equity,
           available,
-          frozen: Number(row.crossMarginLocked || 0),
+          marginUsed,
+          frozen: marginUsed,
           timestamp: Date.now()
         });
       })
@@ -287,6 +307,8 @@ export class BinanceAdapter extends BaseAdapter {
           markPrice: Number(r.markPrice || 0),
           unrealizedPnl: Number(r.unRealizedProfit || 0),
           leverage: Number(r.leverage || 1),
+          initialMargin: Number(r.positionInitialMargin || r.initialMargin || 0),
+          maintMargin: Number(r.maintMargin || 0),
           timestamp: Date.now()
         });
         return pos;
@@ -455,6 +477,13 @@ export class BinanceAdapter extends BaseAdapter {
     await this.#signedRequest('PUT', '/papi/v1/listenKey', {});
   }
 
+  #scheduleBalanceRestSync() {
+    if (this._balanceSyncTimer) clearTimeout(this._balanceSyncTimer);
+    this._balanceSyncTimer = setTimeout(() => {
+      this.getBalance({ silent: true }).catch(() => {});
+    }, 300);
+  }
+
   #stopListenKeyTimer() {
     if (this._listenKeyTimer) {
       clearInterval(this._listenKeyTimer);
@@ -479,6 +508,7 @@ export class BinanceAdapter extends BaseAdapter {
       exchange: this.config.name,
       total: row.total,
       available: row.available,
+      marginUsed: row.marginUsed ?? row.frozen ?? 0,
       frozen: row.frozen ?? 0,
       timestamp: Date.now()
     })));
@@ -514,20 +544,9 @@ export class BinanceAdapter extends BaseAdapter {
       }
       if (msg.e !== 'ACCOUNT_UPDATE' || !msg.a) return;
 
-      const balanceRows = [];
-      for (const b of msg.a.B || []) {
-        const currency = String(b.a || '').toUpperCase();
-        if (!currency) continue;
-        const wb = Number(b.wb ?? 0);
-        const cw = Number(b.cw ?? wb);
-        balanceRows.push({
-          currency,
-          total: wb,
-          available: cw,
-          frozen: Math.max(0, wb - cw)
-        });
+      if ((msg.a.B || []).length > 0) {
+        this.#scheduleBalanceRestSync();
       }
-      this.#emitBalanceMerge(balanceRows);
 
       const positionRows = [];
       for (const p of msg.a.P || []) {

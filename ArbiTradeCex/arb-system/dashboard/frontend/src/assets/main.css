@@ -87,6 +87,75 @@ body {
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
+.account-summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 20px 28px;
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #111820;
+}
+.account-summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.account-summary-label { font-size: 12px; color: var(--muted); }
+.account-summary-value {
+  font-size: 24px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.account-summary-value.avail { color: var(--ok); }
+.account-summary-value.used { color: var(--warn, #ffb020); }
+.account-exchange-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+.account-exchange-card {
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #0f1419;
+}
+.account-exchange-head {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+.account-metric {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+  padding: 6px 0;
+}
+.account-metric.primary {
+  padding-top: 0;
+  margin-bottom: 2px;
+}
+.account-metric.subtle {
+  margin-top: 6px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+  font-size: 12px;
+  color: var(--muted);
+}
+.account-metric-label { font-size: 13px; color: var(--muted); }
+.account-metric-value {
+  font-size: 20px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.account-metric.primary .account-metric-value { font-size: 26px; }
+.account-metric-value.avail { color: var(--ok); }
+.account-metric-value.used { color: var(--warn, #ffb020); }
 .account-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
@@ -112,6 +181,18 @@ body {
   border-top: 1px solid var(--border);
 }
 .account-pos-title { font-size: 12px; color: var(--muted); margin-bottom: 8px; }
+.account-pos-block {
+  padding: 8px 0 10px;
+  border-bottom: 1px solid var(--border);
+}
+.account-pos-block:last-child { border-bottom: none; }
+.account-pos-head { font-weight: 600; }
+.account-pos-note {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.4;
+}
 .account-pos-row {
   display: flex;
   flex-wrap: wrap;
@@ -437,6 +518,31 @@ body {
   margin-bottom: 6px;
 }
 .log-message { font-size: 14px; }
+.log-item.trade .log-message {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text);
+}
+.log-item.trade .trade-head {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.log-item.trade .trade-quote,
+.log-item.trade .trade-spread {
+  color: var(--muted);
+}
+.log-item.trade .trade-slip {
+  color: var(--accent);
+  font-size: 12px;
+}
+.log-item.trade .trade-warn,
+.log-item.trade .trade-warn-line {
+  color: var(--warn);
+}
+.log-item.trade .trade-sim {
+  color: var(--muted);
+  font-weight: 400;
+}
 .log-detail {
   margin: 8px 0 0;
   padding: 10px;

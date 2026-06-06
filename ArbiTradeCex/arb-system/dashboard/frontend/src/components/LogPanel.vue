@@ -6,12 +6,34 @@ const props = defineProps({
   pnlSummary: { type: Object, required: true },
   fmt: { type: Function, required: true },
   formatPnl: { type: Function, required: true },
-  formatTime: { type: Function, required: true }
+  formatTime: { type: Function, required: true },
+  fmtPct: { type: Function, required: true }
 });
 
-function legLine(exchange, side, price, fmt) {
-  if (!side || price == null) return `${exchange} -`;
-  return `${exchange} ${side} @${fmt(price, 6)}`;
+function bidAskLine(exchange, bid, ask, fmt) {
+  return `${exchange} bid ${fmt(bid, 6)} / ask ${fmt(ask, 6)}`;
+}
+
+function legExecLine(exchange, side, nominal, fill, fillQty, fmt) {
+  const sideLabel = side || '-';
+  const nom = nominal != null ? fmt(nominal, 6) : '-';
+  const real = fill != null ? fmt(fill, 6) : '-';
+  const qty = fillQty != null ? fmt(fillQty, 4) : '-';
+  return `${exchange} ${sideLabel} 名义@${nom} 成交@${real} fill=${qty}`;
+}
+
+function slipBps(nominal, fill, side) {
+  if (nominal == null || fill == null || !Number.isFinite(nominal) || nominal === 0) return null;
+  const raw = ((fill - nominal) / nominal) * 10000;
+  if (side === 'sell') return -raw;
+  return raw;
+}
+
+function fmtSlip(nominal, fill, side) {
+  const bps = slipBps(nominal, fill, side);
+  if (bps == null || !Number.isFinite(bps)) return '';
+  const sign = bps > 0 ? '+' : '';
+  return `${sign}${bps.toFixed(2)}bps`;
 }
 
 const combinedLogs = computed(() => {
@@ -20,20 +42,16 @@ const combinedLogs = computed(() => {
     timestamp: l.timestamp,
     level: l.level || 'info',
     symbol: l.symbol || '-',
-    message: l.message || ''
+    message: l.message || '',
+    trade: null
   }));
   const tradeLogs = (props.state.trades || []).map((t) => ({
     id: `trade_${t.timestamp}_${t.symbol}`,
     timestamp: t.timestamp,
     level: 'trade',
     symbol: t.symbol,
-    message: [
-      `${t.symbol} ${t.action || 'trade'} ${t.direction}${t.legExposure ? ' [单腿]' : ''}`,
-      legLine('A', t.aSide, t.aPrice ?? t.aPriceUsed, props.fmt) + (t.aFilledQty != null ? ` fill=${props.fmt(t.aFilledQty, 4)}` : ''),
-      legLine('B', t.bSide, t.bPrice ?? t.bPriceUsed, props.fmt) + (t.bFilledQty != null ? ` fill=${props.fmt(t.bFilledQty, 4)}` : ''),
-      `qty ${props.fmt(t.qty, 4)}`,
-      `pnl ${props.fmt(t.netPnl, 4)} USDT${t.simulated ? ' (sim)' : ''}`
-    ].join(' · ')
+    message: '',
+    trade: t
   }));
   return [...runtimeLogs, ...tradeLogs]
     .sort((a, b) => b.timestamp - a.timestamp)
@@ -58,7 +76,43 @@ const combinedLogs = computed(() => {
           <span class="log-symbol">{{ log.symbol || '-' }}</span>
           <span class="log-level">{{ log.level }}</span>
         </div>
-        <div class="log-message">{{ log.message }}</div>
+        <template v-if="log.trade">
+          <div class="log-message trade-head">
+            {{ log.trade.symbol }} {{ log.trade.action || 'trade' }} {{ log.trade.direction }}
+            <span v-if="log.trade.legExposure" class="trade-warn">[单腿]</span>
+            <span v-if="log.trade.simulated" class="trade-sim">(sim)</span>
+          </div>
+          <div class="log-message trade-quote">
+            盘口 {{ bidAskLine('A', log.trade.aBid, log.trade.aAsk, fmt) }}
+            · {{ bidAskLine('B', log.trade.bBid, log.trade.bAsk, fmt) }}
+          </div>
+          <div class="log-message trade-spread">
+            价差 Ab {{ fmtPct(log.trade.spreadAbPct) }}
+            · Ba {{ fmtPct(log.trade.spreadBaPct) }}
+          </div>
+          <div class="log-message trade-legs">
+            {{ legExecLine('A', log.trade.aSide, log.trade.aPriceNominal, log.trade.aFillPrice, log.trade.aFilledQty, fmt) }}
+            <span v-if="fmtSlip(log.trade.aPriceNominal, log.trade.aFillPrice, log.trade.aSide)" class="trade-slip">
+              ({{ fmtSlip(log.trade.aPriceNominal, log.trade.aFillPrice, log.trade.aSide) }})
+            </span>
+          </div>
+          <div class="log-message trade-legs">
+            {{ legExecLine('B', log.trade.bSide, log.trade.bPriceNominal, log.trade.bFillPrice, log.trade.bFilledQty, fmt) }}
+            <span v-if="fmtSlip(log.trade.bPriceNominal, log.trade.bFillPrice, log.trade.bSide)" class="trade-slip">
+              ({{ fmtSlip(log.trade.bPriceNominal, log.trade.bFillPrice, log.trade.bSide) }})
+            </span>
+          </div>
+          <div class="log-message trade-summary">
+            qty {{ fmt(log.trade.qty, 4) }}
+            · pnl {{ fmt(log.trade.netPnl, 4) }} USDT
+            · cum {{ fmt(log.trade.cumPnl, 4) }}
+            · pos A={{ fmt(log.trade.aPosQty, 4) }} B={{ fmt(log.trade.bPosQty, 4) }}
+          </div>
+          <div v-if="log.trade.failReason" class="log-message trade-warn-line">
+            失败腿 {{ log.trade.failedLeg }}: {{ log.trade.failReason }}
+          </div>
+        </template>
+        <div v-else class="log-message">{{ log.message }}</div>
       </article>
     </div>
   </section>

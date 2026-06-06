@@ -79,12 +79,22 @@ export class Order {
 }
 
 export class Balance {
-  constructor({ currency, exchange, total = 0, available = 0, frozen = 0, timestamp }) {
+  constructor({
+    currency,
+    exchange,
+    total = 0,
+    available = 0,
+    frozen = 0,
+    marginUsed = null,
+    timestamp
+  }) {
     this.currency = currency;
     this.exchange = exchange;
     this.total = Number(total);
     this.available = Number(available);
-    this.frozen = Number(frozen);
+    const used = marginUsed != null ? Number(marginUsed) : Number(frozen);
+    this.marginUsed = Math.max(0, used);
+    this.frozen = Math.max(0, Number(frozen) || this.marginUsed);
     this.timestamp = timestamp || Date.now();
   }
 }
@@ -100,6 +110,8 @@ export class Position {
     markPrice = 0,
     unrealizedPnl = 0,
     leverage = 1,
+    initialMargin = 0,
+    maintMargin = 0,
     timestamp
   }) {
     this.symbol = symbol;
@@ -111,6 +123,8 @@ export class Position {
     this.markPrice = Number(markPrice);
     this.unrealizedPnl = Number(unrealizedPnl);
     this.leverage = Number(leverage);
+    this.initialMargin = Number(initialMargin);
+    this.maintMargin = Number(maintMargin);
     this.timestamp = timestamp || Date.now();
   }
 }

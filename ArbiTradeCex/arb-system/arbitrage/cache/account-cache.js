@@ -31,11 +31,12 @@ export class AccountCache {
     this.balanceCache.set(`${exchange}:USDT`, {
       total: data.total,
       available: data.available ?? data.total,
+      marginUsed: data.marginUsed ?? data.frozen ?? 0,
       updatedAtMs: data.updatedAtMs || Date.now()
     });
   }
 
-  mergeBalance(exchange, { currency = 'USDT', total, available } = {}) {
+  mergeBalance(exchange, { currency = 'USDT', total, available, marginUsed, frozen } = {}) {
     const cur = String(currency).toUpperCase();
     if (cur !== 'USDT') return;
     const totalN = Number(total);
@@ -48,6 +49,7 @@ export class AccountCache {
     this.setBalance(exchange, {
       total: Number.isFinite(totalN) ? totalN : availN,
       available: Number.isFinite(availN) ? availN : totalN,
+      marginUsed: marginUsed ?? frozen ?? 0,
       updatedAtMs: Date.now()
     });
   }
@@ -137,6 +139,7 @@ export class AccountCache {
     this.setBalance(exchange, {
       total,
       available,
+      marginUsed: Number(usdt.marginUsed ?? usdt.frozen ?? Math.max(0, total - available)),
       updatedAtMs: Date.now()
     });
   }
