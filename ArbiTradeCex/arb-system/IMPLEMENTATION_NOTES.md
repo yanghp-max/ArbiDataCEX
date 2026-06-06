@@ -63,15 +63,29 @@
 
 ---
 
-## 3. 开仓最小量守卫（防单腿）
+## 3. 开仓最小量守卫与两腿数量对齐（防单腿）
 
-**问题**：`clipQty` 后数量可能低于交易所最小量，或 Gate `gateSize` 未重算，存在单腿风险。
+**问题**：
 
-**实现**：
+1. `clipQty` 后数量可能低于交易所最小量，或 Gate `gateSize` 未重算，存在单腿风险。
+2. 旧逻辑对 Gate 张数合约用 **floor**，且未强制 `binance.minQty`（JSON），导致如 BTWUSDT：Binance 最少 122、Gate 1 张=100，实际下 100 → 仅 Gate 成交。
 
-- `common/utils/cross-exchange-order-qty.js` — `resolveHedgeQtyFromBaseQty`
-- `arbitrage/risk/risk-manager.js` — `alignHedgeFromBaseQty`、`finalizeOpenOrder`
-- `arbitrage/task-manager/cex-cex-task.js` — 开仓走 `finalizeOpenOrder`；平仓对齐 `gateSize`；不满足时发 `MIN_QTY_SKIP`
+**实现**（`common/utils/cross-exchange-order-qty.js`）：
+
+| 规则 | 说明 |
+|------|------|
+| 币安下限 | `max(按 orderUsd 换算, JSON 中 binance.minQty)` |
+| Gate 张数倍 | `gateBaseUnit = quantoMultiplier × gate.stepSize`（例：100 或 10） |
+| 开仓对齐 | **向上** `ceil` 到 `gateBaseUnit` 整数倍（122 + 倍数 10 → 130；122 + 倍数 100 → 200） |
+| 平仓对齐 | **向下** `floor`，避免超平 |
+| 入口 | `resolveMinHedgeQty`、`finalizeOpenOrder(round:'ceil')`、`alignHedgeFromBaseQty(round:'floor')` |
+
+**其它**：
+
+- `cex/adapters/binance-adapter.js`：下单量按 `stepSize` 格式化；API 错误中文提示；双向持仓自动带 `positionSide`
+- `arbitrage/execution/order-executor.js`：单腿仍成交时记录成交 + `[实盘·单腿风险]` 日志（不自动平仓）
+
+**配置来源**：`config/min-order-qty.json` 为脚本生成**快照**，见 §11「未实现」。
 
 ---
 
@@ -108,13 +122,67 @@
 
 ---
 
-## 7. 已撤销 / 未实现
+## 7. 已撤销
 
 | 项 | 说明 |
 |----|------|
 | 一键平仓（position drain） | 按需求回退；仅保留信号驱动的开/平仓 |
-| Dashboard 独立进程 + Redis | 未做；当前同进程 + 分频道已缓解 OOM |
-| `RollingSignalEngine` median 用 raw/adj 混用 | 历史备注，未改 |
+| 实盘逐步跳过日志（预热/z/预占等） | 曾加过 `[实盘·跳过]` 逐步中文日志，后按需求删除；仅保留单腿成交记录与 `[实盘·单腿风险]` |
+
+---
+
+## 11. 未实现（有意暂不做的能力）
+
+以下在讨论或 demo 文档中出现过，**当前代码未做**；需要时再排期。
+
+### 11.1 最小下单量配置自动刷新
+
+**现状**：
+
+- `config/min-order-qty.json`、`config/symbols_config.json` 由 `npm run build:symbols-min-qty` 从 Binance/Gate REST **离线生成**（见 `scripts/build-common-min-order-qty.js`）。
+- 策略**启动时读 JSON**，运行中**不会**再拉 `exchangeInfo` / Gate `contracts`。
+- 文件头有 `generatedAt`；各币 `priceRef` 为生成时 bid/ask，仅用于写入当时的 `minNotional → minQty`。
+
+**交易所会变**：`minQty`、`stepSize`、`minNotional`、Gate `quanto_multiplier`、`enable_decimal`、上下架等。
+
+**未实现**：
+
+- 启动时或定时（如每日）自动重建/增量更新 `min-order-qty.json`
+- 运行时按 symbol 实时查交易所规则再下单
+- 规则变更告警（JSON 年龄 / 与 API  diff）
+
+**临时运维**：规则疑变、拒单、上新币后，在 ECS 手动执行 `npm run build:symbols-min-qty` 并重启 `npm run live`。
+
+### 11.2 买一 / 卖一数量（盘口深度）
+
+**现状**：
+
+- 公共 WS 只解析 **bid/ask 价格**；`QuoteAggregator` tick 无 `bidQty`/`askQty`。
+- 下单量由 `orderUsd` + JSON 精度规则 + 仓位上限决定；**不**限制在「当前一档可成交量」内。
+- 发 **市价单**；一档不够时会吃多档（滑点），信号/PnL 仍按一档价估算。
+
+**未实现**：
+
+- WS 解析 Binance `B`/`A`、Gate book_ticker 量字段
+- 下单前 `qty ≤ min(本腿要吃的一侧一档量)` 或按深度裁剪
+- 深度不足时跳过或拆单
+
+### 11.3 单腿成交自动补偿
+
+**现状**：一腿成、一腿败时记录成交并打 `[实盘·单腿风险]`，**不**自动撤单/反向平敞口/重试失败腿。
+
+**未实现**（demo 文档曾写过、后简化掉）：
+
+- 失败腿重试、`max_order_retry`
+- 已成交腿按盘口反向平仓
+- 单腿时暂停该 symbol 直至人工处理
+
+### 11.4 其它架构项
+
+| 项 | 说明 |
+|----|------|
+| Dashboard 独立进程 + Redis | 未做；同进程 + 分频道推送已缓解 OOM |
+| `RollingSignalEngine` median raw/adj 混用 | 历史备注，未改 |
 
 ---
 
@@ -167,4 +235,4 @@ npm run live
 
 ---
 
-*文档版本：2026-05-24，对应 Dashboard v5 channels 与 `windowReady` 锁存实现。*
+*文档版本：2026-06-06，含两腿数量 ceil 对齐、单腿记录，及 §11 未实现清单。*

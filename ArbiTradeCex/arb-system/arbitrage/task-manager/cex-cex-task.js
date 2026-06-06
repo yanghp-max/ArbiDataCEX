@@ -375,6 +375,14 @@ export class CexCexTask {
           + ` A=${fill.aFilledQty} B=${fill.bFilledQty}`
           + ` pnl=${netPnl.toFixed(4)} USDT`
         );
+        if (fill.legExposure) {
+          const why = fill.failedLeg === 'binance'
+            ? `Binance未成交: ${fill.failReason || '成交量为0'}`
+            : fill.failedLeg === 'gate'
+              ? `Gate未成交: ${fill.failReason || '成交量为0'}`
+              : `A=${fill.aFilledQty} B=${fill.bFilledQty}`;
+          console.warn(`[实盘·单腿风险] ${symbol} ${why}`);
+        }
       }
       this.sr.eventBus.emitExecutionStatus({
         stage: 'TRADE_DONE',

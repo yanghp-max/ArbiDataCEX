@@ -22,16 +22,46 @@ export function resolveGateMinBaseQty(gateCfg) {
   return 0;
 }
 
-/** 币安最小 U 换算后的对齐步长：张数合约与 Gate multiplier 对齐 */
-export function resolveAlignStep(binanceStepSize, gateCfg) {
-  const binStep = Number(binanceStepSize);
-  if (!Number.isFinite(binStep) || binStep <= 0) return 0;
+/**
+ * Gate 张数合约：1 个「Gate 步进单位」对应多少 Binance 基础币。
+ * 例：multiplier=100、gateStep=1 → 100；multiplier=10、gateStep=1 → 10（币安须为其整数倍）。
+ */
+export function resolveGateBaseAlignStep(gateCfg) {
   if (!gateCfg || gateCfg.enableDecimal || gateCfg.quantityUnit === 'base') {
-    return binStep;
+    return Number(gateCfg?.stepSize) || 0;
   }
-  const mul = Number(gateCfg.quantoMultiplier);
-  if (Number.isFinite(mul) && mul > 0) return Math.max(binStep, mul);
-  return binStep;
+  const mult = Number(gateCfg?.quantoMultiplier);
+  const gateStep = Number(gateCfg?.stepSize || 1);
+  if (!Number.isFinite(mult) || mult <= 0) return 0;
+  return mult * (gateStep > 0 ? gateStep : 1);
+}
+
+/** @deprecated 使用 resolveGateBaseAlignStep */
+export function resolveAlignStep(binanceStepSize, gateCfg) {
+  const gateBase = resolveGateBaseAlignStep(gateCfg);
+  const binStep = Number(binanceStepSize);
+  if (!Number.isFinite(binStep) || binStep <= 0) return gateBase;
+  if (!(gateBase > 0)) return binStep;
+  return Math.max(binStep, gateBase);
+}
+
+function isAligned(value, step) {
+  if (!(step > 0)) return true;
+  const rem = value % step;
+  return rem < 1e-9 || Math.abs(rem - step) < 1e-9;
+}
+
+/** 向上对齐到 step 整数倍（已是整数倍则不变：250+step100→250，122+step100→200） */
+export function ceilToStepMultiple(value, step) {
+  if (!Number.isFinite(value) || value <= 0 || !(step > 0)) return 0;
+  if (isAligned(value, step)) return value;
+  return value + (step - (value % step));
+}
+
+/** 向下对齐到 step 整数倍 */
+export function floorToStepMultiple(value, step) {
+  if (!Number.isFinite(value) || value <= 0 || !(step > 0)) return 0;
+  return floorByStep(value, step);
 }
 
 /**
@@ -48,8 +78,58 @@ export function resolveEffectiveMinNotional(orderUsd, binanceCfg) {
   return 0;
 }
 
+/** JSON 里 binance.minQty（LOT_SIZE + MIN_NOTIONAL 合成，build 脚本写入） */
+export function resolveBinanceApiMinBaseQty(binanceCfg) {
+  const stepSize = Number(binanceCfg?.stepSize);
+  const minQty = Number(binanceCfg?.minQty);
+  if (!Number.isFinite(stepSize) || stepSize <= 0) return 0;
+  if (!Number.isFinite(minQty) || minQty <= 0) return 0;
+  return ceilByStep(minQty, stepSize);
+}
+
+/**
+ * 币安基础币 ↔ Gate 张数对齐。
+ * round='ceil'（开仓/最小量）：币安量向上调到 Gate 张数倍的整数倍。
+ * round='floor'（平仓截断）：向下对齐，避免超平。
+ */
+export function alignHedgeBaseQty({ baseQty, binanceCfg, gateCfg, round = 'ceil' }) {
+  const stepSize = Number(binanceCfg?.stepSize);
+  if (!Number.isFinite(stepSize) || stepSize <= 0 || !(baseQty > 0)) {
+    return { qty: 0, gateSize: 0 };
+  }
+
+  const toMultiple = round === 'floor' ? floorToStepMultiple : ceilToStepMultiple;
+  const toBinStep = round === 'floor' ? floorByStep : ceilByStep;
+
+  let qty = toBinStep(baseQty, stepSize);
+  if (qty <= 0) return { qty: 0, gateSize: 0 };
+
+  if (gateCfg?.quantityUnit === 'base' || gateCfg?.enableDecimal) {
+    const gateStep = Number(gateCfg?.stepSize) || stepSize;
+    qty = toMultiple(qty, gateStep);
+    if (qty <= 0) return { qty: 0, gateSize: 0 };
+    return { qty, gateSize: qty };
+  }
+
+  const multiplier = Number(gateCfg?.quantoMultiplier || 0);
+  const gateStep = Number(gateCfg?.stepSize || 1);
+  if (!(multiplier > 0)) return { qty: 0, gateSize: 0 };
+
+  const gateBaseUnit = multiplier * (gateStep > 0 ? gateStep : 1);
+  qty = toMultiple(qty, gateBaseUnit);
+  if (qty <= 0) return { qty: 0, gateSize: 0 };
+
+  let gateSize = qty / multiplier;
+  if (gateStep > 1) {
+    gateSize = toMultiple(gateSize, gateStep);
+    qty = gateSize * multiplier;
+  }
+  return { qty, gateSize };
+}
+
 /**
  * 币安侧：有效最小 U → 基础币数量（实时价）；特例币用 JSON lotMinQty。
+ * 再向上对齐到 Gate 张数倍数（resolveGateBaseAlignStep）。
  */
 export function resolveBinanceMinBaseQty({ orderUsd, aPrice, binanceCfg, gateCfg, useLotMinQty }) {
   const stepSize = Number(binanceCfg?.stepSize);
@@ -64,16 +144,19 @@ export function resolveBinanceMinBaseQty({ orderUsd, aPrice, binanceCfg, gateCfg
     const minU = resolveEffectiveMinNotional(orderUsd, binanceCfg);
     if (minU <= 0 || !Number.isFinite(aPrice) || aPrice <= 0) return 0;
     qty = ceilByStep(minU / aPrice, stepSize);
-    const alignStep = resolveAlignStep(stepSize, gateCfg);
-    if (alignStep > stepSize) {
-      qty = ceilByStep(qty, alignStep);
-    }
+    const apiMin = resolveBinanceApiMinBaseQty(binanceCfg);
+    if (apiMin > 0) qty = Math.max(qty, apiMin);
+  }
+
+  const gateBaseUnit = resolveGateBaseAlignStep(gateCfg);
+  if (gateBaseUnit > 0) {
+    qty = ceilToStepMultiple(qty, gateBaseUnit);
   }
   return qty;
 }
 
 /**
- * 两腿都能下单的最小基础币数量，并按 Gate 张数回推对齐。
+ * 两腿都能下单的最小基础币数量（币安 min + Gate min，再向上对齐 Gate 张数倍）。
  */
 export function resolveMinHedgeQty({ orderUsd, aPrice, binanceCfg, gateCfg, useLotMinQty }) {
   const stepSize = Number(binanceCfg?.stepSize);
@@ -92,28 +175,17 @@ export function resolveMinHedgeQty({ orderUsd, aPrice, binanceCfg, gateCfg, useL
     useLotMinQty
   });
   const qGate = resolveGateMinBaseQty(gateCfg);
-  let qty = Math.max(qBinance, qGate);
-  if (qty <= 0) {
+  const rawQty = Math.max(qBinance, qGate);
+  if (rawQty <= 0) {
     return { qty: 0, gateSize: 0, effectiveMinNotional, qBinance, qGate };
   }
 
-  const gateStep = Number(gateCfg?.stepSize || 1);
-  let gateSize = 0;
-
-  if (gateCfg?.quantityUnit === 'base' || gateCfg?.enableDecimal) {
-    gateSize = floorByStep(qty, gateStep);
-    if (gateSize <= 0 && qGate > 0) gateSize = ceilByStep(qGate, gateStep);
-    qty = gateSize;
-  } else {
-    const multiplier = Number(gateCfg?.quantoMultiplier || 0);
-    if (multiplier > 0) {
-      gateSize = floorByStep(qty / multiplier, gateStep);
-      if (gateSize <= 0 && qGate > 0) {
-        gateSize = ceilByStep(qGate / multiplier, gateStep);
-      }
-      qty = floorByStep(gateSize * multiplier, stepSize);
-    }
-  }
+  const { qty, gateSize } = alignHedgeBaseQty({
+    baseQty: rawQty,
+    binanceCfg,
+    gateCfg,
+    round: 'ceil'
+  });
 
   if (qty <= 0 || gateSize <= 0) {
     return { qty: 0, gateSize: 0, effectiveMinNotional, qBinance, qGate };
@@ -121,39 +193,21 @@ export function resolveMinHedgeQty({ orderUsd, aPrice, binanceCfg, gateCfg, useL
   return { qty, gateSize, effectiveMinNotional, qBinance, qGate };
 }
 
-/** 按已有基础币数量向下对齐两腿步进，并回推 Gate 张数 */
-export function resolveHedgeQtyFromBaseQty({ baseQty, binanceCfg, gateCfg }) {
-  const stepSize = Number(binanceCfg?.stepSize);
-  if (!Number.isFinite(stepSize) || stepSize <= 0 || !(baseQty > 0)) {
-    return { qty: 0, gateSize: 0 };
-  }
-
-  let qty = floorByStep(baseQty, stepSize);
-  if (qty <= 0) return { qty: 0, gateSize: 0 };
-
-  const gateStep = Number(gateCfg?.stepSize || 1);
-  let gateSize = 0;
-
-  if (gateCfg?.quantityUnit === 'base' || gateCfg?.enableDecimal) {
-    gateSize = floorByStep(qty, gateStep);
-    qty = gateSize;
-  } else {
-    const multiplier = Number(gateCfg?.quantoMultiplier || 0);
-    if (multiplier > 0) {
-      gateSize = floorByStep(qty / multiplier, gateStep);
-      qty = floorByStep(gateSize * multiplier, stepSize);
-    }
-  }
-
-  if (qty <= 0 || gateSize <= 0) return { qty: 0, gateSize: 0 };
-  return { qty, gateSize };
+/** 按已有基础币数量对齐两腿；开仓用 ceil，平仓用 floor */
+export function resolveHedgeQtyFromBaseQty({ baseQty, binanceCfg, gateCfg, round = 'floor' }) {
+  return alignHedgeBaseQty({ baseQty, binanceCfg, gateCfg, round });
 }
 
 export default {
   resolveGateMinBaseQty,
+  resolveGateBaseAlignStep,
   resolveAlignStep,
+  ceilToStepMultiple,
+  floorToStepMultiple,
   resolveEffectiveMinNotional,
+  resolveBinanceApiMinBaseQty,
   resolveBinanceMinBaseQty,
+  alignHedgeBaseQty,
   resolveMinHedgeQty,
   resolveHedgeQtyFromBaseQty
 };

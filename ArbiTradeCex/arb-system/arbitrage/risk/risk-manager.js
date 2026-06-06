@@ -123,7 +123,8 @@ export class PrecisionChecker {
     const aligned = resolveHedgeQtyFromBaseQty({
       baseQty: clippedQty,
       binanceCfg: cfg.binance,
-      gateCfg: cfg.gate
+      gateCfg: cfg.gate,
+      round: 'ceil'
     });
 
     if (min.qty <= 0 || min.gateSize <= 0) return null;
