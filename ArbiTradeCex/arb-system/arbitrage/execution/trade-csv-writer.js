@@ -39,8 +39,11 @@ const CSV_COLUMNS = [
   'leg_exposure',
   'failed_leg',
   'fail_reason',
+  'lat_local_old_to_order_ms',
+  'lat_local_new_to_order_ms',
   'lat_old_data_freshness_ms',
   'lat_new_data_freshness_ms',
+  'local_span_old_to_new_ms',
   'official_span_old_to_new_ms'
 ];
 

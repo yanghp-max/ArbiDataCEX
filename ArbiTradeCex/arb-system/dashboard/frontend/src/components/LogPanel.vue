@@ -47,18 +47,61 @@ function filledLegs(trade) {
   return legs;
 }
 
+/** 滑点与展示价对齐（避免 Binance 多精度小数造成假滑点） */
+function decimalPlacesFromPrice(price) {
+  const s = String(price);
+  const i = s.indexOf('.');
+  if (i === -1) return 0;
+  return s.length - i - 1;
+}
+
+function roundPrice(price, decimals) {
+  if (!Number.isFinite(Number(price))) return NaN;
+  if (decimals <= 0) return Math.round(Number(price));
+  const f = 10 ** decimals;
+  return Math.round(Number(price) * f) / f;
+}
+
+function nominalPriceForLeg(leg) {
+  if (leg.nominal != null && Number.isFinite(Number(leg.nominal))) return Number(leg.nominal);
+  if (leg.side === 'sell' && leg.bid != null) return Number(leg.bid);
+  if (leg.side === 'buy' && leg.ask != null) return Number(leg.ask);
+  return null;
+}
+
+function calcLegSlippageBps(leg) {
+  const nominal = nominalPriceForLeg(leg);
+  const fill = Number(leg.fill);
+  if (!Number.isFinite(nominal) || nominal === 0 || !Number.isFinite(fill)) return null;
+  const dp = Math.max(decimalPlacesFromPrice(nominal), 6);
+  const refR = roundPrice(nominal, dp);
+  const fillR = roundPrice(fill, dp);
+  if (refR === fillR) return 0;
+  const raw = ((fillR - refR) / refR) * 10000;
+  return leg.side === 'sell' ? -raw : raw;
+}
+
+function formatPriceForDisplay(price, refPrice = price) {
+  const dp = Math.max(decimalPlacesFromPrice(refPrice), 6);
+  const rounded = roundPrice(price, dp);
+  if (!Number.isFinite(rounded)) return '—';
+  return rounded.toFixed(dp);
+}
+
+function formatSlippageBps(bps) {
+  if (bps == null || !Number.isFinite(bps)) return null;
+  if (Math.abs(bps) < 0.005) return '0.00 bps';
+  const sign = bps > 0 ? '+' : '';
+  return `${sign}${bps.toFixed(2)} bps`;
+}
+
 /** 名义价 = 下单时用的盘口：卖@bid，买@ask（与后端 legPricesForDirection 一致） */
 function legQuoteRef(leg) {
-  if (leg.side === 'sell' && leg.bid != null && Number.isFinite(Number(leg.bid))) {
-    return { tag: 'bid', price: Number(leg.bid) };
-  }
-  if (leg.side === 'buy' && leg.ask != null && Number.isFinite(Number(leg.ask))) {
-    return { tag: 'ask', price: Number(leg.ask) };
-  }
-  if (leg.nominal != null && Number.isFinite(Number(leg.nominal))) {
-    return { tag: '名义', price: Number(leg.nominal) };
-  }
-  return null;
+  const nominal = nominalPriceForLeg(leg);
+  if (nominal == null) return null;
+  if (leg.side === 'sell') return { tag: 'bid', price: nominal };
+  if (leg.side === 'buy') return { tag: 'ask', price: nominal };
+  return { tag: '名义', price: nominal };
 }
 
 function legExecLine(leg, fmtFn) {
@@ -66,24 +109,11 @@ function legExecLine(leg, fmtFn) {
   if (!ref) {
     return `成交 ${leg.fill != null ? fmtFn(leg.fill, 6) : '—'}`;
   }
-  const fill = leg.fill != null ? fmtFn(leg.fill, 6) : '—';
-  const slip = fmtSlip(ref.price, leg.fill, leg.side);
+  const fill = leg.fill != null ? formatPriceForDisplay(leg.fill, ref.price) : '—';
+  const quote = formatPriceForDisplay(ref.price, ref.price);
+  const slip = formatSlippageBps(calcLegSlippageBps(leg));
   const slipPart = slip ? `  滑点 ${slip}` : '';
-  return `盘口 ${ref.tag} ${fmtFn(ref.price, 6)} → 成交价 ${fill}${slipPart}`;
-}
-
-function slipBps(nominal, fill, side) {
-  if (nominal == null || fill == null || !Number.isFinite(nominal) || nominal === 0) return null;
-  const raw = ((fill - nominal) / nominal) * 10000;
-  if (side === 'sell') return -raw;
-  return raw;
-}
-
-function fmtSlip(nominal, fill, side) {
-  const bps = slipBps(nominal, fill, side);
-  if (bps == null || !Number.isFinite(bps)) return null;
-  const sign = bps > 0 ? '+' : '';
-  return `${sign}${bps.toFixed(2)} bps`;
+  return `盘口 ${ref.tag} ${quote} → 成交价 ${fill}${slipPart}`;
 }
 
 function sideLabel(side) {
@@ -175,6 +205,7 @@ const combinedLogs = computed(() => {
             </template>
             <template v-else-if="hasDualLegGross(log.trade)">
               毛 {{ formatPnl(log.trade.grossPnl) }} USDT · 净 {{ formatPnl(log.trade.netPnl) }} USDT
+              <span v-if="log.trade.feeCost > 0"> · 手续费 -{{ fmt(log.trade.feeCost, 4) }}</span>
             </template>
             <template v-else>
               净 {{ formatPnl(log.trade.netPnl) }} USDT

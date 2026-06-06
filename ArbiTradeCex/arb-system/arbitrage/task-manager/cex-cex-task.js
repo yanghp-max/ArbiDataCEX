@@ -23,32 +23,34 @@ import {
   tickPriceSnapshot,
   tickPriceSnapshotMatch
 } from '../risk/risk-manager.js';
-import { calcTradePnl, calcTradeGross } from '../execution/result-reporter.js';
+import { calcTradePnl, calcTradeGross, calcTradeFeeCost } from '../execution/result-reporter.js';
 import {
   createTradeLatencyTrace,
   formatLatencyLogLines,
   setFreshTickOnLatencyTrace
 } from '../monitoring/trade-latency.js';
 
-function formatFilledLegLine(exchange, side, quoteBid, quoteAsk, fillPrice, qty) {
+import {
+  calcLegSlippageBps,
+  formatSlippageBps,
+  formatPriceForDisplay,
+  nominalPriceForLeg
+} from '../monitoring/trade-slippage.js';
+
+function formatFilledLegLine(exchange, side, quoteBid, quoteAsk, fillPrice, qty, priceNominal = null) {
   const quoteTag = side === 'sell' ? 'bid' : side === 'buy' ? 'ask' : '名义';
-  const quotePx = side === 'sell'
-    ? quoteBid
-    : side === 'buy'
-      ? quoteAsk
-      : (quoteBid ?? quoteAsk);
-  const quote = quotePx != null && Number.isFinite(Number(quotePx))
-    ? Number(quotePx).toFixed(6)
-    : '—';
+  const nominal = nominalPriceForLeg({
+    side,
+    bid: quoteBid,
+    ask: quoteAsk,
+    priceNominal
+  });
+  const quote = nominal != null ? formatPriceForDisplay(nominal, nominal) : '—';
   const fill = fillPrice != null && Number.isFinite(Number(fillPrice))
-    ? Number(fillPrice).toFixed(6)
+    ? formatPriceForDisplay(Number(fillPrice), nominal ?? fillPrice)
     : '—';
-  let slip = '';
-  if (quotePx != null && fillPrice != null && Number(quotePx) !== 0) {
-    const raw = ((Number(fillPrice) - Number(quotePx)) / Number(quotePx)) * 10000;
-    const bps = side === 'sell' ? -raw : raw;
-    slip = ` 滑点${bps >= 0 ? '+' : ''}${bps.toFixed(2)}bps`;
-  }
+  const bps = calcLegSlippageBps({ side, nominal, fill: fillPrice });
+  const slip = bps != null ? ` 滑点${formatSlippageBps(bps)}` : '';
   const sideCn = side === 'buy' ? '买' : side === 'sell' ? '卖' : String(side || '-');
   return `  ${exchange} ${sideCn} 盘口 ${quoteTag} ${quote} → 成交价 ${fill} qty=${qty}${slip}`;
 }
@@ -440,7 +442,8 @@ export class CexCexTask {
             quote.aBid,
             quote.aAsk,
             fill.aFillPrice ?? fill.aPrice,
-            fill.aFilledQty
+            fill.aFilledQty,
+            quote.aPriceNominal
           ));
         }
         if (fill.bFilledQty > 0) {
@@ -450,7 +453,8 @@ export class CexCexTask {
             quote.bBid,
             quote.bAsk,
             fill.bFillPrice ?? fill.bPrice,
-            fill.bFilledQty
+            fill.bFilledQty,
+            quote.bPriceNominal
           ));
         }
         const pnlTag = fill.pnlComplete === false || netPnl == null
@@ -463,11 +467,13 @@ export class CexCexTask {
           console.log(line);
         }
         const gross = calcTradeGross(fill);
+        const feeCost = calcTradeFeeCost(fill);
         if (netPnl != null && Number.isFinite(netPnl)) {
           if (gross != null && Number.isFinite(gross)) {
             console.log(
               `  实际利润 毛${gross >= 0 ? '+' : ''}${gross.toFixed(4)}`
               + ` · 净${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(4)} USDT（回执）`
+              + ` · 手续费 -${feeCost.toFixed(4)}`
             );
           } else {
             console.log(`  实际利润 净${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(4)} USDT（回执·单腿）`);
