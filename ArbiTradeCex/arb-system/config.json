@@ -14,7 +14,7 @@
     "signalMaxAgeMs": 50,
     "fundingMin": -0.1,
     "binanceBpsPerLeg": 5,
-    "gateBpsPerLeg": 2,
+    "gateBpsPerLeg": 4,
     "cexFeeBpsPerLeg": 4,
     "mockBalanceUsdt": 10000,
     "minAvailableUsdt": 6,
