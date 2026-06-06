@@ -55,6 +55,11 @@ export class SharedResources {
     this.cexManager = await CexManager.createDefault(strat);
     this.useMockAccount = Boolean(strat.useMockAccount) && !this.tradingEnabled;
 
+    const defaultLeverage = Number(strat.defaultLeverage);
+    if (!this.useMockAccount && defaultLeverage >= 1 && strat.symbols?.length) {
+      await this.cexManager.applyDefaultLeverage(strat.symbols, defaultLeverage);
+    }
+
     this.accountCache.minAvailableUsdt = strat.minAvailableUsdt;
     this.accountCache.accountCacheMaxAgeMs = Number(strat.accountCacheMaxAgeMs) || 5000;
 

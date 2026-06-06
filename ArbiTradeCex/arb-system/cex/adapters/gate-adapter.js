@@ -755,6 +755,41 @@ export class GateAdapter extends BaseAdapter {
     console.log(`[Gate] private streams (${modeNote}: ${balNote} + ${posNote})`);
   }
 
+  /** 设置 USDT 永续杠杆；逐仓与全仓接口参数不同，失败时自动尝试另一种 */
+  async setSymbolLeverage(symbol, leverage = 1) {
+    const contract = this.toGateContract(symbol);
+    const lev = String(Math.max(1, Math.min(125, Math.floor(Number(leverage) || 1))));
+    try {
+      const data = await this.#signedRequest(
+        'POST',
+        `/futures/usdt/positions/${contract}/leverage`,
+        { leverage: lev }
+      );
+      return {
+        symbol: this.toCompactSymbol(symbol),
+        contract,
+        leverage: Number(data?.leverage ?? data?.lever ?? lev),
+        mode: 'isolated'
+      };
+    } catch (isolatedErr) {
+      try {
+        const data = await this.#signedRequest(
+          'POST',
+          `/futures/usdt/positions/${contract}/leverage`,
+          { leverage: '0', cross_leverage_limit: lev }
+        );
+        return {
+          symbol: this.toCompactSymbol(symbol),
+          contract,
+          leverage: Number(data?.cross_leverage_limit ?? data?.lever ?? lev),
+          mode: 'cross'
+        };
+      } catch (crossErr) {
+        throw new Error(`逐仓: ${isolatedErr.message}; 全仓: ${crossErr.message}`);
+      }
+    }
+  }
+
   async stopPrivateAccountStream() {
     this.privatePositionsSubscribed = false;
     this.privateBalancesSubscribed = false;

@@ -1,5 +1,6 @@
 import { BinanceAdapter } from './adapters/binance-adapter.js';
 import { GateAdapter } from './adapters/gate-adapter.js';
+import { applyDefaultLeverage } from './leverage-bootstrap.js';
 
 export { BinanceAdapter, GateAdapter };
 export { BaseAdapter } from './adapters/base-adapter.js';
@@ -113,6 +114,10 @@ export class CexManager {
       this.get('binance')?.stopPrivateAccountStream?.(),
       this.get('gate')?.stopPrivateAccountStream?.()
     ]);
+  }
+
+  async applyDefaultLeverage(symbols, leverage) {
+    return applyDefaultLeverage(this, symbols, leverage);
   }
 
   static async createDefault(strategyConfig = {}) {

@@ -4,6 +4,7 @@
     "zOpen": 1.0,
     "zClose": 2.0,
     "orderUsd": 5,
+    "defaultLeverage": 1,
     "minOrderLotQtySymbols": [],
     "maxPositionUsd": 50,
     "cooldownMs": 1000,

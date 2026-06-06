@@ -87,6 +87,23 @@
 
 **配置来源**：`config/min-order-qty.json` 为脚本生成**快照**，见 §11「未实现」。
 
+### 3.1 启动统一杠杆
+
+**配置**（`config.json`）：
+
+```json
+"defaultLeverage": 1
+```
+
+**行为**：`SharedResources.init` 连接交易所后，对 `selected_symbols` 逐个调用：
+
+- Binance PM：`POST /papi/v1/um/leverage`
+- Gate USDT 永续：`POST /futures/usdt/positions/{contract}/leverage`（逐仓失败则按全仓 `cross_leverage_limit` 重试）
+
+日志前缀 `[Leverage]`。设为 `0` 或删除该字段则跳过。mock 账户模式不调用。
+
+**说明**：1x 通常对应 Binance 档位里**更高的名义持仓上限**，有利于降低 `-2027` 风险；仍不替代 §11.1 的 bracket 预检。
+
 ---
 
 ## 4. Gate 单币种模式
@@ -147,6 +164,7 @@
 
 **未实现**：
 
+- 下单前查询 Binance `leverageBracket` / 币种持仓上限，与最小对冲量比对（避免 Gate 已成、Binance `-2027` 拒单）
 - 启动时或定时（如每日）自动重建/增量更新 `min-order-qty.json`
 - 运行时按 symbol 实时查交易所规则再下单
 - 规则变更告警（JSON 年龄 / 与 API  diff）

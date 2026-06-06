@@ -188,6 +188,20 @@ export class BinanceAdapter extends BaseAdapter {
     return Number(data.lastFundingRate);
   }
 
+  /** 设置 U 本位合约初始杠杆（Portfolio Margin: POST /papi/v1/um/leverage） */
+  async setSymbolLeverage(symbol, leverage = 1) {
+    const lev = Math.max(1, Math.min(125, Math.floor(Number(leverage) || 1)));
+    const data = await this.#signedRequest('POST', '/papi/v1/um/leverage', {
+      symbol: this.toExchangeSymbol(symbol),
+      leverage: lev
+    });
+    return {
+      symbol: this.toCompactSymbol(symbol),
+      leverage: Number(data?.leverage ?? lev),
+      maxNotionalValue: data?.maxNotionalValue != null ? Number(data.maxNotionalValue) : null
+    };
+  }
+
   #signQuery(params) {
     const p = new URLSearchParams({ ...params, timestamp: String(Date.now()), recvWindow: '5000' });
     const sig = cryptoUtils.hmacSha256(p.toString(), process.env.BINANCE_API_SECRET);
