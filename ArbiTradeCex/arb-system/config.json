@@ -14,7 +14,7 @@
     "signalMaxAgeMs": 50,
     "fundingMin": -0.1,
     "feeBpsTotal": 10,
-    "slippageBpsTotal": 10,
+    "slippageBpsTotal": 4,
     "mockBalanceUsdt": 10000,
     "minAvailableUsdt": 6,
     "balanceCheckRate": 0.1,
