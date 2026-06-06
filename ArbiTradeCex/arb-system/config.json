@@ -13,7 +13,7 @@
     "maxWsLatencyMs": 100,
     "signalMaxAgeMs": 50,
     "fundingMin": -0.1,
-    "cexFeeBpsPerLeg": 2,
+    "cexFeeBpsPerLeg": 4,
     "mockBalanceUsdt": 10000,
     "minAvailableUsdt": 6,
     "balanceCheckRate": 0.1,
