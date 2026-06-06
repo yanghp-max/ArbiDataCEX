@@ -47,6 +47,7 @@ const CSV_COLUMNS = [
   'lat_reserve_ms',
   'lat_async_queue_ms',
   'lat_recheck_ms',
+  'lat_depth_fetch_ms',
   'lat_order_place_binance_ms',
   'lat_order_place_gate_ms',
   'lat_order_place_max_ms',

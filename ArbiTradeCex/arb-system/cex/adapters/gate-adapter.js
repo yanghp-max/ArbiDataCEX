@@ -855,6 +855,33 @@ export class GateAdapter extends BaseAdapter {
     }
   }
 
+  /** 公开深度 REST；size 换算为 base 数量（contracts × quanto_multiplier） */
+  async getOrderBook(symbol, limit = 20, options = {}) {
+    const contract = this.toGateContract(symbol);
+    const depthLimit = Math.min(Math.max(Number(limit) || 20, 5), 50);
+    const timeout = Number(options.timeoutMs) || 5000;
+    const { data } = await axios.get(`${this.config.restUrl}/futures/usdt/order_book`, {
+      params: { contract, limit: depthLimit, with_id: false },
+      timeout
+    });
+    const mult = this.#getContractMultiplier(contract);
+    const parse = (rows) => (Array.isArray(rows) ? rows : [])
+      .map((row) => {
+        const price = Number(Array.isArray(row) ? row[0] : row.p);
+        const contracts = Number(Array.isArray(row) ? row[1] : row.s);
+        return {
+          price,
+          size: contracts * mult
+        };
+      })
+      .filter((x) => Number.isFinite(x.price) && x.price > 0 && Number.isFinite(x.size) && x.size > 0);
+    return {
+      bids: parse(data.bids).sort((a, b) => b.price - a.price),
+      asks: parse(data.asks).sort((a, b) => a.price - b.price),
+      timestamp: Date.now()
+    };
+  }
+
   async stopPrivateAccountStream() {
     this.privatePositionsSubscribed = false;
     this.privateBalancesSubscribed = false;

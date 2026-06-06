@@ -96,6 +96,14 @@ export class CexManager {
     return adapter.getFundingRate(symbol);
   }
 
+  async getOrderBook(exchange, symbol, limit = 20, options = {}) {
+    const adapter = this.#requireAdapter(exchange);
+    if (typeof adapter.getOrderBook !== 'function') {
+      throw new Error(`getOrderBook not supported on ${exchange}`);
+    }
+    return adapter.getOrderBook(symbol, limit, options);
+  }
+
   normalizeSymbol(exchange, symbol) {
     return this.#requireAdapter(exchange).normalizeSymbol(symbol);
   }

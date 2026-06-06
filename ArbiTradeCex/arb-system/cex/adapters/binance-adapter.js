@@ -625,6 +625,28 @@ export class BinanceAdapter extends BaseAdapter {
     });
   }
 
+  /** 公开深度 REST（下单前预检用） */
+  async getOrderBook(symbol, limit = 20, options = {}) {
+    const sym = this.toExchangeSymbol(symbol);
+    const depthLimit = Math.min(Math.max(Number(limit) || 20, 5), 1000);
+    const timeout = Number(options.timeoutMs) || 5000;
+    const { data } = await axios.get(`${this.config.restUrl}/fapi/v1/depth`, {
+      params: { symbol: sym, limit: depthLimit },
+      timeout
+    });
+    const parse = (rows) => (Array.isArray(rows) ? rows : [])
+      .map((row) => ({
+        price: Number(Array.isArray(row) ? row[0] : row.price),
+        size: Number(Array.isArray(row) ? row[1] : row.size)
+      }))
+      .filter((x) => Number.isFinite(x.price) && x.price > 0 && Number.isFinite(x.size) && x.size > 0);
+    return {
+      bids: parse(data.bids).sort((a, b) => b.price - a.price),
+      asks: parse(data.asks).sort((a, b) => a.price - b.price),
+      timestamp: Date.now()
+    };
+  }
+
   async stopPrivateAccountStream() {
     this.#stopListenKeyTimer();
     if (this.privateWs) {

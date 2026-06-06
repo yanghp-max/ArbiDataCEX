@@ -29,7 +29,13 @@
     "processHealthIntervalMs": 30000,
     "symbolsConfigJson": "config/symbols_config.json",
     "minQtyJson": "config/min-order-qty.json",
-    
+
+    "depthCheckEnabled": true,
+    "depthLevels": 20,
+    "depthMinFillRatio": 0.999,
+    "depthMinEdgeBps": 0,
+    "depthFetchTimeoutMs": 500,
+
     "windowSeconds": 600,
     "enforceLatency": true,
     "useMockAccount": false

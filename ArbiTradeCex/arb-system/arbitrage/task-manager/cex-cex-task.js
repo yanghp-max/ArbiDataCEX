@@ -29,6 +29,7 @@ import {
   finalizeTradeLatency,
   formatLatencyLogLines
 } from '../monitoring/trade-latency.js';
+import { DepthChecker } from '../risk/depth-checker.js';
 
 function formatFilledLegLine(exchange, side, quoteBid, quoteAsk, fillPrice, qty) {
   const quoteTag = side === 'sell' ? 'bid' : side === 'buy' ? 'ask' : '名义';
@@ -64,6 +65,7 @@ export class CexCexTask {
     };
     this.precision = precisionChecker;
     this.risk = new RiskManager(strategyConfig);
+    this.depthChecker = new DepthChecker(strategyConfig);
     this.engines = new Map();
     this.lastOrderTs = new Map();
     this.lockedDirection = new Map();
@@ -382,6 +384,45 @@ export class CexCexTask {
       }
 
       markLatency(latencyTrace, 'recheck_pass');
+
+      if (this.depthChecker.enabled && !this.sr.useMockAccount) {
+        markLatency(latencyTrace, 'depth_fetch_start');
+        try {
+          const depth = await this.depthChecker.check({
+            cexManager: this.sr.cexManager,
+            symbol,
+            direction: execDirection,
+            action,
+            lockedDirection,
+            qty: order.qty,
+            tick: freshTick,
+            feeBpsTotal: this.cfg.feeBpsTotal,
+            slippageBpsTotal: this.cfg.slippageBpsTotal
+          });
+          markLatency(latencyTrace, 'depth_fetch_done');
+          if (depth.fetchMs != null) {
+            latencyTrace.depthFetchMs = depth.fetchMs;
+          }
+          if (!depth.pass) {
+            console.log(`[深度] ${symbol} 跳过: ${depth.reason}`);
+            if (depth.detail) console.log(`  ${depth.detail}`);
+            this.#logLatency(latencyTrace, { reason: `深度检查: ${depth.reason}` });
+            this.#releaseSymbolClaim(symbol, { restoreCooldown: true });
+            return;
+          }
+          console.log(
+            `[深度] ${symbol} 通过`
+            + (depth.detail ? ` · ${depth.detail}` : '')
+            + (depth.fetchMs != null ? ` · fetch=${depth.fetchMs}ms` : '')
+          );
+        } catch (err) {
+          markLatency(latencyTrace, 'depth_fetch_done');
+          console.warn(`[深度] ${symbol} 拉取失败: ${err.message}，跳过`);
+          this.#logLatency(latencyTrace, { reason: `深度拉取失败: ${err.message}` });
+          this.#releaseSymbolClaim(symbol, { restoreCooldown: true });
+          return;
+        }
+      }
 
       let fill;
       try {
