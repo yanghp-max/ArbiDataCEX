@@ -5,6 +5,7 @@
  */
 import WebSocket from 'ws';
 import axios from 'axios';
+import { parseJsonPreserveBigIntIds, idToString } from '../../common/utils/parse-json-bigint.js';
 import { BaseAdapter } from './base-adapter.js';
 import { Balance, Order, Position, OrderStatus, EventTypes } from '../types.js';
 import { cryptoUtils } from '../utils.js';
@@ -174,7 +175,8 @@ export class GateAdapter extends BaseAdapter {
         'Content-Type': 'application/json',
         ...extraHeaders
       },
-      timeout: 15000
+      timeout: 15000,
+      transformResponse: [(data) => parseJsonPreserveBigIntIds(data)]
     };
     if (bodyObj) config.data = bodyObj;
     try {
@@ -536,7 +538,7 @@ export class GateAdapter extends BaseAdapter {
     const response = await this.#signedRequest('POST', '/futures/usdt/orders', body, headers);
     const filled = this.#parseGateFilled(response);
     return new Order({
-      orderId: String(response.id),
+      orderId: idToString(response.id),
       clientOrderId: response.text,
       symbol: this.normalizeSymbol(orderData.symbol),
       exchange: this.config.name,
@@ -577,7 +579,7 @@ export class GateAdapter extends BaseAdapter {
     }
     const filled = this.#parseGateFilled(response);
     return new Order({
-      orderId: String(response.id),
+      orderId: idToString(response.id),
       clientOrderId: response.text,
       symbol: this.normalizeSymbol(symbol),
       exchange: this.config.name,
@@ -597,7 +599,7 @@ export class GateAdapter extends BaseAdapter {
     const contract = this.toGateContract(symbol);
     const response = await this.#signedRequest('GET', '/futures/usdt/orders', { contract, limit });
     return (response || []).map((row) => new Order({
-      orderId: String(row.id),
+      orderId: idToString(row.id),
       clientOrderId: row.text,
       symbol: this.normalizeSymbol(symbol),
       exchange: this.config.name,
@@ -624,13 +626,11 @@ export class GateAdapter extends BaseAdapter {
   /** 订单成交明细（PnL 真实 quote / fee 来源） */
   async getOrderTrades(orderId, symbol, options = {}) {
     const contract = this.toGateContract(symbol);
-    const rows = await this.#signedRequest('GET', '/futures/usdt/my_trades', {
-      contract,
-      order: orderId
-    });
+    const orderStr = String(orderId);
     const mult = this.#getContractMultiplier(contract);
     const decimalSize = Boolean(options.decimalSize);
-    return (rows || []).map((row) => {
+
+    const mapRows = (rows) => (rows || []).map((row) => {
       const contracts = Math.abs(Number(row.size || 0));
       const price = Number(row.price || 0);
       const baseQty = decimalSize ? contracts : contracts * mult;
@@ -640,9 +640,28 @@ export class GateAdapter extends BaseAdapter {
         baseQty,
         quoteQty: baseQty * price,
         fee: Math.abs(Number(row.fee || 0)) + Math.abs(Number(row.point_fee || 0)),
-        feeAsset: 'USDT'
+        feeAsset: 'USDT',
+        orderId: idToString(row.order_id ?? row.orderId),
       };
     });
+
+    // order 必须用字符串传递（Gate order_id 常超过 JS 安全整数）
+    let rows = await this.#signedRequest('GET', '/futures/usdt/my_trades', {
+      contract,
+      order: orderStr,
+      limit: 100
+    });
+    let mapped = mapRows(rows).filter((row) => !row.orderId || row.orderId === orderStr);
+    if (mapped.length > 0) return mapped;
+
+    const from = Math.floor(Date.now() / 1000) - 180;
+    rows = await this.#signedRequest('GET', '/futures/usdt/my_trades_timerange', {
+      contract,
+      from,
+      limit: 100
+    });
+    mapped = mapRows(rows).filter((row) => row.orderId === orderStr);
+    return mapped;
   }
 
   /** 汇总订单成交手续费（USDT） */

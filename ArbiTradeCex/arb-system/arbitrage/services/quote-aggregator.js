@@ -66,6 +66,7 @@ export class QuoteAggregator {
     if (aExchangeTs == null || bExchangeTs == null) return null;
 
     const timestamp = Math.max(aExchangeTs, bExchangeTs);
+    const oldestLegExchangeMs = Math.min(aExchangeTs, bExchangeTs);
     const aAgeMs = legExchangeAgeMs(b, now);
     const bAgeMs = legExchangeAgeMs(g, now);
     const aLatencyMs = legLatencyMs(b);
@@ -80,6 +81,7 @@ export class QuoteAggregator {
     return {
       symbol: sym,
       timestamp,
+      oldestLegExchangeMs,
       localTimestamp: now,
       priceAgeMs,
       legSkewMs,

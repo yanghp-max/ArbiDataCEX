@@ -51,8 +51,9 @@ export function useFormatters() {
   }
 
   function formatPnl(v) {
+    if (v == null) return '待确认';
     const n = Number(v);
-    if (!Number.isFinite(n)) return '-';
+    if (!Number.isFinite(n)) return '待确认';
     const sign = n > 0 ? '+' : '';
     return `${sign}${fmt(n, 4)}`;
   }

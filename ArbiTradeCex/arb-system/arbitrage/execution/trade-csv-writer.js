@@ -39,9 +39,9 @@ const CSV_COLUMNS = [
   'leg_exposure',
   'failed_leg',
   'fail_reason',
-  'lat_signal_exchange_to_order_ms',
-  'lat_fresh_exchange_to_order_ms',
-  'exchange_span_signal_to_fresh_ms'
+  'lat_old_data_freshness_ms',
+  'lat_new_data_freshness_ms',
+  'official_span_old_to_new_ms'
 ];
 
 function csvEscape(value) {

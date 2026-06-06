@@ -167,9 +167,12 @@ const combinedLogs = computed(() => {
             </div>
           </template>
           <div v-else class="log-message trade-warn-line">无成交</div>
-          <div class="log-message trade-profit" :class="pnlClass(log.trade.netPnl)">
+          <div class="log-message trade-profit" :class="pnlClass(log.trade.pnlComplete === false ? null : log.trade.netPnl)">
             <strong>实际利润</strong>
-            <template v-if="hasDualLegGross(log.trade)">
+            <template v-if="log.trade.pnlComplete === false || log.trade.netPnl == null">
+              待确认（Gate/Binance fee 回执未齐）
+            </template>
+            <template v-else-if="hasDualLegGross(log.trade)">
               毛 {{ formatPnl(log.trade.grossPnl) }} USDT · 净 {{ formatPnl(log.trade.netPnl) }} USDT
             </template>
             <template v-else>

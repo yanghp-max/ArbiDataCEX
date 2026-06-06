@@ -337,14 +337,16 @@ export class DashboardBridge {
         lossCount: summary.lossCount ?? 0,
         bySymbol: summary.bySymbol ?? {}
       };
-    } else {
-      const net = tradeRow.netPnl ?? 0;
+    } else if (tradeRow.pnlComplete !== false && tradeRow.netPnl != null && Number.isFinite(tradeRow.netPnl)) {
+      const net = tradeRow.netPnl;
       this.state.summary.totalPnl = tradeRow.cumPnl ?? (this.state.summary.totalPnl + net);
       this.state.summary.tradeCount += 1;
       if (net >= 0) this.state.summary.winCount += 1;
       else this.state.summary.lossCount += 1;
       this.state.summary.bySymbol[tradeRow.symbol] =
         (this.state.summary.bySymbol[tradeRow.symbol] ?? 0) + net;
+    } else {
+      this.state.summary.tradeCount += 1;
     }
     this.#flushTradesUpdate(tradeRow);
   }

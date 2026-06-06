@@ -26,8 +26,9 @@ function quoteSnapshot(direction, tick, spreadOptions = {}) {
 
 const POLL_ATTEMPTS = 5;
 const POLL_INTERVAL_MS = 150;
-const TRADE_FETCH_ATTEMPTS = 8;
-const TRADE_FETCH_INTERVAL_MS = 250;
+const TRADE_FETCH_ATTEMPTS = 16;
+const TRADE_FETCH_INTERVAL_MS = 300;
+const TRADE_FETCH_INITIAL_DELAY_MS = 400;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -265,14 +266,16 @@ export class OrderExecutor {
   }
 
   async #fetchOrderTradesWithRetry(exchange, orderId, symbol, options = {}) {
+    await sleep(exchange === 'gate' ? TRADE_FETCH_INITIAL_DELAY_MS : 150);
+    const orderKey = String(orderId);
     for (let i = 0; i < TRADE_FETCH_ATTEMPTS; i += 1) {
       try {
-        const trades = await this.cexManager.getOrderTrades(exchange, orderId, symbol, options);
+        const trades = await this.cexManager.getOrderTrades(exchange, orderKey, symbol, options);
         if (Array.isArray(trades) && trades.length > 0) {
           return trades;
         }
       } catch (err) {
-        console.warn(`[OrderExecutor] ${exchange} trades fetch failed order=${orderId}: ${err.message}`);
+        console.warn(`[OrderExecutor] ${exchange} trades fetch failed order=${orderKey}: ${err.message}`);
       }
       if (i < TRADE_FETCH_ATTEMPTS - 1) {
         await sleep(TRADE_FETCH_INTERVAL_MS);
