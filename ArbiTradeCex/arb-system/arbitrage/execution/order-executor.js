@@ -6,11 +6,12 @@
  */
 import { OrderStatus } from '../../cex/types.js';
 import { calcSpreads, legPricesForDirection, tradeLegSides } from '../services/spread-calculator.js';
+import { buildLegPnl } from './cex-leg-pnl.js';
 import { markLatency } from '../monitoring/trade-latency.js';
 
-function quoteSnapshot(direction, tick, totalCostPct = 0) {
+function quoteSnapshot(direction, tick, spreadOptions = {}) {
   const nominal = legPricesForDirection(direction, tick);
-  const spreads = calcSpreads(tick, totalCostPct);
+  const spreads = calcSpreads(tick, spreadOptions);
   return {
     aBid: tick.aBid,
     aAsk: tick.aAsk,
@@ -58,7 +59,8 @@ export class OrderExecutor {
     order,
     reduceOnly = false,
     lockedDirection = null,
-    latencyTrace = null
+    latencyTrace = null,
+    cexFeeBpsPerLeg = 2
   }) {
     const { qty, gateSize, gateDecimalSize } = order;
     const { aSide, bSide } = tradeLegSides(direction);
@@ -70,6 +72,20 @@ export class OrderExecutor {
     const binanceStepSize = order.cfg?.binance?.stepSize;
 
     if (!this.tradingEnabled) {
+      const aLeg = buildLegPnl({
+        exchange: 'binance',
+        side: aSide,
+        filledQty: qty,
+        order: { avgPrice: quote.aPriceNominal, cumQuote: qty * quote.aPriceNominal },
+        feeBpsFallback: cexFeeBpsPerLeg
+      });
+      const bLeg = buildLegPnl({
+        exchange: 'gate',
+        side: bSide,
+        filledQty: qty,
+        order: { avgPrice: quote.bPriceNominal, cumQuote: qty * quote.bPriceNominal },
+        feeBpsFallback: cexFeeBpsPerLeg
+      });
       return {
         simulated: true,
         aOrderId: `SIM_A_${Date.now()}`,
@@ -84,6 +100,8 @@ export class OrderExecutor {
         qty,
         aFilledQty: qty,
         bFilledQty: qty,
+        aLeg,
+        bLeg,
         legMismatch: false,
         legExposure: false
       };
@@ -168,6 +186,32 @@ export class OrderExecutor {
       ? Number(bOrder.avgPrice || bOrder.price || fallback.bPrice)
       : null;
 
+    if (aOrder && aFilled > 0) {
+      aOrder.fee = await this.#fetchOrderFee('binance', aOrder, tick.symbol);
+    }
+    if (bOrder && bFilledBase > 0) {
+      bOrder.fee = await this.#fetchOrderFee('gate', bOrder, tick.symbol);
+    }
+
+    const aLeg = aFilled > 0
+      ? buildLegPnl({
+        exchange: 'binance',
+        side: aSide,
+        filledQty: aFilled,
+        order: aOrder,
+        feeBpsFallback: cexFeeBpsPerLeg
+      })
+      : { exchange: 'binance', side: aSide, filledQty: 0, usdtChange: 0, quoteVolume: 0, fee: 0, filled: false };
+    const bLeg = bFilledBase > 0
+      ? buildLegPnl({
+        exchange: 'gate',
+        side: bSide,
+        filledQty: bFilledBase,
+        order: bOrder,
+        feeBpsFallback: cexFeeBpsPerLeg
+      })
+      : { exchange: 'gate', side: bSide, filledQty: 0, usdtChange: 0, quoteVolume: 0, fee: 0, filled: false };
+
     return {
       simulated: false,
       aOrderId: aOrder ? String(aOrder.orderId) : null,
@@ -182,12 +226,24 @@ export class OrderExecutor {
       qty: matchedQty,
       aFilledQty: aFilled,
       bFilledQty: bFilledBase,
+      aLeg,
+      bLeg,
       legMismatch,
       legExposure,
       failedLeg,
       failReason,
       latencyTrace
     };
+  }
+
+  async #fetchOrderFee(exchange, order, symbol) {
+    try {
+      const fee = await this.cexManager.getOrderCommission(exchange, order.orderId, symbol);
+      if (Number.isFinite(fee) && fee >= 0) return fee;
+    } catch (err) {
+      console.warn(`[OrderExecutor] ${exchange} fee fetch failed order=${order.orderId}: ${err.message}`);
+    }
+    return null;
   }
 
   async #ensureOrderFill(exchange, order, symbol, requestedQty, gateDecimalSize = false) {

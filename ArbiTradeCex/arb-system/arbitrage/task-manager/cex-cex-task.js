@@ -10,7 +10,8 @@ import {
   closeTradeDirection,
   isFlatPosition,
   isHedgedPosition,
-  inferDirectionFromPosition
+  inferDirectionFromPosition,
+  resolveCexCostConfig
 } from '../services/spread-calculator.js';
 import {
   PrecisionChecker,
@@ -69,7 +70,8 @@ export class CexCexTask {
     this.executingSymbols = new Set();
     this.enforceLatency = sharedResources.enforceLatency;
     this.latencyLimits = resolveLatencyLimits(this.cfg, this.enforceLatency);
-    this.totalCostPct = (strategyConfig.feeBpsTotal + strategyConfig.slippageBpsTotal) / 100;
+    this.cexCost = resolveCexCostConfig(strategyConfig);
+    this.spreadOptions = this.cexCost;
 
     for (const sym of strategyConfig.symbols) {
       this.engines.set(sym, new RollingSignalEngine({
@@ -126,7 +128,7 @@ export class CexCexTask {
       return;
     }
 
-    const spreads = calcSpreads(tick, this.totalCostPct);
+    const spreads = calcSpreads(tick, this.spreadOptions);
     const signal = engine.updateAndCalc({
       timestamp: tick.timestamp,
       spreadAb: spreads.spreadAb,
@@ -377,7 +379,8 @@ export class CexCexTask {
           order,
           reduceOnly: action === 'close',
           lockedDirection,
-          latencyTrace
+          latencyTrace,
+          cexFeeBpsPerLeg: this.cexCost.cexFeeBpsPerLeg
         });
       } catch (err) {
         await this.sr.accountCache.refreshFromCexManager(this.sr.cexManager).catch(() => {});
@@ -400,12 +403,7 @@ export class CexCexTask {
         await this.sr.accountCache.refreshFromCexManager(this.sr.cexManager);
       }
 
-      const netPnl = calcTradePnl(
-        fill,
-        { action, direction: execDirection, lockedDirection },
-        this.cfg.feeBpsTotal,
-        this.cfg.slippageBpsTotal
-      );
+      const netPnl = calcTradePnl(fill);
 
       this.sr.resultReporter.recordTrade({
         symbol,
@@ -414,8 +412,6 @@ export class CexCexTask {
         lockedDirection,
         fill,
         netPnl,
-        feeBpsTotal: this.cfg.feeBpsTotal,
-        slippageBpsTotal: this.cfg.slippageBpsTotal,
         accountCache: this.sr.accountCache,
         dashboardBridge: this.sr.dashboardBridge,
         latencyTrace
@@ -461,11 +457,7 @@ export class CexCexTask {
         for (const line of legLines) {
           console.log(line);
         }
-        const gross = calcTradeGross(fill, {
-          action,
-          direction: execDirection,
-          lockedDirection
-        });
+        const gross = calcTradeGross(fill);
         if (gross != null && Number.isFinite(gross)) {
           console.log(
             `  实际利润 毛${gross >= 0 ? '+' : ''}${gross.toFixed(4)}`
@@ -473,6 +465,18 @@ export class CexCexTask {
           );
         } else {
           console.log(`  实际利润 净${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(4)} USDT（单腿）`);
+        }
+        if (fill.aLeg?.filled) {
+          console.log(
+            `  Binance USDT ${fill.aLeg.usdtChange >= 0 ? '+' : ''}${fill.aLeg.usdtChange.toFixed(4)}`
+            + ` (fee ${Number(fill.aLeg.fee || 0).toFixed(4)})`
+          );
+        }
+        if (fill.bLeg?.filled) {
+          console.log(
+            `  Gate USDT ${fill.bLeg.usdtChange >= 0 ? '+' : ''}${fill.bLeg.usdtChange.toFixed(4)}`
+            + ` (fee ${Number(fill.bLeg.fee || 0).toFixed(4)})`
+          );
         }
         if (fill.legExposure) {
           const why = fill.failedLeg === 'binance'

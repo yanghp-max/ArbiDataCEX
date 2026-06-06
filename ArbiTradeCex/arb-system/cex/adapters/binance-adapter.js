@@ -464,6 +464,22 @@ export class BinanceAdapter extends BaseAdapter {
     }));
   }
 
+  /** 汇总订单成交手续费（USDT） */
+  async getOrderCommission(orderId, symbol) {
+    const rows = await this.#signedRequest('GET', '/papi/v1/um/userTrades', {
+      symbol: this.toExchangeSymbol(symbol),
+      orderId
+    });
+    let fee = 0;
+    for (const row of rows || []) {
+      const asset = String(row.commissionAsset || 'USDT').toUpperCase();
+      if (asset === 'USDT') {
+        fee += Math.abs(Number(row.commission || 0));
+      }
+    }
+    return fee;
+  }
+
   async checkOrder(orderData) {
     this.validateOrderData(orderData);
     if (Number(orderData.amount) <= 0) {

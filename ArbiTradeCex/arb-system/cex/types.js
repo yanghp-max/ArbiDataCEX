@@ -58,7 +58,8 @@ export class Order {
     timestamp,
     updateTime,
     avgPrice = 0,
-    cumQuote = 0
+    cumQuote = 0,
+    fee = null
   }) {
     this.orderId = orderId;
     this.clientOrderId = clientOrderId;
@@ -75,6 +76,7 @@ export class Order {
     this.updateTime = updateTime || timestamp || Date.now();
     this.avgPrice = Number(avgPrice) || 0;
     this.cumQuote = Number(cumQuote) || 0;
+    this.fee = fee != null && Number.isFinite(Number(fee)) ? Number(fee) : null;
   }
 }
 

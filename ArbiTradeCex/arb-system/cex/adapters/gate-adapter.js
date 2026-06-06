@@ -580,6 +580,20 @@ export class GateAdapter extends BaseAdapter {
     }));
   }
 
+  /** 汇总订单成交手续费（USDT） */
+  async getOrderCommission(orderId, symbol) {
+    const contract = this.toGateContract(symbol);
+    const rows = await this.#signedRequest('GET', '/futures/usdt/my_trades', {
+      contract,
+      order: orderId
+    });
+    let fee = 0;
+    for (const row of rows || []) {
+      fee += Math.abs(Number(row.fee || 0));
+    }
+    return fee;
+  }
+
   async checkOrder(orderData) {
     this.validateOrderData(orderData);
     return true;

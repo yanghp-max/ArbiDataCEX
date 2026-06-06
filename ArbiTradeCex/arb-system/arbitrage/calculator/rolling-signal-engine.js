@@ -1,7 +1,7 @@
 /**
- * 滚动窗口：1 秒时间桶，median/MAD z-score（对齐 backtest_cex_cex_open_only.py）
- * - median / mad 用原始 spread
- * - open_z / close_z 用扣费 spread + 分支 A/B
+ * 滚动窗口：1 秒时间桶，median/MAD z-score
+ * - median / mad / z 均用扣费后 spread（ArbiTrade-1 data-manager 同思路）
+ * - spreadAb/Ba 保留 WS raw 供展示
  */
 import { percentile50, computeMad } from '../../common/utils/precision.js';
 import { branchForAb, branchForBa, computeZPair } from '../services/spread-calculator.js';
@@ -92,8 +92,8 @@ export class RollingSignalEngine {
       };
     }
 
-    const abRaw = entries.map((e) => e.spreadAb).filter(Number.isFinite);
-    const baRaw = entries.map((e) => e.spreadBa).filter(Number.isFinite);
+    const abRaw = entries.map((e) => e.spreadAbAdj).filter(Number.isFinite);
+    const baRaw = entries.map((e) => e.spreadBaAdj).filter(Number.isFinite);
     const medianAb = percentile50(abRaw);
     const medianBa = percentile50(baRaw);
     const madAb = computeMad(abRaw, medianAb);

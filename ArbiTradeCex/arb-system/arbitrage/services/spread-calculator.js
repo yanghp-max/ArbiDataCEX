@@ -14,14 +14,53 @@ export function tradeLegSides(direction) {
   return { aSide: 'buy', bSide: 'sell' };
 }
 
-export function calcSpreads(tick, totalCostPct) {
+/** 默认与 ArbiTrade-1 CEX 腿一致：卖 ×0.9998、买 ×1.0002（各 ~2bps） */
+export const DEFAULT_CEX_FEE_BPS_PER_LEG = 2;
+
+/** 信号 spread + PnL 共用（对齐 ArbiTrade-1，仅 per-leg 手续费） */
+export function resolveCexCostConfig(strategyConfig = {}) {
+  const bps = Number(strategyConfig.cexFeeBpsPerLeg ?? DEFAULT_CEX_FEE_BPS_PER_LEG);
+  return {
+    cexFeeBpsPerLeg: Number.isFinite(bps) && bps >= 0 ? bps : DEFAULT_CEX_FEE_BPS_PER_LEG
+  };
+}
+
+function cexLegMultipliers(options = {}) {
+  const bps = Number(options.cexFeeBpsPerLeg ?? DEFAULT_CEX_FEE_BPS_PER_LEG);
+  if (options.cexSellMult != null && options.cexBuyMult != null) {
+    return { sellMult: Number(options.cexSellMult), buyMult: Number(options.cexBuyMult) };
+  }
+  const rate = Number.isFinite(bps) ? bps / 10000 : DEFAULT_CEX_FEE_BPS_PER_LEG / 10000;
+  return { sellMult: 1 - rate, buyMult: 1 + rate };
+}
+
+/**
+ * 价差计算（对齐 ArbiTrade-1 data-manager：手续费乘在每条腿价格上）
+ * - spreadAb/Ba：WS 顶档 raw（展示用）
+ * - spreadAbAdj/BaAdj：扣费后 spread（Z 分数 / 开平仓门槛）
+ *
+ * -a+b: A 卖 bid × sellMult, B 买 ask × buyMult
+ * +a-b: B 卖 bid × sellMult, A 买 ask × buyMult
+ */
+export function calcSpreads(tick, options = {}) {
+  const { sellMult, buyMult } = cexLegMultipliers(options);
+
   const spreadAb = ((tick.aBid - tick.bAsk) / tick.bAsk) * 100;
   const spreadBa = ((tick.bBid - tick.aAsk) / tick.aAsk) * 100;
+
+  const aBidEff = tick.aBid * sellMult;
+  const aAskEff = tick.aAsk * buyMult;
+  const bBidEff = tick.bBid * sellMult;
+  const bAskEff = tick.bAsk * buyMult;
+
+  const spreadAbAdj = ((aBidEff - bAskEff) / bAskEff) * 100;
+  const spreadBaAdj = ((bBidEff - aAskEff) / aAskEff) * 100;
+
   return {
     spreadAb,
     spreadBa,
-    spreadAbAdj: spreadAb - totalCostPct,
-    spreadBaAdj: spreadBa - totalCostPct
+    spreadAbAdj,
+    spreadBaAdj
   };
 }
 
