@@ -98,7 +98,7 @@
 **行为**：`SharedResources.init` 连接交易所后，对 `selected_symbols` 逐个调用：
 
 - Binance PM：`POST /papi/v1/um/leverage`
-- Gate USDT 永续：`POST /futures/usdt/positions/{contract}/leverage`（逐仓失败则按全仓 `cross_leverage_limit` 重试）
+- Gate USDT 永续：`POST /futures/usdt/positions/{contract}/leverage?...`（**query 参数**，非 JSON body；先全仓 `leverage=0&cross_leverage_limit=1`，失败再试逐仓）
 
 日志前缀 `[Leverage]`。设为 `0` 或删除该字段则跳过。mock 账户模式不调用。
 

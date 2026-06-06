@@ -92,13 +92,21 @@ export class GateAdapter extends BaseAdapter {
     return cryptoUtils.hmacSha512(payload, process.env.GATE_API_SECRET || '');
   }
 
-  async #signedRequest(method, path, options = null, extraHeaders = {}) {
+  #formatApiError(err) {
+    const data = err?.response?.data;
+    if (data?.label || data?.message) {
+      return `Gate[${data.label || 'ERROR'}] ${data.message || ''}`.trim();
+    }
+    return err?.message || 'Gate request failed';
+  }
+
+  async #signedRequest(method, path, options = null, extraHeaders = {}, requestOpts = {}) {
     let bodyObj = null;
     let queryString = '';
     let urlPath = path;
 
     if (options) {
-      if (method === 'GET' || method === 'DELETE') {
+      if (method === 'GET' || method === 'DELETE' || requestOpts.asQuery) {
         queryString = new URLSearchParams(
           Object.entries(options).reduce((acc, [k, v]) => {
             if (v != null) acc[k] = String(v);
@@ -135,8 +143,12 @@ export class GateAdapter extends BaseAdapter {
       timeout: 15000
     };
     if (bodyObj) config.data = bodyObj;
-    const { data } = await axios(config);
-    return data;
+    try {
+      const { data } = await axios(config);
+      return data;
+    } catch (err) {
+      throw new Error(this.#formatApiError(err));
+    }
   }
 
   async loadSymbols() {
@@ -755,37 +767,44 @@ export class GateAdapter extends BaseAdapter {
     console.log(`[Gate] private streams (${modeNote}: ${balNote} + ${posNote})`);
   }
 
-  /** 设置 USDT 永续杠杆；逐仓与全仓接口参数不同，失败时自动尝试另一种 */
+  /** 设置 USDT 永续杠杆（Gate 要求 query 参数，非 JSON body） */
   async setSymbolLeverage(symbol, leverage = 1) {
     const contract = this.toGateContract(symbol);
     const lev = String(Math.max(1, Math.min(125, Math.floor(Number(leverage) || 1))));
+    const path = `/futures/usdt/positions/${contract}/leverage`;
+    const queryOpts = { asQuery: true };
+
     try {
       const data = await this.#signedRequest(
         'POST',
-        `/futures/usdt/positions/${contract}/leverage`,
-        { leverage: lev }
+        path,
+        { leverage: '0', cross_leverage_limit: lev },
+        {},
+        queryOpts
       );
       return {
         symbol: this.toCompactSymbol(symbol),
         contract,
-        leverage: Number(data?.leverage ?? data?.lever ?? lev),
-        mode: 'isolated'
+        leverage: Number(data?.cross_leverage_limit ?? data?.lever ?? lev),
+        mode: 'cross'
       };
-    } catch (isolatedErr) {
+    } catch (crossErr) {
       try {
         const data = await this.#signedRequest(
           'POST',
-          `/futures/usdt/positions/${contract}/leverage`,
-          { leverage: '0', cross_leverage_limit: lev }
+          path,
+          { leverage: lev },
+          {},
+          queryOpts
         );
         return {
           symbol: this.toCompactSymbol(symbol),
           contract,
-          leverage: Number(data?.cross_leverage_limit ?? data?.lever ?? lev),
-          mode: 'cross'
+          leverage: Number(data?.leverage ?? data?.lever ?? lev),
+          mode: 'isolated'
         };
-      } catch (crossErr) {
-        throw new Error(`逐仓: ${isolatedErr.message}; 全仓: ${crossErr.message}`);
+      } catch (isolatedErr) {
+        throw new Error(`全仓: ${crossErr.message}; 逐仓: ${isolatedErr.message}`);
       }
     }
   }
