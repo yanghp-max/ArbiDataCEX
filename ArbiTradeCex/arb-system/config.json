@@ -31,7 +31,7 @@
     "symbolsConfigJson": "config/symbols_config.json",
     "minQtyJson": "config/min-order-qty.json",
 
-    "windowSeconds": 600,
+    "windowSeconds": 3600,
     "enforceLatency": true,
     "useMockAccount": false
 
