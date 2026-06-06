@@ -388,39 +388,22 @@ export class CexCexTask {
       if (this.depthChecker.enabled && !this.sr.useMockAccount) {
         markLatency(latencyTrace, 'depth_fetch_start');
         try {
-          const depth = await this.depthChecker.check({
+          const depth = await this.depthChecker.snapshot({
             cexManager: this.sr.cexManager,
             symbol,
             direction: execDirection,
-            action,
-            lockedDirection,
             qty: order.qty,
-            tick: freshTick,
-            feeBpsTotal: this.cfg.feeBpsTotal,
-            slippageBpsTotal: this.cfg.slippageBpsTotal
+            tick: freshTick
           });
           markLatency(latencyTrace, 'depth_fetch_done');
           if (depth.fetchMs != null) {
             latencyTrace.depthFetchMs = depth.fetchMs;
           }
-          if (!depth.pass) {
-            console.log(`[深度] ${symbol} 跳过: ${depth.reason}`);
-            if (depth.detail) console.log(`  ${depth.detail}`);
-            this.#logLatency(latencyTrace, { reason: `深度检查: ${depth.reason}` });
-            this.#releaseSymbolClaim(symbol, { restoreCooldown: true });
-            return;
-          }
-          console.log(
-            `[深度] ${symbol} 通过`
-            + (depth.detail ? ` · ${depth.detail}` : '')
-            + (depth.fetchMs != null ? ` · fetch=${depth.fetchMs}ms` : '')
-          );
+          console.log(`[深度] ${symbol} REST快照 · fetch=${depth.fetchMs ?? '-'}ms`);
+          if (depth.bookDebug) console.log(depth.bookDebug);
         } catch (err) {
           markLatency(latencyTrace, 'depth_fetch_done');
-          console.warn(`[深度] ${symbol} 拉取失败: ${err.message}，跳过`);
-          this.#logLatency(latencyTrace, { reason: `深度拉取失败: ${err.message}` });
-          this.#releaseSymbolClaim(symbol, { restoreCooldown: true });
-          return;
+          console.warn(`[深度] ${symbol} REST拉取失败: ${err.message}（继续发单）`);
         }
       }
 

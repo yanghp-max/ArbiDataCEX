@@ -30,10 +30,8 @@
     "symbolsConfigJson": "config/symbols_config.json",
     "minQtyJson": "config/min-order-qty.json",
 
-    "depthCheckEnabled": true,
-    "depthLevels": 20,
-    "depthMinFillRatio": 0.999,
-    "depthMinEdgeBps": 0,
+    "depthLogEnabled": true,
+    "depthLevels": 5,
     "depthFetchTimeoutMs": 500,
 
     "windowSeconds": 600,
