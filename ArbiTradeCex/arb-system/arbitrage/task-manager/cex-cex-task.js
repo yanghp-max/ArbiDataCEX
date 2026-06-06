@@ -25,11 +25,8 @@ import {
 import { calcTradePnl, calcTradeGross } from '../execution/result-reporter.js';
 import {
   createTradeLatencyTrace,
-  markLatency,
-  finalizeTradeLatency,
   formatLatencyLogLines
 } from '../monitoring/trade-latency.js';
-import { DepthChecker } from '../risk/depth-checker.js';
 
 function formatFilledLegLine(exchange, side, quoteBid, quoteAsk, fillPrice, qty) {
   const quoteTag = side === 'sell' ? 'bid' : side === 'buy' ? 'ask' : '名义';
@@ -65,7 +62,6 @@ export class CexCexTask {
     };
     this.precision = precisionChecker;
     this.risk = new RiskManager(strategyConfig);
-    this.depthChecker = new DepthChecker(strategyConfig);
     this.engines = new Map();
     this.lastOrderTs = new Map();
     this.lockedDirection = new Map();
@@ -209,7 +205,6 @@ export class CexCexTask {
     if (!tradePlan) return;
 
     const latencyTrace = createTradeLatencyTrace(tick);
-    markLatency(latencyTrace, 'trade_plan');
 
     const isClose = tradePlan.action === 'close';
     const execDirection = isClose ? closeTradeDirection(tradePlan.direction) : tradePlan.direction;
@@ -246,11 +241,7 @@ export class CexCexTask {
       qty = finalized.qty;
     }
 
-    markLatency(latencyTrace, 'order_built');
-
     if (this.enforceLatency && !tickSignalAgePass(tick, this.latencyLimits.signalMaxAgeMs)) return;
-
-    markLatency(latencyTrace, 'pre_order_gate');
 
     const priceSnapshot = tickPriceSnapshot(symbol, tick);
 
@@ -269,8 +260,6 @@ export class CexCexTask {
         return;
       }
     }
-
-    markLatency(latencyTrace, 'account_fresh');
 
     // 在 await 之前占位（对齐 ArbiTrade-1 预占前互斥 + 单路径 tick）
     if (this.executingSymbols.has(symbol)) return;
@@ -304,8 +293,6 @@ export class CexCexTask {
       return;
     }
 
-    markLatency(latencyTrace, 'reserve_done');
-
     this.sr.inFlightCount += 1;
     this.sr.reservationManager.markExecuting(tradeId);
     this.executeAsync({
@@ -328,8 +315,8 @@ export class CexCexTask {
   #logLatency(trace, { reason = null } = {}) {
     if (!trace) return;
     if (reason) {
-      finalizeTradeLatency(trace);
       console.warn(`[延迟·中止] ${reason}`);
+      return;
     }
     for (const line of formatLatencyLogLines(trace)) {
       console.log(line);
@@ -364,7 +351,6 @@ export class CexCexTask {
       latencyTrace
     } = ctx;
     const tradeId = reservations?.tradeId;
-    markLatency(latencyTrace, 'execute_start');
     try {
       const freshTick = this.sr.quoteAggregator.buildTick(symbol);
       const latencyOk = !this.enforceLatency || tickLatencyPass(freshTick, this.latencyLimits);
@@ -381,30 +367,6 @@ export class CexCexTask {
         this.#logLatency(latencyTrace, { reason: '最终价差校验未过' });
         this.#releaseSymbolClaim(symbol, { restoreCooldown: true });
         return;
-      }
-
-      markLatency(latencyTrace, 'recheck_pass');
-
-      if (this.depthChecker.enabled && !this.sr.useMockAccount) {
-        markLatency(latencyTrace, 'depth_fetch_start');
-        try {
-          const depth = await this.depthChecker.snapshot({
-            cexManager: this.sr.cexManager,
-            symbol,
-            direction: execDirection,
-            qty: order.qty,
-            tick: freshTick
-          });
-          markLatency(latencyTrace, 'depth_fetch_done');
-          if (depth.fetchMs != null) {
-            latencyTrace.depthFetchMs = depth.fetchMs;
-          }
-          console.log(`[深度] ${symbol} REST快照 · fetch=${depth.fetchMs ?? '-'}ms`);
-          if (depth.bookDebug) console.log(depth.bookDebug);
-        } catch (err) {
-          markLatency(latencyTrace, 'depth_fetch_done');
-          console.warn(`[深度] ${symbol} REST拉取失败: ${err.message}（继续发单）`);
-        }
       }
 
       let fill;
@@ -438,16 +400,12 @@ export class CexCexTask {
         await this.sr.accountCache.refreshFromCexManager(this.sr.cexManager);
       }
 
-      markLatency(latencyTrace, 'pos_refresh');
-
       const netPnl = calcTradePnl(
         fill,
         { action, direction: execDirection, lockedDirection },
         this.cfg.feeBpsTotal,
         this.cfg.slippageBpsTotal
       );
-
-      finalizeTradeLatency(latencyTrace);
 
       this.sr.resultReporter.recordTrade({
         symbol,

@@ -35,26 +35,7 @@ const CSV_COLUMNS = [
   'leg_exposure',
   'failed_leg',
   'fail_reason',
-  'lat_ws_a_ms',
-  'lat_ws_b_ms',
-  'lat_ws_max_ms',
-  'lat_price_age_ms',
-  'lat_leg_skew_ms',
-  'lat_decision_ms',
-  'lat_order_build_ms',
-  'lat_pre_order_ms',
-  'lat_account_fresh_ms',
-  'lat_reserve_ms',
-  'lat_async_queue_ms',
-  'lat_recheck_ms',
-  'lat_depth_fetch_ms',
-  'lat_order_place_binance_ms',
-  'lat_order_place_gate_ms',
-  'lat_order_place_max_ms',
-  'lat_order_poll_binance_ms',
-  'lat_order_poll_gate_ms',
-  'lat_pos_refresh_ms',
-  'lat_total_ms'
+  'lat_to_order_ms'
 ];
 
 function csvEscape(value) {

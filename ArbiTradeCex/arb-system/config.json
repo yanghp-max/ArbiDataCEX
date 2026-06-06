@@ -14,7 +14,7 @@
     "signalMaxAgeMs": 50,
     "fundingMin": -0.1,
     "feeBpsTotal": 10,
-    "slippageBpsTotal": 4,
+    "slippageBpsTotal": 8,
     "mockBalanceUsdt": 10000,
     "minAvailableUsdt": 6,
     "balanceCheckRate": 0.1,
@@ -29,10 +29,6 @@
     "processHealthIntervalMs": 30000,
     "symbolsConfigJson": "config/symbols_config.json",
     "minQtyJson": "config/min-order-qty.json",
-
-    "depthLogEnabled": true,
-    "depthLevels": 5,
-    "depthFetchTimeoutMs": 500,
 
     "windowSeconds": 600,
     "enforceLatency": true,
