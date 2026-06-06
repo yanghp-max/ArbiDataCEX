@@ -375,11 +375,41 @@ export class GateAdapter extends BaseAdapter {
     return balances;
   }
 
+  async #sumPositionInitialMargin() {
+    try {
+      const rows = await this.#signedRequest('GET', '/futures/usdt/positions');
+      let sum = 0;
+      for (const r of rows || []) {
+        if (Math.abs(Number(r.size)) <= 0) continue;
+        sum += Math.abs(Number(r.initial_margin ?? r.margin ?? 0));
+      }
+      return sum;
+    } catch {
+      return 0;
+    }
+  }
+
+  /** Gate 全仓/新账户 API：position_margin 常为空，需读 cross_* / 持仓 initial_margin */
+  async #resolveSingleFuturesMarginUsed(data, equity, available) {
+    const crossInit = Number(data?.cross_initial_margin ?? 0);
+    const isolatedPos = Number(data?.isolated_position_margin ?? data?.position_margin ?? 0);
+    const posInitUnified = Number(data?.position_initial_margin ?? 0);
+    const orderMargin = Number(data?.cross_order_margin ?? data?.order_margin ?? 0);
+    let positionMargin = crossInit + isolatedPos;
+    if (positionMargin <= 0 && posInitUnified > 0) {
+      positionMargin = posInitUnified;
+    }
+    if (positionMargin <= 0 && orderMargin <= 0) {
+      positionMargin = await this.#sumPositionInitialMargin();
+    }
+    return Math.max(0, positionMargin + orderMargin, equity - available);
+  }
+
   async #getSingleFuturesBalance(options = {}) {
     const data = await this.#signedRequest('GET', '/futures/usdt/accounts');
-    const unrealised = Number(data?.unrealised_pnl ?? 0);
+    const unrealised = Number(data?.unrealised_pnl ?? data?.cross_unrealised_pnl ?? 0);
     const available = Number(
-      data?.available ?? data?.available_margin ?? data?.cross_available ?? 0
+      data?.cross_available ?? data?.available ?? data?.available_margin ?? 0
     );
     const rawTotal = Number(
       data?.total ?? data?.margin_balance ?? data?.cross_margin_balance ?? NaN
@@ -389,9 +419,7 @@ export class GateAdapter extends BaseAdapter {
       ? equityField
       : (Number.isFinite(rawTotal) && rawTotal > 0 ? rawTotal + unrealised : available);
     if (equity <= 0 && available > 0) equity = available;
-    const positionMargin = Number(data?.position_margin ?? 0);
-    const orderMargin = Number(data?.order_margin ?? 0);
-    const marginUsed = Math.max(0, positionMargin + orderMargin, equity - available);
+    const marginUsed = await this.#resolveSingleFuturesMarginUsed(data, equity, available);
     const balances = [];
     if (equity > 0 || available > 0) {
       balances.push(new Balance({

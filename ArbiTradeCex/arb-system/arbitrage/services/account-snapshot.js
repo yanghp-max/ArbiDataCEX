@@ -55,7 +55,7 @@ export async function buildAccountSnapshot(deps) {
   const binanceAvail = binanceWallet.available;
   const gateAvail = gateWallet.available;
   const binanceMarginUsed = binanceWallet.marginUsed;
-  const gateMarginUsed = gateWallet.marginUsed;
+  let gateMarginUsed = gateWallet.marginUsed;
 
   const positions = [];
   let positionNotionalUsdt = 0;
@@ -119,6 +119,12 @@ export async function buildAccountSnapshot(deps) {
       aLeverage: aPos?.leverage ?? null,
       bLeverage: bPos?.leverage ?? null
     });
+  }
+
+  /** Gate 全仓账户 REST 常不填 position_margin，用持仓 initial_margin 补全展示 */
+  if (gateMarginUsed <= 0) {
+    const gatePosMargin = positions.reduce((s, p) => s + Number(p.bInitialMargin || 0), 0);
+    if (gatePosMargin > 0) gateMarginUsed = gatePosMargin;
   }
 
   /** 两腿 USDT 钱包合计（PM/统一账户 total 通常已含未实现盈亏） */
