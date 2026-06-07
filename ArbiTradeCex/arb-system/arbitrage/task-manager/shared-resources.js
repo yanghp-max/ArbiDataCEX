@@ -62,6 +62,7 @@ export class SharedResources {
 
     this.accountCache.minAvailableUsdt = strat.minAvailableUsdt;
     this.accountCache.accountCacheMaxAgeMs = Number(strat.accountCacheMaxAgeMs) || 5000;
+    this.accountCache.setTrackedSymbols(strat.symbols);
 
     if (this.useMockAccount) {
       const balanceUsdt = Number(strat.mockBalanceUsdt) || 10000;

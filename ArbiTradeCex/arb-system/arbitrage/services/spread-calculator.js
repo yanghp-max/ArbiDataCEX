@@ -192,6 +192,29 @@ export function isHedgedPosition(aQty, bQty, eps = 1e-6) {
   return Math.abs(Math.abs(aQty) - Math.abs(bQty)) <= eps;
 }
 
+/** 仅一侧有仓（另一侧为 0），常见于缓存残留或单腿成交 */
+export function isOneSidedOrphan(aQty, bQty, eps = 1e-6) {
+  const a = Math.abs(aQty);
+  const b = Math.abs(bQty);
+  return (a > eps && b <= eps) || (b > eps && a <= eps);
+}
+
+/** lockedDirection 是否与当前持仓符号一致（防止 A=200 B=0 残留锁触发加仓） */
+export function isPositionLockConsistent(direction, aQty, bQty, eps = 1e-6) {
+  if (!direction) return false;
+  if (direction === '-a+b') {
+    if (aQty < -eps && bQty > eps) return true;
+    if (aQty < -eps && Math.abs(bQty) <= eps) return true;
+    return false;
+  }
+  if (direction === '+a-b') {
+    if (aQty > eps && bQty < -eps) return true;
+    if (aQty > eps && Math.abs(bQty) <= eps) return true;
+    return false;
+  }
+  return false;
+}
+
 export function heldQty(aQty, bQty) {
   return Math.min(Math.abs(aQty), Math.abs(bQty));
 }

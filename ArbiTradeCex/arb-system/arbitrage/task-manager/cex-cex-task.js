@@ -10,6 +10,8 @@ import {
   closeTradeDirection,
   isFlatPosition,
   isHedgedPosition,
+  isOneSidedOrphan,
+  isPositionLockConsistent,
   inferDirectionFromPosition,
   resolveCexCostConfig
 } from '../services/spread-calculator.js';
@@ -74,6 +76,8 @@ export class CexCexTask {
     this.executingSymbols = new Set();
     /** 持仓失衡 warn 节流（每 symbol 30s 最多 1 条） */
     this._imbalanceWarnTs = new Map();
+    /** 单边孤儿持仓 REST 对账节流（每 symbol 5s 最多 1 次） */
+    this._reconcileTs = new Map();
     this.enforceLatency = sharedResources.enforceLatency;
     this.latencyLimits = resolveLatencyLimits(this.cfg, this.enforceLatency);
     this.cexCost = resolveCexCostConfig(strategyConfig);
@@ -107,7 +111,13 @@ export class CexCexTask {
       return { flat: true, direction: null, branch: null };
     }
 
-    let direction = this.lockedDirection.get(symbol) ?? inferDirectionFromPosition(aQty, bQty);
+    const inferred = inferDirectionFromPosition(aQty, bQty);
+    let direction = inferred ?? this.lockedDirection.get(symbol) ?? null;
+    if (direction && !isPositionLockConsistent(direction, aQty, bQty)) {
+      this.lockedDirection.delete(symbol);
+      this.lockedBranch.delete(symbol);
+      direction = inferred;
+    }
     if (!direction) {
       return { flat: false, direction: null, branch: null };
     }
@@ -123,6 +133,45 @@ export class CexCexTask {
     }
 
     return { flat: false, direction, branch };
+  }
+
+  #clearLocksIfFlat(symbol) {
+    const aQty = this.sr.accountCache.getPosition('binance', symbol);
+    const bQty = this.sr.accountCache.getPosition('gate', symbol);
+    if (isFlatPosition(aQty, bQty)) {
+      this.lockedDirection.delete(symbol);
+      this.lockedBranch.delete(symbol);
+    }
+  }
+
+  /** 缓存与实盘不一致时按 symbol REST 对账（不依赖加仓信号触发） */
+  async #reconcileStalePositionsIfNeeded(symbol) {
+    if (this.sr.useMockAccount || this.executingSymbols.has(symbol)) return;
+
+    const aQty = this.sr.accountCache.getPosition('binance', symbol);
+    const bQty = this.sr.accountCache.getPosition('gate', symbol);
+    if (isFlatPosition(aQty, bQty) || isHedgedPosition(aQty, bQty)) return;
+
+    const now = Date.now();
+    const last = this._reconcileTs.get(symbol) || 0;
+    if (now - last < 3000) return;
+    this._reconcileTs.set(symbol, now);
+
+    await this.sr.accountCache.reconcileSymbolPositions(this.sr.cexManager, symbol);
+    this.#clearLocksIfFlat(symbol);
+  }
+
+  /** 定时兜底：不依赖 WS 来价也能纠正陈旧持仓 */
+  async reconcileAllStalePositions() {
+    if (this.sr.useMockAccount) return;
+    for (const sym of this.cfg.symbols || []) {
+      if (this.executingSymbols.has(sym)) continue;
+      const aQty = this.sr.accountCache.getPosition('binance', sym);
+      const bQty = this.sr.accountCache.getPosition('gate', sym);
+      if (isFlatPosition(aQty, bQty) || isHedgedPosition(aQty, bQty)) continue;
+      await this.sr.accountCache.reconcileSymbolPositions(this.sr.cexManager, sym);
+      this.#clearLocksIfFlat(sym);
+    }
   }
 
   async onTick(symbol) {
@@ -142,6 +191,8 @@ export class CexCexTask {
       spreadAbAdj: spreads.spreadAbAdj,
       spreadBaAdj: spreads.spreadBaAdj
     });
+
+    await this.#reconcileStalePositionsIfNeeded(symbol);
 
     const lock = this.#syncLockState(symbol, signal);
     this.sr.dashboardBridge?.updateMarketSnapshot({
@@ -185,18 +236,22 @@ export class CexCexTask {
         let aQty = this.sr.accountCache.getPosition('binance', symbol);
         let bQty = this.sr.accountCache.getPosition('gate', symbol);
         if (!isHedgedPosition(aQty, bQty) && !this.sr.useMockAccount) {
-          await this.sr.accountCache.refreshFromCexManager(this.sr.cexManager);
+          await this.sr.accountCache.reconcileSymbolPositions(this.sr.cexManager, symbol);
           aQty = this.sr.accountCache.getPosition('binance', symbol);
           bQty = this.sr.accountCache.getPosition('gate', symbol);
         }
         if (!isHedgedPosition(aQty, bQty)) {
+          if (isFlatPosition(aQty, bQty)) {
+            this.#clearLocksIfFlat(symbol);
+            return;
+          }
           const now = Date.now();
           const last = this._imbalanceWarnTs.get(symbol) || 0;
           if (now - last >= 30000) {
             this._imbalanceWarnTs.set(symbol, now);
             console.warn(
               `[CexCexTask] ${symbol} 持仓失衡(A=${aQty} B=${bQty})，跳过加仓直至对冲恢复`
-              + '（若 Gate App 也无多仓：多为单腿或原空仓被买入抵销为 0）'
+              + '（若 App 也无仓：多为缓存残留，已对账；仍出现请点 Dashboard 刷新账户）'
             );
           }
           return;
@@ -499,6 +554,7 @@ export class CexCexTask {
 
       if (!fill.simulated) {
         await this.sr.accountCache.refreshFromCexManagerWithRetry(this.sr.cexManager);
+        await this.sr.accountCache.reconcileSymbolPositions(this.sr.cexManager, symbol);
         await this.#auditPostTradeHedge(symbol, fill);
       }
 

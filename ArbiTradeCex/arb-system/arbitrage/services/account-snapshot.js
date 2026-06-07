@@ -79,15 +79,15 @@ export async function buildAccountSnapshot(deps) {
     const aPos = binPosMap.get(key);
     const bPos = gatePosMap.get(key);
 
-    let aQty = aPos != null && Number.isFinite(Number(aPos.qty))
+    const aQty = aPos != null && Number.isFinite(Number(aPos.qty))
       ? Number(aPos.qty)
-      : accountCache.getPosition('binance', key);
-    let bQty = bPos != null && Number.isFinite(Number(bPos.qty))
+      : 0;
+    const bQty = bPos != null && Number.isFinite(Number(bPos.qty))
       ? Number(bPos.qty)
-      : accountCache.getPosition('gate', key);
+      : 0;
 
-    if (aPos) accountCache.setPosition('binance', key, aQty);
-    if (bPos) accountCache.setPosition('gate', key, bQty);
+    accountCache.setPosition('binance', key, aQty);
+    accountCache.setPosition('gate', key, bQty);
 
     if (Math.abs(aQty) < 1e-12 && Math.abs(bQty) < 1e-12) continue;
     const aUpnl = Number(aPos?.unrealizedPnl ?? 0);

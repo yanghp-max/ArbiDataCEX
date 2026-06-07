@@ -20,6 +20,7 @@ export class TaskManager {
     this.task = null;
     this.fundingTimer = null;
     this.maintenanceTimer = null;
+    this.positionReconcileTimer = null;
     /** 同 symbol 同一事件循环内合并为一次 onTick（来价驱动，非定频） */
     this._priceTickCoalesce = new Set();
     this._symbolSet = new Set();
@@ -81,6 +82,19 @@ export class TaskManager {
       this.sharedResources.reservationManager.purgeExpired();
     }, 1000);
 
+    this.task.reconcileAllStalePositions().catch((e) => {
+      console.warn('[TaskManager] startup position reconcile:', e.message);
+    });
+
+    this.positionReconcileTimer = setInterval(() => {
+      this.task.reconcileAllStalePositions().catch((e) => {
+        console.warn('[TaskManager] position reconcile:', e.message);
+      });
+    }, 45000);
+    if (typeof this.positionReconcileTimer.unref === 'function') {
+      this.positionReconcileTimer.unref();
+    }
+
     console.log(
       `[TaskManager] started symbols=${strat.symbols.join(',')} trading=${this.tradingEnabled}`
       + ` priceMode=ws-driven(any-leg) windowSeconds=${strat.windowSeconds}`
@@ -103,6 +117,7 @@ export class TaskManager {
   async stop() {
     if (this.fundingTimer) clearInterval(this.fundingTimer);
     if (this.maintenanceTimer) clearInterval(this.maintenanceTimer);
+    if (this.positionReconcileTimer) clearInterval(this.positionReconcileTimer);
     await this.sharedResources?.shutdown();
   }
 }

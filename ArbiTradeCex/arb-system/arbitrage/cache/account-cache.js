@@ -5,11 +5,14 @@ export class AccountCache {
   constructor() {
     this.balanceCache = new Map();
     this.positionCache = new Map();
+    /** 策略监控币种（compact），用于 merge 刷新时清掉 REST 已平仓的残留 */
+    this.trackedSymbols = [];
     this.reliable = false;
     this.mockMode = false;
     this.accountCacheMaxAgeMs = 5000;
     this._lastRestRefreshMs = { binance: 0, gate: 0 };
     this.restRefreshMinIntervalMs = 2000;
+    this.absentPositionGraceMs = 8000;
     this.wsStatus = {
       binance: { connected: false, reliable: false },
       gate: { connected: false, reliable: false }
@@ -73,6 +76,85 @@ export class AccountCache {
 
   getPosition(exchange, symbol) {
     return this.positionCache.get(`${exchange}:${this.#compactSymbol(symbol)}`)?.qty ?? 0;
+  }
+
+  getPositionEntry(exchange, symbol) {
+    return this.positionCache.get(`${exchange}:${this.#compactSymbol(symbol)}`) || null;
+  }
+
+  setTrackedSymbols(symbols = []) {
+    this.trackedSymbols = [...new Set(
+      (symbols || []).map((s) => this.#compactSymbol(s))
+    )];
+  }
+
+  /**
+   * 按 symbol 用 REST 对账两腿持仓。
+   * REST 不返回 qty=0 的合约；两腿皆缺席时强制清 0（不受 grace 影响）。
+   * 仅一侧缺席时：若本地条目在 graceMs 内刚被 WS/applyLegDelta 更新则暂保留（Gate 写入延迟）。
+   */
+  async reconcileSymbolPositions(cexManager, symbol, { graceMs } = {}) {
+    const sym = this.#compactSymbol(symbol);
+    const now = Date.now();
+    const grace = graceMs ?? this.absentPositionGraceMs ?? 8000;
+
+    const fetchLeg = async (exchange) => {
+      const rows = await cexManager.getPositions(exchange, { silent: true });
+      return (rows || []).find((p) => this.#compactSymbol(p.symbol) === sym) ?? null;
+    };
+
+    let binRow;
+    let gateRow;
+    try {
+      [binRow, gateRow] = await Promise.all([
+        fetchLeg('binance'),
+        fetchLeg('gate')
+      ]);
+    } catch (err) {
+      console.warn(`[AccountCache] reconcile ${sym} failed: ${err.message}`);
+      return { ok: false, error: err.message };
+    }
+
+    if (binRow == null && gateRow == null) {
+      this.setPosition('binance', sym, 0);
+      this.setPosition('gate', sym, 0);
+      return { ok: true, bothAbsent: true };
+    }
+
+    const applyLeg = (exchange, row) => {
+      if (row != null) {
+        this.setPosition(exchange, sym, Number(row.qty));
+        return;
+      }
+      const cached = this.getPositionEntry(exchange, sym);
+      if (cached && now - cached.updatedAtMs < grace) return;
+      this.setPosition(exchange, sym, 0);
+    };
+
+    applyLeg('binance', binRow);
+    applyLeg('gate', gateRow);
+    return { ok: true };
+  }
+
+  /** merge 刷新后：监控币种未出现在 REST 列表且条目已过期 → 清 0 */
+  #clearAbsentTrackedPositions(exchange, positions, { graceMs } = {}) {
+    const tracked = this.trackedSymbols;
+    if (!tracked?.length) return 0;
+    const grace = graceMs ?? this.absentPositionGraceMs ?? 8000;
+    const now = Date.now();
+    const returned = new Set(
+      (positions || []).map((p) => this.#compactSymbol(p.symbol))
+    );
+    let cleared = 0;
+    for (const sym of tracked) {
+      if (returned.has(sym)) continue;
+      const cached = this.getPositionEntry(exchange, sym);
+      if (!cached) continue;
+      if (now - cached.updatedAtMs < grace) continue;
+      this.setPosition(exchange, sym, 0);
+      cleared += 1;
+    }
+    return cleared;
   }
 
   getBalanceAgeMs(exchange) {
@@ -190,6 +272,10 @@ export class AccountCache {
       if (!Number.isFinite(qty)) continue;
       this.setPosition(exchange, sym, qty);
       if (Math.abs(qty) >= 1e-12) merged += 1;
+    }
+
+    if (!fullReplace) {
+      this.#clearAbsentTrackedPositions(exchange, positions);
     }
 
     return { ok: true, count: merged, fullReplace };
