@@ -2,6 +2,7 @@
  * 延迟链路：WS 推送时间 → 本机接收 → 各处理阶段 → 发单
  * 行情锚点用发单前 fresh tick（较新腿官方时间 = WS 推送基准）
  */
+import { legPricesForDirection } from '../services/spread-calculator.js';
 
 const PROCESS_STAGES = [
   ['trace_start', 'prep_done', '算量'],
@@ -62,11 +63,30 @@ function normalizeServerMs(ts) {
   return n > 1e12 ? n : n * 1000;
 }
 
-export function createTradeLatencyTrace(tick) {
+function quoteLegPrices(direction, src) {
+  if (!src || !direction) return null;
+  const { aPrice, bPrice } = legPricesForDirection(direction, src);
+  return {
+    aBid: src.aBid,
+    aAsk: src.aAsk,
+    bBid: src.bBid,
+    bAsk: src.bAsk,
+    aPrice,
+    bPrice
+  };
+}
+
+export function createTradeLatencyTrace(tick, { direction = null, priceSnapshot = null } = {}) {
   const now = Date.now();
   return {
     signalQuote: snapshotQuoteTiming(tick),
     orderQuote: null,
+    priceStages: {
+      direction,
+      signal: quoteLegPrices(direction, priceSnapshot),
+      send: null,
+      fill: null
+    },
     marks: {
       trace_start: now
     }
@@ -76,6 +96,23 @@ export function createTradeLatencyTrace(tick) {
 export function setFreshTickOnLatencyTrace(trace, tick) {
   if (!trace) return trace;
   trace.orderQuote = snapshotQuoteTiming(tick);
+  if (trace.priceStages?.direction) {
+    trace.priceStages.send = quoteLegPrices(trace.priceStages.direction, tick);
+  }
+  return trace;
+}
+
+/** 成交后写入第三阶段价格（真实 fill） */
+export function attachFillPricesToTrace(trace, fill) {
+  if (!trace?.priceStages || !fill) return trace;
+  trace.priceStages.fill = {
+    aPrice: fill.aFilledQty > 0
+      ? (fill.aFillPrice ?? fill.aPrice ?? fill.aPriceUsed ?? null)
+      : null,
+    bPrice: fill.bFilledQty > 0
+      ? (fill.bFillPrice ?? fill.bPrice ?? fill.bPriceUsed ?? null)
+      : null
+  };
   return trace;
 }
 
@@ -232,6 +269,40 @@ export function formatLatencyLogLines(trace) {
   return [`[延迟] ${parts.join(' · ')}`];
 }
 
+export function priceStagesCsvFields(trace) {
+  const ps = trace?.priceStages;
+  if (!ps) {
+    return {
+      accept_a_price: '',
+      accept_b_price: '',
+      send_a_price: '',
+      send_b_price: ''
+    };
+  }
+  return {
+    accept_a_price: ps.signal?.aPrice ?? '',
+    accept_b_price: ps.signal?.bPrice ?? '',
+    send_a_price: ps.send?.aPrice ?? '',
+    send_b_price: ps.send?.bPrice ?? ''
+  };
+}
+
+function fmtPrice(v) {
+  if (v == null || !Number.isFinite(Number(v))) return '-';
+  return Number(v).toFixed(8);
+}
+
+/** 三阶段执行价：接受(决策快照) → 发单(fresh tick) → 成交 */
+export function formatPriceStageLines(trace) {
+  const ps = trace?.priceStages;
+  if (!ps?.signal) return [];
+  return [
+    `[价格] 接受 A=${fmtPrice(ps.signal.aPrice)} B=${fmtPrice(ps.signal.bPrice)}`
+    + ` · 发单 A=${fmtPrice(ps.send?.aPrice)} B=${fmtPrice(ps.send?.bPrice)}`
+    + ` · 成交 A=${fmtPrice(ps.fill?.aPrice)} B=${fmtPrice(ps.fill?.bPrice)}`
+  ];
+}
+
 export function latencyCsvFields(trace) {
   const stages = latencyProcessStages(trace);
   const byLabel = Object.fromEntries(stages.map((s) => [s.label, s.ms]));
@@ -256,7 +327,8 @@ export function latencyCsvFields(trace) {
     lat_stage_queue_ms: byLabel['排队'] ?? '',
     lat_stage_fresh_tick_ms: byLabel['拉新价'] ?? '',
     lat_stage_precheck_ms: byLabel['预检'] ?? '',
-    lat_stage_presend_ms: byLabel['待发'] ?? ''
+    lat_stage_presend_ms: byLabel['待发'] ?? '',
+    ...priceStagesCsvFields(trace)
   };
 }
 
@@ -282,5 +354,8 @@ export default {
   latDecisionToOrderMs,
   latToOrderMs,
   formatLatencyLogLines,
+  formatPriceStageLines,
+  priceStagesCsvFields,
+  attachFillPricesToTrace,
   latencyCsvFields
 };

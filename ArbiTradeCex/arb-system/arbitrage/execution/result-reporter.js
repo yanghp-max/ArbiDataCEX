@@ -120,6 +120,7 @@ export class ResultReporter {
     const quote = fill.quote ?? {};
     const grossPnl = calcTradeGross(fill);
     const feeCost = calcTradeFeeCost(fill);
+    const priceStages = latencyTrace?.priceStages ?? null;
     const row = {
       symbol,
       timestamp: ts,
@@ -137,6 +138,10 @@ export class ResultReporter {
       aSide: fill.aSide,
       aPriceNominal: quote.aPriceNominal ?? null,
       bPriceNominal: quote.bPriceNominal ?? null,
+      acceptAPrice: priceStages?.signal?.aPrice ?? null,
+      acceptBPrice: priceStages?.signal?.bPrice ?? null,
+      sendAPrice: priceStages?.send?.aPrice ?? null,
+      sendBPrice: priceStages?.send?.bPrice ?? null,
       aFillPrice: fill.aFilledQty > 0
         ? (fill.aFillPrice ?? fill.aPrice ?? fill.aPriceUsed ?? null)
         : null,
@@ -208,6 +213,10 @@ export class ResultReporter {
         a_price_nominal: row.aPriceNominal,
         b_side: row.bSide,
         b_price_nominal: row.bPriceNominal,
+        accept_a_price: row.acceptAPrice,
+        accept_b_price: row.acceptBPrice,
+        send_a_price: row.sendAPrice,
+        send_b_price: row.sendBPrice,
         a_fill_price: row.aFillPrice,
         b_fill_price: row.bFillPrice,
         qty: row.qty,

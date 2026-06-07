@@ -29,8 +29,10 @@ import {
 } from '../risk/risk-manager.js';
 import { calcTradePnl, calcTradeGross, calcTradeFeeCost } from '../execution/result-reporter.js';
 import {
+  attachFillPricesToTrace,
   createTradeLatencyTrace,
   formatLatencyLogLines,
+  formatPriceStageLines,
   markLatency,
   setFreshTickOnLatencyTrace
 } from '../monitoring/trade-latency.js';
@@ -283,8 +285,6 @@ export class CexCexTask {
 
     if (!tradePlan) return;
 
-    const latencyTrace = createTradeLatencyTrace(tick);
-
     const isClose = tradePlan.action === 'close';
     const execDirection = isClose ? closeTradeDirection(tradePlan.direction) : tradePlan.direction;
     const spreadFilterDir = tradePlan.spreadFilterDirection ?? tradePlan.direction;
@@ -322,9 +322,12 @@ export class CexCexTask {
 
     if (this.enforceLatency && !tickSignalAgePass(tick, this.latencyLimits.signalMaxAgeMs)) return;
 
-    markLatency(latencyTrace, 'prep_done');
-
     const priceSnapshot = tickPriceSnapshot(symbol, tick);
+    const latencyTrace = createTradeLatencyTrace(tick, {
+      direction: execDirection,
+      priceSnapshot
+    });
+    markLatency(latencyTrace, 'prep_done');
 
     const posBefore = {
       a: this.sr.accountCache.getPosition('binance', symbol),
@@ -544,6 +547,7 @@ export class CexCexTask {
       this.sr.accountCache.applyFillToCache(symbol, execDirection, fill);
 
       const netPnl = calcTradePnl(fill);
+      attachFillPricesToTrace(latencyTrace, fill);
 
       this.sr.resultReporter.recordTrade({
         symbol,
@@ -653,6 +657,9 @@ export class CexCexTask {
               ? `Gate未成交: ${fill.failReason || '成交量为0'}`
               : `A=${fill.aFilledQty} B=${fill.bFilledQty}`;
           console.warn(`[实盘·单腿风险] ${symbol} ${why}`);
+        }
+        for (const line of formatPriceStageLines(latencyTrace)) {
+          console.log(line);
         }
         for (const line of formatLatencyLogLines(latencyTrace)) {
           console.log(line);
