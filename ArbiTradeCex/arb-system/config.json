@@ -13,8 +13,8 @@
     "maxWsLatencyMs": 100,
     "signalMaxAgeMs": 50,
     "fundingMin": -0.1,
-    "binanceBpsPerLeg": 10,
-    "gateBpsPerLeg": 10,
+    "binanceBpsPerLeg": 4,
+    "gateBpsPerLeg": 4,
     "cexFeeBpsPerLeg": 4,
     "mockBalanceUsdt": 10000,
     "minAvailableUsdt": 6,
@@ -31,7 +31,7 @@
     "symbolsConfigJson": "config/symbols_config.json",
     "minQtyJson": "config/min-order-qty.json",
 
-    "windowSeconds": 3600,
+    "windowSeconds": 600,
     "enforceLatency": true,
     "useMockAccount": false
 
