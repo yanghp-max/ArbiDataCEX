@@ -154,7 +154,7 @@ export class CexCexTask {
 
     const now = Date.now();
     const last = this._reconcileTs.get(symbol) || 0;
-    if (now - last < 3000) return;
+    if (now - last < 1000) return;
     this._reconcileTs.set(symbol, now);
 
     await this.sr.accountCache.reconcileSymbolPositions(this.sr.cexManager, symbol);
@@ -497,6 +497,7 @@ export class CexCexTask {
       setFreshTickOnLatencyTrace(latencyTrace, freshTick);
       markLatency(latencyTrace, 'fresh_tick_done');
 
+      const symbolCost = resolveCexCostConfigForSymbol(this.cfg, symbol);
       let fill;
       try {
         fill = await this.sr.orderExecutor.executeBothLegs({
@@ -506,7 +507,9 @@ export class CexCexTask {
           reduceOnly: action === 'close',
           lockedDirection,
           latencyTrace,
-          cexFeeBpsPerLeg: resolveCexCostConfigForSymbol(this.cfg, symbol).cexFeeBpsPerLeg,
+          cexFeeBpsPerLeg: symbolCost.cexFeeBpsPerLeg,
+          binanceFeeBps: symbolCost.binanceFeeBps,
+          gateFeeBps: symbolCost.gateFeeBps,
           maxPositionQty: this.risk.maxPositionQty(
             freshTick,
             action === 'close' ? (lockedDirection ?? execDirection) : execDirection
@@ -527,17 +530,7 @@ export class CexCexTask {
         return;
       }
 
-      if (fill.simulated) {
-        this.sr.accountCache.applyLegDelta(symbol, execDirection, fill.qty);
-      } else {
-        const matchedQty = Math.min(
-          fill.aFilledQty > 0 ? fill.aFilledQty : 0,
-          fill.bFilledQty > 0 ? fill.bFilledQty : 0
-        );
-        if (matchedQty > 0 && fill.aFilledQty > 0 && fill.bFilledQty > 0 && !fill.legExposure) {
-          this.sr.accountCache.applyLegDelta(symbol, execDirection, matchedQty);
-        }
-      }
+      this.sr.accountCache.applyFillToCache(symbol, execDirection, fill);
 
       const netPnl = calcTradePnl(fill);
 
@@ -554,8 +547,17 @@ export class CexCexTask {
       });
 
       if (!fill.simulated) {
-        await this.sr.accountCache.refreshFromCexManagerWithRetry(this.sr.cexManager);
-        await this.sr.accountCache.reconcileSymbolPositions(this.sr.cexManager, symbol);
+        const syncRes = await this.sr.accountCache.syncSymbolPositionsAfterFill(
+          this.sr.cexManager,
+          symbol
+        );
+        if (syncRes.timeout && !syncRes.hedged && !syncRes.flat) {
+          console.warn(
+            `[CexCexTask] ${symbol} 成交后 REST 未在时限内确认对冲，保留回执缓存 A=`
+            + `${this.sr.accountCache.getPosition('binance', symbol)} B=`
+            + `${this.sr.accountCache.getPosition('gate', symbol)}`
+          );
+        }
         await this.#auditPostTradeHedge(symbol, fill);
       }
 

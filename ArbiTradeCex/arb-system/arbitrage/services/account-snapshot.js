@@ -1,6 +1,8 @@
 /**
  * 账户 U 快照：REST/缓存余额 + 持仓按盘口 mid 估算名义价值
  */
+import { isFlatPosition } from './spread-calculator.js';
+
 function compactSymbol(symbol) {
   return String(symbol).replace(/[-_]/g, '');
 }
@@ -43,7 +45,7 @@ export async function buildAccountSnapshot(deps) {
   } = deps;
 
   if (forceRefresh && cexManager && !accountCache.mockMode) {
-    await accountCache.refreshFromCexManager(cexManager, { fullReplace: true });
+    await accountCache.refreshFromCexManager(cexManager, { fullReplace: false });
   }
 
   const binanceBal = accountCache.getBalance('binance');
@@ -79,15 +81,29 @@ export async function buildAccountSnapshot(deps) {
     const aPos = binPosMap.get(key);
     const bPos = gatePosMap.get(key);
 
-    const aQty = aPos != null && Number.isFinite(Number(aPos.qty))
-      ? Number(aPos.qty)
-      : 0;
-    const bQty = bPos != null && Number.isFinite(Number(bPos.qty))
-      ? Number(bPos.qty)
-      : 0;
+    if (aPos != null && Number.isFinite(Number(aPos.qty))) {
+      accountCache.setPosition('binance', key, Number(aPos.qty));
+    }
+    if (bPos != null && Number.isFinite(Number(bPos.qty))) {
+      accountCache.setPosition('gate', key, Number(bPos.qty));
+    }
 
-    accountCache.setPosition('binance', key, aQty);
-    accountCache.setPosition('gate', key, bQty);
+    if (
+      forceRefresh
+      && cexManager
+      && !accountCache.mockMode
+      && aPos == null
+      && bPos == null
+      && !isFlatPosition(
+        accountCache.getPosition('binance', key),
+        accountCache.getPosition('gate', key)
+      )
+    ) {
+      await accountCache.reconcileSymbolPositions(cexManager, key);
+    }
+
+    const aQty = accountCache.getPosition('binance', key);
+    const bQty = accountCache.getPosition('gate', key);
 
     if (Math.abs(aQty) < 1e-12 && Math.abs(bQty) < 1e-12) continue;
     const aUpnl = Number(aPos?.unrealizedPnl ?? 0);

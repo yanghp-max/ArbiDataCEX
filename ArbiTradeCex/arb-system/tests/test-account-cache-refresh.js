@@ -96,4 +96,34 @@ const cexMergeClear = {
 await cache.refreshExchange(cexMergeClear, 'binance', { force: true, fullReplace: false });
 assert.equal(cache.getPosition('binance', 'HOMEUSDT'), 0, 'merge 刷新应清掉监控币种陈旧持仓');
 
+cache.setPosition('binance', 'SIRENUSDT', 0);
+cache.setPosition('gate', 'SIRENUSDT', 0);
+cache.applyFillToCache('SIRENUSDT', '-a+b', {
+  simulated: false,
+  aFilledQty: 10,
+  bFilledQty: 10,
+  aSide: 'sell',
+  bSide: 'buy',
+  legExposure: false
+});
+assert.equal(cache.getPosition('binance', 'SIRENUSDT'), -10);
+assert.equal(cache.getPosition('gate', 'SIRENUSDT'), 10);
+await cache.reconcileSymbolPositions(cexGateLag, 'SIRENUSDT', { graceMs: 0 });
+assert.equal(cache.getPosition('gate', 'SIRENUSDT'), 10, '成交保护期内 Gate REST 缺席不应清腿');
+
+const cexGateLagLate = {
+  async getPositions(exchange) {
+    if (exchange === 'binance') return [{ symbol: 'SIRENUSDT', qty: -10 }];
+    if (exchange === 'gate') return [{ symbol: 'SIRENUSDT', qty: 10 }];
+    return [];
+  }
+};
+const syncRes = await cache.syncSymbolPositionsAfterFill(cexGateLagLate, 'SIRENUSDT', {
+  retries: 2,
+  delayMs: 10
+});
+assert.equal(syncRes.hedged, true);
+assert.equal(cache.getPosition('binance', 'SIRENUSDT'), -10);
+assert.equal(cache.getPosition('gate', 'SIRENUSDT'), 10);
+
 console.log('test-account-cache-refresh: OK');

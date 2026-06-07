@@ -14,12 +14,17 @@ export function tradeLegSides(direction) {
   return { aSide: 'buy', bSide: 'sell' };
 }
 
-/** PnL 估算 fallback（真实 fee 优先）；与信号 bps 无关 */
-export const DEFAULT_CEX_FEE_BPS_PER_LEG = 2;
-/** 信号：A=Binance，对齐 ArbiTrade-1 DEX 侧 ~5bps（0.9995 / 1.0005） */
-export const DEFAULT_BINANCE_BPS_PER_LEG = 5;
-/** 信号：B=Gate，对齐 ArbiTrade-1 CEX 侧 ~2bps（0.9998 / 1.0002） */
-export const DEFAULT_GATE_BPS_PER_LEG = 2;
+/** dry-run PnL fee fallback（真实成交 fee 优先） */
+export const DEFAULT_CEX_FEE_BPS_PER_LEG = 5;
+/** 信号：每腿交易所手续费（0.05% = 5 bps） */
+export const DEFAULT_BINANCE_FEE_BPS = 5;
+export const DEFAULT_GATE_FEE_BPS = 5;
+/** 信号：扣费后再扣的预估滑点 bps */
+export const DEFAULT_BINANCE_SLIPPAGE_BPS = 1;
+export const DEFAULT_GATE_SLIPPAGE_BPS = 1;
+/** @deprecated 用 feeBps + slippageBps；仅作未配新字段时的总 bps 兼容 */
+export const DEFAULT_BINANCE_BPS_PER_LEG = DEFAULT_BINANCE_FEE_BPS + DEFAULT_BINANCE_SLIPPAGE_BPS;
+export const DEFAULT_GATE_BPS_PER_LEG = DEFAULT_GATE_FEE_BPS + DEFAULT_GATE_SLIPPAGE_BPS;
 
 function clampBps(value, fallback) {
   const n = Number(value);
@@ -33,30 +38,116 @@ function exchangeMults(bps) {
 }
 
 /**
- * binanceBpsPerLeg / gateBpsPerLeg：信号 spread 用（fee+滑点写进这一个数里即可）
- * cexFeeBpsPerLeg：仅 dry-run（tradingEnabled=false）模拟成交 PnL 时估算手续费
+ * 信号 spread：先扣 binanceFeeBps / gateFeeBps（手续费），再扣 slippageBps（预估滑点）。
+ * binanceBpsPerLeg / gateBpsPerLeg 仍可用作「总 bps」兼容旧配置。
+ * cexFeeBpsPerLeg：dry-run 两腿统一 fee fallback；优先用 binanceFeeBps / gateFeeBps。
  */
 function compactSymbol(symbol) {
   return String(symbol).replace(/[-_]/g, '').toUpperCase();
 }
 
-/** 全局 strategy + symbolOverrides[SYMBOL] 浅合并 */
+/** 仅全局配置，symbolOverrides 不得覆盖 */
+const GLOBAL_COST_KEYS = [
+  'binanceFeeBps',
+  'gateFeeBps',
+  'cexFeeBpsPerLeg',
+  'binanceBpsPerLeg',
+  'gateBpsPerLeg'
+];
+
+function pickGlobalFees(strategyConfig = {}) {
+  return {
+    binanceFeeBps: strategyConfig.binanceFeeBps,
+    gateFeeBps: strategyConfig.gateFeeBps,
+    cexFeeBpsPerLeg: strategyConfig.cexFeeBpsPerLeg,
+    binanceBpsPerLeg: strategyConfig.binanceBpsPerLeg,
+    gateBpsPerLeg: strategyConfig.gateBpsPerLeg
+  };
+}
+
+/** 全局 strategy + symbolOverrides[SYMBOL]；手续费类字段始终用全局 */
 export function resolveSymbolStrategyConfig(strategyConfig = {}, symbol) {
   const key = compactSymbol(symbol);
-  const overrides = strategyConfig?.symbolOverrides?.[key] ?? {};
-  return { ...strategyConfig, ...overrides };
+  const raw = strategyConfig?.symbolOverrides?.[key] ?? {};
+  const overrides = { ...raw };
+  for (const k of GLOBAL_COST_KEYS) delete overrides[k];
+  return { ...strategyConfig, ...overrides, ...pickGlobalFees(strategyConfig) };
+}
+
+function resolveExchangeLegBps(strategyConfig, {
+  feeKey,
+  slipKey,
+  legacyKey,
+  defaultFee,
+  defaultSlip,
+  defaultLegacyTotal
+}) {
+  const feeExplicit = strategyConfig[feeKey] != null;
+  const slipExplicit = strategyConfig[slipKey] != null;
+  const legacyExplicit = strategyConfig[legacyKey] != null;
+
+  if (feeExplicit || slipExplicit) {
+    const feeBps = clampBps(strategyConfig[feeKey], defaultFee);
+    const slippageBps = clampBps(strategyConfig[slipKey], defaultSlip);
+    return {
+      feeBps,
+      slippageBps,
+      totalBps: feeBps + slippageBps
+    };
+  }
+
+  if (legacyExplicit) {
+    const totalBps = clampBps(strategyConfig[legacyKey], defaultLegacyTotal);
+    const feeBps = clampBps(strategyConfig[feeKey], defaultFee);
+    return {
+      feeBps,
+      slippageBps: Math.max(0, totalBps - feeBps),
+      totalBps
+    };
+  }
+
+  const feeBps = clampBps(strategyConfig[feeKey], defaultFee);
+  const slippageBps = clampBps(strategyConfig[slipKey], defaultSlip);
+  return {
+    feeBps,
+    slippageBps,
+    totalBps: feeBps + slippageBps
+  };
 }
 
 export function resolveCexCostConfig(strategyConfig = {}) {
+  const binance = resolveExchangeLegBps(strategyConfig, {
+    feeKey: 'binanceFeeBps',
+    slipKey: 'binanceSlippageBps',
+    legacyKey: 'binanceBpsPerLeg',
+    defaultFee: DEFAULT_BINANCE_FEE_BPS,
+    defaultSlip: DEFAULT_BINANCE_SLIPPAGE_BPS,
+    defaultLegacyTotal: DEFAULT_BINANCE_BPS_PER_LEG
+  });
+  const gate = resolveExchangeLegBps(strategyConfig, {
+    feeKey: 'gateFeeBps',
+    slipKey: 'gateSlippageBps',
+    legacyKey: 'gateBpsPerLeg',
+    defaultFee: DEFAULT_GATE_FEE_BPS,
+    defaultSlip: DEFAULT_GATE_SLIPPAGE_BPS,
+    defaultLegacyTotal: DEFAULT_GATE_BPS_PER_LEG
+  });
+
   return {
-    binanceBpsPerLeg: clampBps(strategyConfig.binanceBpsPerLeg, DEFAULT_BINANCE_BPS_PER_LEG),
-    gateBpsPerLeg: clampBps(strategyConfig.gateBpsPerLeg, DEFAULT_GATE_BPS_PER_LEG),
+    binanceFeeBps: binance.feeBps,
+    binanceSlippageBps: binance.slippageBps,
+    gateFeeBps: gate.feeBps,
+    gateSlippageBps: gate.slippageBps,
+    binanceBpsPerLeg: binance.totalBps,
+    gateBpsPerLeg: gate.totalBps,
     cexFeeBpsPerLeg: clampBps(strategyConfig.cexFeeBpsPerLeg, DEFAULT_CEX_FEE_BPS_PER_LEG)
   };
 }
 
 export function resolveCexCostConfigForSymbol(strategyConfig = {}, symbol) {
-  return resolveCexCostConfig(resolveSymbolStrategyConfig(strategyConfig, symbol));
+  const merged = resolveSymbolStrategyConfig(strategyConfig, symbol);
+  const cfg = { ...merged, ...pickGlobalFees(strategyConfig) };
+  return resolveCexCostConfig(cfg);
 }
 
 /**
@@ -65,11 +156,23 @@ export function resolveCexCostConfigForSymbol(strategyConfig = {}, symbol) {
  *   spread_ab = (A_bid×(1−bn/1e4) − B_ask×(1+gt/1e4)) / (B_ask×(1+gt/1e4)) × 100
  *   spread_ba = (B_bid×(1−gt/1e4) − A_ask×(1+bn/1e4)) / (A_ask×(1+bn/1e4)) × 100
  *
- * bn = binanceBpsPerLeg，gt = gateBpsPerLeg
+ * bn / gt = 每腿 fee + slippage 总 bps（可由 resolveCexCostConfig 提供）
  */
 export function calcSpreads(tick, options = {}) {
-  const bn = clampBps(options.binanceBpsPerLeg, DEFAULT_BINANCE_BPS_PER_LEG);
-  const gt = clampBps(options.gateBpsPerLeg, DEFAULT_GATE_BPS_PER_LEG);
+  const bn = options.binanceBpsPerLeg != null
+    ? clampBps(options.binanceBpsPerLeg, DEFAULT_BINANCE_BPS_PER_LEG)
+    : clampBps(
+      (options.binanceFeeBps ?? DEFAULT_BINANCE_FEE_BPS)
+      + (options.binanceSlippageBps ?? DEFAULT_BINANCE_SLIPPAGE_BPS),
+      DEFAULT_BINANCE_BPS_PER_LEG
+    );
+  const gt = options.gateBpsPerLeg != null
+    ? clampBps(options.gateBpsPerLeg, DEFAULT_GATE_BPS_PER_LEG)
+    : clampBps(
+      (options.gateFeeBps ?? DEFAULT_GATE_FEE_BPS)
+      + (options.gateSlippageBps ?? DEFAULT_GATE_SLIPPAGE_BPS),
+      DEFAULT_GATE_BPS_PER_LEG
+    );
   const a = exchangeMults(bn);
   const b = exchangeMults(gt);
 

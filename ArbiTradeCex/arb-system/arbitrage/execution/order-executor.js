@@ -69,6 +69,8 @@ export class OrderExecutor {
     lockedDirection = null,
     latencyTrace = null,
     cexFeeBpsPerLeg = 2,
+    binanceFeeBps = null,
+    gateFeeBps = null,
     maxPositionQty = null
   }) {
     const { qty, gateSize, gateDecimalSize } = order;
@@ -81,19 +83,21 @@ export class OrderExecutor {
     const binanceStepSize = order.cfg?.binance?.stepSize;
 
     if (!this.tradingEnabled) {
+      const aFeeBps = binanceFeeBps ?? cexFeeBpsPerLeg;
+      const bFeeBps = gateFeeBps ?? cexFeeBpsPerLeg;
       const aLeg = buildLegPnl({
         exchange: 'binance',
         side: aSide,
         filledQty: qty,
         order: { avgPrice: quote.aPriceNominal, cumQuote: qty * quote.aPriceNominal },
-        feeBpsFallback: cexFeeBpsPerLeg
+        feeBpsFallback: aFeeBps
       });
       const bLeg = buildLegPnl({
         exchange: 'gate',
         side: bSide,
         filledQty: qty,
         order: { avgPrice: quote.bPriceNominal, cumQuote: qty * quote.bPriceNominal },
-        feeBpsFallback: cexFeeBpsPerLeg
+        feeBpsFallback: bFeeBps
       });
       return {
         simulated: true,

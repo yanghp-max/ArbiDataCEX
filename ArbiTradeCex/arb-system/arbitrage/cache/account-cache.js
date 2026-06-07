@@ -1,12 +1,17 @@
 /**
  * 账户 WS 缓存（REST 初始化 + 私有 WS 增量 merge）
  */
+import { isFlatPosition, isHedgedPosition } from '../services/spread-calculator.js';
+
 export class AccountCache {
   constructor() {
     this.balanceCache = new Map();
     this.positionCache = new Map();
     /** 策略监控币种（compact），用于 merge 刷新时清掉 REST 已平仓的残留 */
     this.trackedSymbols = [];
+    /** 成交后保护：防止全所 merge 刷新把 Gate 延迟腿清成 0 */
+    this._fillSyncProtect = new Map();
+    this.fillSyncProtectMs = 90000;
     this.reliable = false;
     this.mockMode = false;
     this.accountCacheMaxAgeMs = 5000;
@@ -88,10 +93,112 @@ export class AccountCache {
     )];
   }
 
+  #markFillSync(symbol) {
+    const sym = this.#compactSymbol(symbol);
+    const aQty = this.getPosition('binance', sym);
+    const bQty = this.getPosition('gate', sym);
+    this._fillSyncProtect.set(sym, {
+      until: Date.now() + (this.fillSyncProtectMs ?? 90000),
+      aQty,
+      bQty
+    });
+  }
+
+  #clearFillSync(symbol) {
+    this._fillSyncProtect.delete(this.#compactSymbol(symbol));
+  }
+
+  #fillSyncActive(sym, now = Date.now()) {
+    const p = this._fillSyncProtect.get(sym);
+    return p && now < p.until ? p : null;
+  }
+
+  #shouldKeepAbsentLeg(exchange, sym, now, grace) {
+    const protect = this.#fillSyncActive(sym, now);
+    if (protect) {
+      const expected = exchange === 'binance' ? protect.aQty : protect.bQty;
+      const cached = this.getPosition(exchange, sym);
+      if (Math.abs(expected) > 1e-12 && Math.abs(cached - expected) <= 1e-6) {
+        return true;
+      }
+    }
+    const cached = this.getPositionEntry(exchange, sym);
+    if (cached && now - cached.updatedAtMs < grace) return true;
+    return false;
+  }
+
+  /**
+   * 成交回执优先写缓存（同步），再按需 REST 确认；不依赖全所 merge 刷新。
+   */
+  applyFillToCache(symbol, direction, fill) {
+    const sym = this.#compactSymbol(symbol);
+    if (fill?.simulated) {
+      this.applyLegDelta(sym, direction, fill.qty);
+      this.#markFillSync(sym);
+      return;
+    }
+
+    const aFill = Number(fill?.aFilledQty) || 0;
+    const bFill = Number(fill?.bFilledQty) || 0;
+    if (!fill?.legExposure && aFill > 0 && bFill > 0) {
+      this.applyLegDelta(sym, direction, Math.min(aFill, bFill));
+    } else if (aFill > 0 || bFill > 0) {
+      let aQty = this.getPosition('binance', sym);
+      let bQty = this.getPosition('gate', sym);
+      if (aFill > 0) {
+        if (fill.aSide === 'sell') aQty -= aFill;
+        else aQty += aFill;
+      }
+      if (bFill > 0) {
+        if (fill.bSide === 'sell') bQty -= bFill;
+        else bQty += bFill;
+      }
+      this.setPosition('binance', sym, aQty);
+      this.setPosition('gate', sym, bQty);
+    }
+
+    this.#markFillSync(sym);
+    const aQty = this.getPosition('binance', sym);
+    const bQty = this.getPosition('gate', sym);
+    if (isFlatPosition(aQty, bQty)) {
+      this.#clearFillSync(sym);
+    }
+  }
+
+  /**
+   * 成交后仅对当前 symbol REST 确认（带重试），不触发全所 refresh。
+   */
+  async syncSymbolPositionsAfterFill(cexManager, symbol, { retries = 6, delayMs = 500 } = {}) {
+    const sym = this.#compactSymbol(symbol);
+    const grace = Math.max(this.absentPositionGraceMs ?? 8000, this.fillSyncProtectMs ?? 90000);
+    let last = { ok: false };
+
+    for (let i = 0; i < retries; i += 1) {
+      last = await this.reconcileSymbolPositions(cexManager, sym, { graceMs: grace });
+      const aQty = this.getPosition('binance', sym);
+      const bQty = this.getPosition('gate', sym);
+      if (isFlatPosition(aQty, bQty)) {
+        this.#clearFillSync(sym);
+        return { ...last, ok: true, flat: true };
+      }
+      if (isHedgedPosition(aQty, bQty)) {
+        this.#markFillSync(sym);
+        return { ...last, ok: true, hedged: true };
+      }
+      if (i < retries - 1) {
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+
+    const aQty = this.getPosition('binance', sym);
+    const bQty = this.getPosition('gate', sym);
+    if (isFlatPosition(aQty, bQty)) this.#clearFillSync(sym);
+    return { ...last, ok: last.ok !== false, timeout: true };
+  }
+
   /**
    * 按 symbol 用 REST 对账两腿持仓。
-   * REST 不返回 qty=0 的合约；两腿皆缺席时强制清 0（不受 grace 影响）。
-   * 仅一侧缺席时：若本地条目在 graceMs 内刚被 WS/applyLegDelta 更新则暂保留（Gate 写入延迟）。
+   * REST 不返回 qty=0 的合约；成交保护期内不因 REST 缺席清腿。
    */
   async reconcileSymbolPositions(cexManager, symbol, { graceMs } = {}) {
     const sym = this.#compactSymbol(symbol);
@@ -116,8 +223,13 @@ export class AccountCache {
     }
 
     if (binRow == null && gateRow == null) {
+      const protect = this.#fillSyncActive(sym, now);
+      if (protect && !isFlatPosition(protect.aQty, protect.bQty)) {
+        return { ok: true, bothAbsent: false, deferred: true };
+      }
       this.setPosition('binance', sym, 0);
       this.setPosition('gate', sym, 0);
+      this.#clearFillSync(sym);
       return { ok: true, bothAbsent: true };
     }
 
@@ -126,13 +238,18 @@ export class AccountCache {
         this.setPosition(exchange, sym, Number(row.qty));
         return;
       }
-      const cached = this.getPositionEntry(exchange, sym);
-      if (cached && now - cached.updatedAtMs < grace) return;
+      if (this.#shouldKeepAbsentLeg(exchange, sym, now, grace)) return;
       this.setPosition(exchange, sym, 0);
     };
 
     applyLeg('binance', binRow);
     applyLeg('gate', gateRow);
+
+    const aQty = this.getPosition('binance', sym);
+    const bQty = this.getPosition('gate', sym);
+    if (isFlatPosition(aQty, bQty)) this.#clearFillSync(sym);
+    else if (isHedgedPosition(aQty, bQty)) this.#markFillSync(sym);
+
     return { ok: true };
   }
 
@@ -148,6 +265,7 @@ export class AccountCache {
     let cleared = 0;
     for (const sym of tracked) {
       if (returned.has(sym)) continue;
+      if (this.#fillSyncActive(sym, now)) continue;
       const cached = this.getPositionEntry(exchange, sym);
       if (!cached) continue;
       if (now - cached.updatedAtMs < grace) continue;
