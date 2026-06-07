@@ -241,6 +241,7 @@ async function main() {
         quantoMultiplier: gateLimits.quantoMultiplier,
         minBaseQty: gateLimits.minBaseQty,
         gateOrderSizeMin: gateLimits.gateOrderSizeMin,
+        gateOrderSizeRound: gateLimits.gateOrderSizeRound,
         priceRef: {
           collectedAt: priceCollectedAt,
           bid: gTicker?.bid ?? null,

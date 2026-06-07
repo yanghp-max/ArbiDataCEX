@@ -36,7 +36,7 @@ function signedPositionQty(pos) {
  * @param {string} params.symbol - 如 WLDUSDT
  * @param {string} params.side - buy | sell
  * @param {number} params.amount - 基础币数量（Binance qty）
- * @param {number} [params.gateAmount] - Gate 下单 size（币本位）
+ * @param {number} [params.gateAmount] - Gate 下单 size（张数）
  * @param {number} [params.maxPosition] - 最大持仓（基础币）
  * @param {number} [params.estimatedPrice] - 名义价（买用 ask，卖用 bid）
  * @param {boolean} [params.decimalSize] - Gate 小数下单
@@ -61,7 +61,18 @@ export async function checkOrderPreconditions(adapter, params = {}) {
   const exchangeName = adapter?.config?.name || adapter?.id || 'CEX';
   const isGate = String(adapter?.id || adapter?.config?.name || '').toLowerCase() === 'gate';
   const sideNorm = String(side || '').toLowerCase();
-  const qty = Number(isGate && gateAmount != null ? gateAmount : amount);
+  const gateContracts = Number(isGate && gateAmount != null ? gateAmount : amount);
+  const mult = Number(quantoMultiplier);
+  const baseQty = (
+    isGate
+    && Number.isFinite(mult)
+    && mult > 0
+    && Number.isFinite(gateContracts)
+    && gateContracts > 0
+  )
+    ? gateContracts * mult
+    : Number(isGate && gateAmount != null ? gateAmount : amount);
+  const qty = baseQty;
 
   const result = {
     balanceCheck: { passed: false, details: {}, reason: '' },
@@ -97,20 +108,9 @@ export async function checkOrderPreconditions(adapter, params = {}) {
       }
       const marginRate = isGate ? GATE_FUTURES_MARGIN_RATE : MARGIN_RATE_ESTIMATE;
       requiredAmount = qty * priceForCalc * marginRate * BALANCE_BUFFER;
-
-      // 小数单 size=1 若被当成 1 张合约，保证金 = multiplier × 价
-      const mult = Number(quantoMultiplier);
-      if (
-        isGate
-        && decimalSize
-        && Number.isFinite(mult)
-        && mult > 1
-        && qty > 0
-        && qty <= 1
-      ) {
-        const misreadMargin = mult * priceForCalc * BALANCE_BUFFER;
-        requiredAmount = Math.max(requiredAmount, misreadMargin);
-        result.balanceCheck.details.misreadContractMargin = misreadMargin;
+      if (isGate && gateAmount != null) {
+        result.balanceCheck.details.gateContracts = gateContracts;
+        result.balanceCheck.details.baseQty = qty;
       }
     } else {
       const base = compactSymbol(symbol).replace(/USDT$/, '');

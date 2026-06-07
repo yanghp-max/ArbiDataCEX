@@ -1,41 +1,57 @@
 import { ceilByStep } from './binance-order-limits.js';
 import { floorByStep } from './precision.js';
+import {
+  gateContractMinToBaseQty,
+  resolveGateContractStep
+} from './gate-contract-limits.js';
 
-/** Gate 最小基础币数量（张数合约：minQty 张 × multiplier） */
+/** Gate 最小基础币数量（decimal：gateOrderSizeMin 张 × multiplier） */
 export function resolveGateMinBaseQty(gateCfg) {
   if (!gateCfg) return 0;
-  const apiMin = Number(gateCfg.gateOrderSizeMin);
-  const minBase = Number(gateCfg.minBaseQty);
-  if (Number.isFinite(apiMin) && apiMin > 0 && Number.isFinite(minBase) && minBase > 0) {
-    return Math.max(apiMin, minBase);
-  }
-  if (Number.isFinite(minBase) && minBase > 0) return minBase;
-  if (Number.isFinite(apiMin) && apiMin > 0) return apiMin;
 
-  const minQty = Number(gateCfg.minQty);
   const mul = Number(gateCfg.quantoMultiplier);
+  const contractMin = Number(gateCfg.gateOrderSizeMin);
+  let derived = 0;
+  if (gateCfg.enableDecimal && contractMin > 0 && mul > 0) {
+    derived = gateContractMinToBaseQty(contractMin, mul);
+  }
+
+  const minBase = Number(gateCfg.minBaseQty);
+  const minQty = Number(gateCfg.minQty);
+  let best = derived;
+  if (Number.isFinite(minBase) && minBase > 0) best = Math.max(best, minBase);
+  if (Number.isFinite(minQty) && minQty > 0) best = Math.max(best, minQty);
+
   if (
     (gateCfg.quantityUnit === 'contract' || !gateCfg.enableDecimal)
     && Number.isFinite(minQty)
     && minQty > 0
-    && Number.isFinite(mul)
     && mul > 0
+    && !(derived > 0)
   ) {
     return minQty * mul;
   }
-  if (Number.isFinite(minQty) && minQty > 0) return minQty;
-  return 0;
+
+  return best > 0 ? best : 0;
 }
 
 /**
  * Gate 张数合约：1 个「Gate 步进单位」对应多少 Binance 基础币。
- * 例：multiplier=100、gateStep=1 → 100；multiplier=10、gateStep=1 → 10（币安须为其整数倍）。
+ * decimal + multiplier：contractStep × multiplier（例：0.1 张 × 100 = 10 币）。
  */
 export function resolveGateBaseAlignStep(gateCfg) {
-  if (!gateCfg || gateCfg.enableDecimal || gateCfg.quantityUnit === 'base') {
+  if (!gateCfg) return 0;
+
+  const mult = Number(gateCfg?.quantoMultiplier);
+  if (gateCfg.enableDecimal && Number.isFinite(mult) && mult > 0) {
+    const contractStep = resolveGateContractStep(gateCfg);
+    return contractStep * mult;
+  }
+
+  if (gateCfg.enableDecimal || gateCfg.quantityUnit === 'base') {
     return Number(gateCfg?.stepSize) || 0;
   }
-  const mult = Number(gateCfg?.quantoMultiplier);
+
   const gateStep = Number(gateCfg?.stepSize || 1);
   if (!Number.isFinite(mult) || mult <= 0) return 0;
   return mult * (gateStep > 0 ? gateStep : 1);
@@ -67,6 +83,37 @@ export function ceilToStepMultiple(value, step) {
 export function floorToStepMultiple(value, step) {
   if (!Number.isFinite(value) || value <= 0 || !(step > 0)) return 0;
   return floorByStep(value, step);
+}
+
+function alignDecimalGateHedge({ baseQty, binanceCfg, gateCfg, round }) {
+  const stepSize = Number(binanceCfg?.stepSize);
+  const multiplier = Number(gateCfg?.quantoMultiplier);
+  const contractStep = resolveGateContractStep(gateCfg);
+  const baseUnit = contractStep * multiplier;
+
+  const toMultiple = round === 'floor' ? floorToStepMultiple : ceilToStepMultiple;
+  const toBinStep = round === 'floor' ? floorByStep : ceilByStep;
+  const toContractStep = round === 'floor'
+    ? (value, step) => floorByStep(value, step)
+    : (value, step) => ceilByStep(value, step);
+
+  let qty = toBinStep(baseQty, stepSize);
+  if (qty <= 0) return { qty: 0, gateSize: 0 };
+
+  if (baseUnit > 0) {
+    qty = toMultiple(qty, baseUnit);
+  }
+  if (qty <= 0) return { qty: 0, gateSize: 0 };
+
+  let gateSize = qty / multiplier;
+  gateSize = toContractStep(gateSize, contractStep);
+  if (!(gateSize > 0)) return { qty: 0, gateSize: 0 };
+
+  qty = gateSize * multiplier;
+  qty = toBinStep(qty, stepSize);
+  if (qty <= 0) return { qty: 0, gateSize: 0 };
+
+  return { qty, gateSize };
 }
 
 /**
@@ -103,20 +150,24 @@ export function alignHedgeBaseQty({ baseQty, binanceCfg, gateCfg, round = 'ceil'
     return { qty: 0, gateSize: 0 };
   }
 
+  const multiplier = Number(gateCfg?.quantoMultiplier || 0);
+  if (gateCfg?.enableDecimal && multiplier > 0) {
+    return alignDecimalGateHedge({ baseQty, binanceCfg, gateCfg, round });
+  }
+
   const toMultiple = round === 'floor' ? floorToStepMultiple : ceilToStepMultiple;
   const toBinStep = round === 'floor' ? floorByStep : ceilByStep;
 
   let qty = toBinStep(baseQty, stepSize);
   if (qty <= 0) return { qty: 0, gateSize: 0 };
 
-  if (gateCfg?.quantityUnit === 'base' || gateCfg?.enableDecimal) {
+  if (gateCfg?.quantityUnit === 'base') {
     const gateStep = Number(gateCfg?.stepSize) || stepSize;
     qty = toMultiple(qty, gateStep);
     if (qty <= 0) return { qty: 0, gateSize: 0 };
     return { qty, gateSize: qty };
   }
 
-  const multiplier = Number(gateCfg?.quantoMultiplier || 0);
   const gateStep = Number(gateCfg?.stepSize || 1);
   if (!(multiplier > 0)) return { qty: 0, gateSize: 0 };
 
@@ -133,35 +184,37 @@ export function alignHedgeBaseQty({ baseQty, binanceCfg, gateCfg, round = 'ceil'
 }
 
 /**
- * 币安侧：有效最小 U → 基础币数量（实时价）；特例币用 JSON lotMinQty。
- * 再向上对齐到 Gate 张数倍数（resolveGateBaseAlignStep）。
+ * 币安侧最小基础币（仅 Binance 规则，不做 Gate 对齐）：
+ *   1. orderUsd（如 5U）÷ 实时价，按 stepSize 向上取整
+ *   2. 与 JSON 里 binance.minQty（API 合成最小量）取 max
  */
-export function resolveBinanceMinBaseQty({ orderUsd, aPrice, binanceCfg, gateCfg, useLotMinQty }) {
+export function resolveBinanceMinBaseQty({ orderUsd, aPrice, binanceCfg, useLotMinQty }) {
   const stepSize = Number(binanceCfg?.stepSize);
   if (!Number.isFinite(stepSize) || stepSize <= 0) return 0;
 
-  let qty;
   if (useLotMinQty) {
-    qty = Number(binanceCfg.lotMinQty ?? binanceCfg.minQty);
-    if (!Number.isFinite(qty) || qty <= 0) return 0;
-    qty = ceilByStep(qty, stepSize);
-  } else {
-    const minU = resolveEffectiveMinNotional(orderUsd, binanceCfg);
-    if (minU <= 0 || !Number.isFinite(aPrice) || aPrice <= 0) return 0;
-    qty = ceilByStep(minU / aPrice, stepSize);
-    const apiMin = resolveBinanceApiMinBaseQty(binanceCfg);
-    if (apiMin > 0) qty = Math.max(qty, apiMin);
+    const lotQty = Number(binanceCfg.lotMinQty ?? binanceCfg.minQty);
+    if (!Number.isFinite(lotQty) || lotQty <= 0) return 0;
+    return ceilByStep(lotQty, stepSize);
   }
 
-  const gateBaseUnit = resolveGateBaseAlignStep(gateCfg);
-  if (gateBaseUnit > 0) {
-    qty = ceilToStepMultiple(qty, gateBaseUnit);
-  }
+  const minU = resolveEffectiveMinNotional(orderUsd, binanceCfg);
+  if (minU <= 0 || !Number.isFinite(aPrice) || aPrice <= 0) return 0;
+
+  let qty = ceilByStep(minU / aPrice, stepSize);
+  const apiMin = resolveBinanceApiMinBaseQty(binanceCfg);
+  if (apiMin > 0) qty = Math.max(qty, apiMin);
   return qty;
 }
 
 /**
- * 两腿都能下单的最小基础币数量（币安 min + Gate min，再向上对齐 Gate 张数倍）。
+ * 两腿最小对冲量（基础币 qty + Gate 张数 gateSize）：
+ *   1. qBinance = resolveBinanceMinBaseQty（5U 与币安配置取大）
+ *   2. qGate = Gate 最小张数 × multiplier（换算成基础币）
+ *   3. rawQty = max(qBinance, qGate)
+ *   4. alignHedgeBaseQty：
+ *        - 币安小 → 抬到 Gate 最小张数对应的基础币
+ *        - 币安大 → 向上对齐到 Gate 张数步进的整数倍，再反算 gateSize
  */
 export function resolveMinHedgeQty({ orderUsd, aPrice, binanceCfg, gateCfg, useLotMinQty }) {
   const stepSize = Number(binanceCfg?.stepSize);
@@ -176,7 +229,6 @@ export function resolveMinHedgeQty({ orderUsd, aPrice, binanceCfg, gateCfg, useL
     orderUsd,
     aPrice,
     binanceCfg,
-    gateCfg,
     useLotMinQty
   });
   const qGate = resolveGateMinBaseQty(gateCfg);

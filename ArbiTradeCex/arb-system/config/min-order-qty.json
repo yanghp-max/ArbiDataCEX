@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-06-07T08:00:47.785Z",
+  "generatedAt": "2026-06-07T09:24:27.067Z",
   "sortRule": "liquidity_score_desc_then_symbol_asc",
   "totalCommonSymbols": 496,
   "selectedSymbolsCount": 52,
@@ -1223,12 +1223,12 @@
       },
       "gate": {
         "symbol": "SIREN_USDT",
-        "minQty": 6,
-        "stepSize": 1,
-        "quantityUnit": "base",
+        "minQty": 10,
+        "stepSize": 10,
+        "quantityUnit": "contract",
         "enableDecimal": true,
         "quantoMultiplier": 100,
-        "minBaseQty": 6,
+        "minBaseQty": 10,
         "gateOrderSizeMin": 0.1,
         "priceRef": {
           "collectedAt": "2026-06-07T08:00:47.567Z",
@@ -1236,7 +1236,8 @@
           "ask": 0.84082,
           "mid": 0.84049,
           "last": 0.84065
-        }
+        },
+        "gateOrderSizeRound": null
       }
     },
     "ONDOUSDT": {

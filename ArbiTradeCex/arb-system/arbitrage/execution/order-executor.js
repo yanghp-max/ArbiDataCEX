@@ -45,10 +45,9 @@ function readFilled(order, requestedQty) {
 export function gateFillToBaseQty(filledContracts, order) {
   const filled = Number(filledContracts);
   if (!Number.isFinite(filled) || filled <= 0) return 0;
-  if (order.gateDecimalSize || order.gateQuantityUnit === 'base') return filled;
   const mult = Number(order.gateQuantoMultiplier);
-  if (!Number.isFinite(mult) || mult <= 0) return filled;
-  return filled * mult;
+  if (Number.isFinite(mult) && mult > 0) return filled * mult;
+  return filled;
 }
 
 export class OrderExecutor {

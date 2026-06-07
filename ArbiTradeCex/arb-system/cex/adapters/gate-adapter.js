@@ -561,7 +561,7 @@ export class GateAdapter extends BaseAdapter {
       filled,
       timestamp: Date.now(),
       avgPrice: Number(response.fill_price || 0),
-      cumQuote: this.#gateOrderCumQuote(response, contract, filled, orderData.decimalSize)
+      cumQuote: this.#gateOrderCumQuote(response, contract, filled)
     });
   }
 
@@ -625,11 +625,10 @@ export class GateAdapter extends BaseAdapter {
     }));
   }
 
-  #gateOrderCumQuote(response, contract, filledContracts, decimalSize = false) {
+  #gateOrderCumQuote(response, contract, filledContracts) {
     const filled = Number(filledContracts);
     const avgPrice = Number(response.fill_price || 0);
     if (!(filled > 0) || !(avgPrice > 0)) return 0;
-    if (decimalSize) return filled * avgPrice;
     const mult = this.#getContractMultiplier(contract);
     return filled * mult * avgPrice;
   }
@@ -639,12 +638,10 @@ export class GateAdapter extends BaseAdapter {
     const contract = this.toGateContract(symbol);
     const orderStr = String(orderId);
     const mult = this.#getContractMultiplier(contract);
-    const decimalSize = Boolean(options.decimalSize);
-
     const mapRows = (rows) => (rows || []).map((row) => {
       const contracts = Math.abs(Number(row.size || 0));
       const price = Number(row.price || 0);
-      const baseQty = decimalSize ? contracts : contracts * mult;
+      const baseQty = contracts * mult;
       return {
         contracts,
         price,
