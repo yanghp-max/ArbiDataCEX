@@ -13,7 +13,8 @@ import {
   isOneSidedOrphan,
   isPositionLockConsistent,
   inferDirectionFromPosition,
-  resolveCexCostConfig
+  resolveCexCostConfig,
+  resolveCexCostConfigForSymbol
 } from '../services/spread-calculator.js';
 import {
   PrecisionChecker,
@@ -81,7 +82,6 @@ export class CexCexTask {
     this.enforceLatency = sharedResources.enforceLatency;
     this.latencyLimits = resolveLatencyLimits(this.cfg, this.enforceLatency);
     this.cexCost = resolveCexCostConfig(strategyConfig);
-    this.spreadOptions = this.cexCost;
 
     for (const sym of strategyConfig.symbols) {
       this.engines.set(sym, new RollingSignalEngine({
@@ -183,7 +183,8 @@ export class CexCexTask {
       return;
     }
 
-    const spreads = calcSpreads(tick, this.spreadOptions);
+    const symbolCost = resolveCexCostConfigForSymbol(this.cfg, symbol);
+    const spreads = calcSpreads(tick, symbolCost);
     const signal = engine.updateAndCalc({
       timestamp: tick.timestamp,
       spreadAb: spreads.spreadAb,
@@ -505,7 +506,7 @@ export class CexCexTask {
           reduceOnly: action === 'close',
           lockedDirection,
           latencyTrace,
-          cexFeeBpsPerLeg: this.cexCost.cexFeeBpsPerLeg,
+          cexFeeBpsPerLeg: resolveCexCostConfigForSymbol(this.cfg, symbol).cexFeeBpsPerLeg,
           maxPositionQty: this.risk.maxPositionQty(
             freshTick,
             action === 'close' ? (lockedDirection ?? execDirection) : execDirection

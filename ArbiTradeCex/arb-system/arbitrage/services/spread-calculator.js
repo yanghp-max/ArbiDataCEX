@@ -36,12 +36,27 @@ function exchangeMults(bps) {
  * binanceBpsPerLeg / gateBpsPerLeg：信号 spread 用（fee+滑点写进这一个数里即可）
  * cexFeeBpsPerLeg：仅 dry-run（tradingEnabled=false）模拟成交 PnL 时估算手续费
  */
+function compactSymbol(symbol) {
+  return String(symbol).replace(/[-_]/g, '').toUpperCase();
+}
+
+/** 全局 strategy + symbolOverrides[SYMBOL] 浅合并 */
+export function resolveSymbolStrategyConfig(strategyConfig = {}, symbol) {
+  const key = compactSymbol(symbol);
+  const overrides = strategyConfig?.symbolOverrides?.[key] ?? {};
+  return { ...strategyConfig, ...overrides };
+}
+
 export function resolveCexCostConfig(strategyConfig = {}) {
   return {
     binanceBpsPerLeg: clampBps(strategyConfig.binanceBpsPerLeg, DEFAULT_BINANCE_BPS_PER_LEG),
     gateBpsPerLeg: clampBps(strategyConfig.gateBpsPerLeg, DEFAULT_GATE_BPS_PER_LEG),
     cexFeeBpsPerLeg: clampBps(strategyConfig.cexFeeBpsPerLeg, DEFAULT_CEX_FEE_BPS_PER_LEG)
   };
+}
+
+export function resolveCexCostConfigForSymbol(strategyConfig = {}, symbol) {
+  return resolveCexCostConfig(resolveSymbolStrategyConfig(strategyConfig, symbol));
 }
 
 /**

@@ -16,6 +16,16 @@
     "binanceBpsPerLeg": 6,
     "gateBpsPerLeg": 4,
     "cexFeeBpsPerLeg": 4,
+    "symbolOverrides": {
+      "HOMEUSDT": {
+        "binanceBpsPerLeg": 10,
+        "gateBpsPerLeg": 10
+      },
+      "SIRENUSDT": {
+        "binanceBpsPerLeg": 6,
+        "gateBpsPerLeg": 4
+      }
+    },
     "mockBalanceUsdt": 10000,
     "minAvailableUsdt": 6,
     "balanceCheckRate": 0.1,
