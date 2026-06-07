@@ -19,18 +19,7 @@
     "gateSlippageBps": 4,
     "cexFeeBpsPerLeg": 5,
     "symbolOverrides": {
-      "HOMEUSDT": {
-        "binanceSlippageBps": 10,
-        "gateSlippageBps": 10
-      },
-      "SIRENUSDT": {
-        "binanceSlippageBps": 2,
-        "gateSlippageBps": 2
-      },
-      "EDENUSDT": {
-        "binanceSlippageBps": 10,
-        "gateSlippageBps": 10
-      }
+      
     },
     "mockBalanceUsdt": 10000,
     "minAvailableUsdt": 6,
