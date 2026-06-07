@@ -24,7 +24,8 @@ import {
   tickLatencyPass,
   tickSignalAgePass,
   tickPriceSnapshot,
-  tickPriceSnapshotMatch
+  tickPriceSlippagePass,
+  describePriceSlippageFail
 } from '../risk/risk-manager.js';
 import { calcTradePnl, calcTradeGross, calcTradeFeeCost } from '../execution/result-reporter.js';
 import {
@@ -474,14 +475,25 @@ export class CexCexTask {
       markLatency(latencyTrace, 'exec_async_start');
       const freshTick = this.sr.quoteAggregator.buildTick(symbol);
       const latencyOk = !this.enforceLatency || tickLatencyPass(freshTick, this.latencyLimits);
-      const priceOk = freshTick && tickPriceSnapshotMatch(priceSnapshot, freshTick);
+      const symbolCost = resolveCexCostConfigForSymbol(this.cfg, symbol);
+      const slipCheck = freshTick
+        ? tickPriceSlippagePass(priceSnapshot, freshTick, execDirection, {
+          binanceSlippageBps: symbolCost.binanceSlippageBps,
+          gateSlippageBps: symbolCost.gateSlippageBps
+        })
+        : { ok: false, reason: '无行情' };
+      const priceOk = slipCheck.ok;
       if (!freshTick || !latencyOk || !priceOk) {
         if (freshTick) {
           setFreshTickOnLatencyTrace(latencyTrace, freshTick);
           markLatency(latencyTrace, 'fresh_tick_done');
         }
         this.#logLatency(latencyTrace, {
-          reason: !freshTick ? '无行情' : !latencyOk ? '延迟检查未过' : '价格快照不一致',
+          reason: !freshTick
+            ? '无行情'
+            : !latencyOk
+              ? '延迟检查未过'
+              : describePriceSlippageFail(slipCheck) || 'WS 价格超过滑点',
           partial: true
         });
         this.#releaseSymbolClaim(symbol, { restoreCooldown: true });
@@ -497,7 +509,6 @@ export class CexCexTask {
       setFreshTickOnLatencyTrace(latencyTrace, freshTick);
       markLatency(latencyTrace, 'fresh_tick_done');
 
-      const symbolCost = resolveCexCostConfigForSymbol(this.cfg, symbol);
       let fill;
       try {
         fill = await this.sr.orderExecutor.executeBothLegs({

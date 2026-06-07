@@ -4,7 +4,12 @@ import {
   resolveMinHedgeQty,
   resolveHedgeQtyFromBaseQty
 } from '../../common/utils/cross-exchange-order-qty.js';
-import { legPricesForDirection } from '../services/spread-calculator.js';
+import {
+  DEFAULT_BINANCE_SLIPPAGE_BPS,
+  DEFAULT_GATE_SLIPPAGE_BPS,
+  legPricesForDirection,
+  tradeLegSides
+} from '../services/spread-calculator.js';
 
 export class PrecisionChecker {
   constructor(minQtyBySymbol = {}, options = {}) {
@@ -282,6 +287,110 @@ export function tickPriceSnapshotMatch(snapshot, tick) {
     && snapshot.aAsk === tick.aAsk
     && snapshot.bBid === tick.bBid
     && snapshot.bAsk === tick.bAsk;
+}
+
+function clampSlippageBps(value, fallback) {
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : fallback;
+}
+
+/**
+ * 单腿：决策快照 → 发单前 fresh 价，不利方向变动不得超过 slippageBps
+ * sell: fresh >= snap×(1−bps/1e4)；buy: fresh <= snap×(1+bps/1e4)
+ */
+export function legPriceSlippageOk({ side, snapPrice, freshPrice, slippageBps, legLabel = 'leg' }) {
+  const snap = Number(snapPrice);
+  const fresh = Number(freshPrice);
+  const bps = clampSlippageBps(slippageBps, 0);
+  if (!Number.isFinite(snap) || snap <= 0 || !Number.isFinite(fresh) || fresh <= 0) {
+    return { ok: false, leg: legLabel, reason: `${legLabel} 价格无效` };
+  }
+  const r = bps / 10000;
+  const sideNorm = String(side || '').toLowerCase();
+  if (sideNorm === 'sell') {
+    const minOk = snap * (1 - r);
+    if (fresh + 1e-15 < minOk) {
+      const moveBps = ((snap - fresh) / snap) * 10000;
+      return {
+        ok: false,
+        leg: legLabel,
+        side: sideNorm,
+        reason: `${legLabel} 卖价下滑 ${moveBps.toFixed(1)}bps > 允许 ${bps}bps`,
+        snapPrice: snap,
+        freshPrice: fresh,
+        slippageBps: bps,
+        moveBps
+      };
+    }
+    return { ok: true, leg: legLabel, side: sideNorm, moveBps: Math.max(0, ((snap - fresh) / snap) * 10000) };
+  }
+  if (sideNorm === 'buy') {
+    const maxOk = snap * (1 + r);
+    if (fresh - 1e-15 > maxOk) {
+      const moveBps = ((fresh - snap) / snap) * 10000;
+      return {
+        ok: false,
+        leg: legLabel,
+        side: sideNorm,
+        reason: `${legLabel} 买价上涨 ${moveBps.toFixed(1)}bps > 允许 ${bps}bps`,
+        snapPrice: snap,
+        freshPrice: fresh,
+        slippageBps: bps,
+        moveBps
+      };
+    }
+    return { ok: true, leg: legLabel, side: sideNorm, moveBps: Math.max(0, ((fresh - snap) / snap) * 10000) };
+  }
+  return { ok: false, leg: legLabel, reason: `${legLabel} 未知买卖方向` };
+}
+
+/**
+ * 发单前：WS 最新价相对决策快照，不利变动是否在 symbol 配置的滑点内
+ * @returns {{ ok: boolean, reason?: string, leg?: string, details?: object[] }}
+ */
+export function tickPriceSlippagePass(snapshot, tick, direction, slippage = {}) {
+  if (!snapshot || !tick) {
+    return { ok: false, reason: '缺少行情快照或最新 tick' };
+  }
+  const { aSide, bSide } = tradeLegSides(direction);
+  const binanceBps = clampSlippageBps(
+    slippage.binanceSlippageBps,
+    DEFAULT_BINANCE_SLIPPAGE_BPS
+  );
+  const gateBps = clampSlippageBps(slippage.gateSlippageBps, DEFAULT_GATE_SLIPPAGE_BPS);
+
+  const aSnap = aSide === 'sell' ? snapshot.aBid : snapshot.aAsk;
+  const aFresh = aSide === 'sell' ? tick.aBid : tick.aAsk;
+  const bSnap = bSide === 'sell' ? snapshot.bBid : snapshot.bAsk;
+  const bFresh = bSide === 'sell' ? tick.bBid : tick.bAsk;
+
+  const aCheck = legPriceSlippageOk({
+    side: aSide,
+    snapPrice: aSnap,
+    freshPrice: aFresh,
+    slippageBps: binanceBps,
+    legLabel: 'Binance'
+  });
+  const bCheck = legPriceSlippageOk({
+    side: bSide,
+    snapPrice: bSnap,
+    freshPrice: bFresh,
+    slippageBps: gateBps,
+    legLabel: 'Gate'
+  });
+
+  if (!aCheck.ok) {
+    return { ok: false, reason: aCheck.reason, leg: aCheck.leg, details: [aCheck, bCheck] };
+  }
+  if (!bCheck.ok) {
+    return { ok: false, reason: bCheck.reason, leg: bCheck.leg, details: [aCheck, bCheck] };
+  }
+  return { ok: true, details: [aCheck, bCheck] };
+}
+
+export function describePriceSlippageFail(result) {
+  if (!result || result.ok) return null;
+  return result.reason || 'WS 价格变动超过滑点容忍';
 }
 
 export function tickPriceSnapshot(symbol, tick) {
