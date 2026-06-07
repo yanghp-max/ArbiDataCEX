@@ -68,7 +68,7 @@ export class SharedResources {
       this.accountCache.seedMock({ balanceUsdt });
       console.log(`[SharedResources] mock account: ${balanceUsdt} USDT per exchange (skip balance REST)`);
     } else {
-      await this.accountCache.refreshFromCexManager(this.cexManager);
+      await this.accountCache.refreshFromCexManager(this.cexManager, { fullReplace: true });
       this.accountStreamBridge = bindAccountStream({
         cexManager: this.cexManager,
         accountCache: this.accountCache,

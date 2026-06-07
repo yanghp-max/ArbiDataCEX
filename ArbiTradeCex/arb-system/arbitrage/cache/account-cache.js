@@ -144,34 +144,73 @@ export class AccountCache {
     });
   }
 
-  async refreshExchange(cexManager, exchange, { force = false } = {}) {
+  /**
+   * @param {boolean} [options.fullReplace] - true：清空该所全部持仓再写入（仅启动/手动全量刷新）
+   *   false（默认）：仅 merge REST 返回的条目，避免成交后 Gate 延迟未出现在列表时把缓存清成 0
+   */
+  async refreshExchange(cexManager, exchange, { force = false, fullReplace = false } = {}) {
     const now = Date.now();
     const minGap = this.restRefreshMinIntervalMs ?? 2000;
     if (!force && now - (this._lastRestRefreshMs[exchange] || 0) < minGap) {
-      return;
+      return { ok: true, skipped: true };
     }
     this._lastRestRefreshMs[exchange] = now;
 
-    const [balances, positions] = await Promise.all([
-      cexManager.getBalance(exchange, { silent: true }),
-      cexManager.getPositions(exchange, { silent: true })
-    ]);
+    let balances;
+    let positions;
+    try {
+      [balances, positions] = await Promise.all([
+        cexManager.getBalance(exchange, { silent: true }),
+        cexManager.getPositions(exchange, { silent: true })
+      ]);
+    } catch (err) {
+      console.warn(`[AccountCache] ${exchange} REST 刷新失败，保留旧持仓: ${err.message}`);
+      return { ok: false, error: err.message };
+    }
+
+    if (!Array.isArray(positions)) {
+      console.warn(`[AccountCache] ${exchange} positions 非数组，保留旧持仓`);
+      return { ok: false, error: 'invalid_positions' };
+    }
+
     this.#applyBalance(exchange, balances);
+
     const prefix = `${exchange}:`;
-    for (const key of [...this.positionCache.keys()]) {
-      if (key.startsWith(prefix)) this.positionCache.delete(key);
+    let merged = 0;
+
+    if (fullReplace) {
+      for (const key of [...this.positionCache.keys()]) {
+        if (key.startsWith(prefix)) this.positionCache.delete(key);
+      }
     }
+
     for (const p of positions) {
-      this.setPosition(exchange, this.#compactSymbol(p.symbol), p.qty);
+      const sym = this.#compactSymbol(p.symbol);
+      const qty = Number(p.qty);
+      if (!Number.isFinite(qty)) continue;
+      this.setPosition(exchange, sym, qty);
+      if (Math.abs(qty) >= 1e-12) merged += 1;
     }
+
+    return { ok: true, count: merged, fullReplace };
   }
 
-  async refreshFromCexManager(cexManager) {
+  async refreshFromCexManager(cexManager, { fullReplace = false } = {}) {
     await Promise.all([
-      this.refreshExchange(cexManager, 'binance', { force: true }),
-      this.refreshExchange(cexManager, 'gate', { force: true })
+      this.refreshExchange(cexManager, 'binance', { force: true, fullReplace }),
+      this.refreshExchange(cexManager, 'gate', { force: true, fullReplace })
     ]);
     this.markRestSnapshotReliable();
+  }
+
+  /** 成交后 Gate 持仓写入常有延迟，带重试刷新（merge 模式，不清空未返回的 symbol） */
+  async refreshFromCexManagerWithRetry(cexManager, { retries = 3, delayMs = 350 } = {}) {
+    for (let i = 0; i < retries; i += 1) {
+      await this.refreshFromCexManager(cexManager, { fullReplace: false });
+      if (i < retries - 1) {
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
   }
 
   /** 启动时 REST 全量同步后标记可用，避免私有 WS 连上前每笔信号都打 REST */

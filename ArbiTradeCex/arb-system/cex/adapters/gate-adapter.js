@@ -728,8 +728,14 @@ export class GateAdapter extends BaseAdapter {
       const contract = String(r.contract || r.s || '');
       if (!contract) continue;
       const size = Number(r.size ?? 0);
-      const baseQty = this.#contractsToBaseQty(contract, size);
-      positions.push(new Position({
+      const rowMult = Number(r.quanto_multiplier);
+      if (Number.isFinite(rowMult) && rowMult > 0) {
+        this._contractMultipliers.set(contract, rowMult);
+      }
+      const baseQty = Number.isFinite(rowMult) && rowMult > 0
+        ? size * rowMult
+        : this.#contractsToBaseQty(contract, size);
+      const pos = new Position({
         symbol: this.toCompactSymbol(contract),
         exchange: this.config.name,
         side: size >= 0 ? 'long' : 'short',
@@ -744,7 +750,9 @@ export class GateAdapter extends BaseAdapter {
         initialMargin: Number(r.initial_margin || 0),
         maintMargin: Number(r.maintenance_margin || r.maint_margin || 0),
         timestamp: Date.now()
-      }));
+      });
+      pos.contracts = size;
+      positions.push(pos);
     }
     if (positions.length > 0) {
       this.emitPositionUpdate(positions);

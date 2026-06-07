@@ -72,6 +72,8 @@ export class CexCexTask {
     this.lockedDirection = new Map();
     this.lockedBranch = new Map();
     this.executingSymbols = new Set();
+    /** 持仓失衡 warn 节流（每 symbol 30s 最多 1 条） */
+    this._imbalanceWarnTs = new Map();
     this.enforceLatency = sharedResources.enforceLatency;
     this.latencyLimits = resolveLatencyLimits(this.cfg, this.enforceLatency);
     this.cexCost = resolveCexCostConfig(strategyConfig);
@@ -180,12 +182,23 @@ export class CexCexTask {
       const execDirection = lock.direction;
       const adjSpread = execDirection === '-a+b' ? spreads.spreadAbAdj : spreads.spreadBaAdj;
       if (decision.action === 'add') {
-        const aQty = this.sr.accountCache.getPosition('binance', symbol);
-        const bQty = this.sr.accountCache.getPosition('gate', symbol);
+        let aQty = this.sr.accountCache.getPosition('binance', symbol);
+        let bQty = this.sr.accountCache.getPosition('gate', symbol);
+        if (!isHedgedPosition(aQty, bQty) && !this.sr.useMockAccount) {
+          await this.sr.accountCache.refreshFromCexManager(this.sr.cexManager);
+          aQty = this.sr.accountCache.getPosition('binance', symbol);
+          bQty = this.sr.accountCache.getPosition('gate', symbol);
+        }
         if (!isHedgedPosition(aQty, bQty)) {
-          console.warn(
-            `[CexCexTask] ${symbol} 持仓失衡(A=${aQty} B=${bQty})，跳过加仓直至对冲恢复`
-          );
+          const now = Date.now();
+          const last = this._imbalanceWarnTs.get(symbol) || 0;
+          if (now - last >= 30000) {
+            this._imbalanceWarnTs.set(symbol, now);
+            console.warn(
+              `[CexCexTask] ${symbol} 持仓失衡(A=${aQty} B=${bQty})，跳过加仓直至对冲恢复`
+              + '（若 Gate App 也无多仓：多为单腿或原空仓被买入抵销为 0）'
+            );
+          }
           return;
         }
         tradePlan = {
@@ -332,6 +345,31 @@ export class CexCexTask {
     }).catch((err) => console.error(`[CexCexTask] execute error ${symbol}:`, err.message));
   }
 
+  async #auditPostTradeHedge(symbol, fill) {
+    if (fill?.legExposure || !(fill?.aFilledQty > 0 && fill?.bFilledQty > 0)) return;
+
+    const aQty = this.sr.accountCache.getPosition('binance', symbol);
+    const bQty = this.sr.accountCache.getPosition('gate', symbol);
+    if (isHedgedPosition(aQty, bQty)) return;
+
+    const key = String(symbol).replace(/[-_]/g, '');
+    const gateRows = await this.sr.cexManager.getPositions('gate', { silent: true }).catch(() => []);
+    const raw = (gateRows || []).find(
+      (p) => String(p.symbol).replace(/[-_]/g, '') === key
+    );
+
+    console.error(
+      `[CexCexTask] ${symbol} 成交后未对冲: cache A=${aQty} B=${bQty}`
+      + ` | 回执 A=${fill.aFilledQty} B=${fill.bFilledQty}`
+      + (raw
+        ? ` | Gate REST contracts=${raw.contracts ?? '?'} baseQty=${raw.qty}`
+        : ' | Gate REST 无该合约持仓')
+      + (Math.abs(aQty) > 1e-6 && Math.abs(bQty) < 1e-6
+        ? ` → 建议 Gate 开多 ${Math.abs(aQty)} 或 Binance 平空 ${Math.abs(aQty)}`
+        : '')
+    );
+  }
+
   #logLatency(trace, { reason = null, partial = false } = {}) {
     if (!trace) return;
     if (reason) {
@@ -436,7 +474,13 @@ export class CexCexTask {
       if (fill.simulated) {
         this.sr.accountCache.applyLegDelta(symbol, execDirection, fill.qty);
       } else {
-        await this.sr.accountCache.refreshFromCexManager(this.sr.cexManager);
+        const matchedQty = Math.min(
+          fill.aFilledQty > 0 ? fill.aFilledQty : 0,
+          fill.bFilledQty > 0 ? fill.bFilledQty : 0
+        );
+        if (matchedQty > 0 && fill.aFilledQty > 0 && fill.bFilledQty > 0 && !fill.legExposure) {
+          this.sr.accountCache.applyLegDelta(symbol, execDirection, matchedQty);
+        }
       }
 
       const netPnl = calcTradePnl(fill);
@@ -452,6 +496,12 @@ export class CexCexTask {
         dashboardBridge: this.sr.dashboardBridge,
         latencyTrace
       });
+
+      if (!fill.simulated) {
+        await this.sr.accountCache.refreshFromCexManagerWithRetry(this.sr.cexManager);
+        await this.#auditPostTradeHedge(symbol, fill);
+      }
+
       const aQty = this.sr.accountCache.getPosition('binance', symbol);
       const bQty = this.sr.accountCache.getPosition('gate', symbol);
       if (action === 'open' || action === 'add') {

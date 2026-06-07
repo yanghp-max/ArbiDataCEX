@@ -43,7 +43,7 @@ export async function buildAccountSnapshot(deps) {
   } = deps;
 
   if (forceRefresh && cexManager && !accountCache.mockMode) {
-    await accountCache.refreshFromCexManager(cexManager);
+    await accountCache.refreshFromCexManager(cexManager, { fullReplace: true });
   }
 
   const binanceBal = accountCache.getBalance('binance');
@@ -76,12 +76,20 @@ export async function buildAccountSnapshot(deps) {
 
   for (const sym of symbols) {
     const key = compactSymbol(sym);
-    const aQty = accountCache.getPosition('binance', key);
-    const bQty = accountCache.getPosition('gate', key);
-    if (Math.abs(aQty) < 1e-12 && Math.abs(bQty) < 1e-12) continue;
-
     const aPos = binPosMap.get(key);
     const bPos = gatePosMap.get(key);
+
+    let aQty = aPos != null && Number.isFinite(Number(aPos.qty))
+      ? Number(aPos.qty)
+      : accountCache.getPosition('binance', key);
+    let bQty = bPos != null && Number.isFinite(Number(bPos.qty))
+      ? Number(bPos.qty)
+      : accountCache.getPosition('gate', key);
+
+    if (aPos) accountCache.setPosition('binance', key, aQty);
+    if (bPos) accountCache.setPosition('gate', key, bQty);
+
+    if (Math.abs(aQty) < 1e-12 && Math.abs(bQty) < 1e-12) continue;
     const aUpnl = Number(aPos?.unrealizedPnl ?? 0);
     const bUpnl = Number(bPos?.unrealizedPnl ?? 0);
     const aInitMargin = Number(aPos?.initialMargin ?? 0);
