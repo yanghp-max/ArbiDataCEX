@@ -28,12 +28,11 @@
     "processHealthLog": "logs/process-health.jsonl",
     "processLastExitJson": "logs/last-exit.json",
     "processHealthIntervalMs": 30000,
-    "symbolsConfigJson": "config/symbols_config.json",
     "minQtyJson": "config/min-order-qty.json",
 
     "windowSeconds": 600,
     "enforceLatency": true,
-    "useMockAccount": false
+    "useMockAccount": true
 
   },
   "dashboard": {

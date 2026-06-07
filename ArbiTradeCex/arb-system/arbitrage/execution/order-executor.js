@@ -116,6 +116,7 @@ export class OrderExecutor {
     await this.#assertOrderPreconditions({
       tick,
       quote,
+      order,
       binanceSide,
       gateSide,
       qty,
@@ -280,12 +281,14 @@ export class OrderExecutor {
   async #assertOrderPreconditions({
     tick,
     quote,
+    order,
     binanceSide,
     gateSide,
     qty,
     reduceOnly,
     maxPositionQty
   }) {
+    const gateSize = Number(order?.gateSize ?? qty);
     const [binanceCheck, gateCheck] = await Promise.all([
       this.cexManager.checkOrderPreconditions('binance', {
         symbol: tick.symbol,
@@ -299,8 +302,11 @@ export class OrderExecutor {
         symbol: tick.symbol,
         side: gateSide,
         amount: qty,
+        gateAmount: gateSize,
         maxPosition: maxPositionQty,
         estimatedPrice: quote.bPriceNominal,
+        decimalSize: Boolean(order?.gateDecimalSize),
+        quantoMultiplier: Number(order?.gateQuantoMultiplier) || null,
         reduceOnly
       })
     ]);

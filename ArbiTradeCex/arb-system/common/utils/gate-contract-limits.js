@@ -1,6 +1,22 @@
 /**
  * Gate 合约最小量/步进解析。
- * enable_decimal 合约 order_size_min 为 0，最小量按 Binance base qty 对齐。
+ * enable_decimal 合约需带 X-Gate-Size-Decimal 拉取的 order_size_min（币本位）。
+ */
+import { ceilByStep } from './binance-order-limits.js';
+
+function parsePositiveNumber(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+/** Gate API order_size_min（币本位，需 X-Gate-Size-Decimal: 1） */
+export function parseGateDecimalOrderSizeMin(gateInfo) {
+  if (!gateInfo || gateInfo.enable_decimal !== true) return null;
+  return parsePositiveNumber(gateInfo.order_size_min);
+}
+
+/**
+ * Gate 合约最小量/步进解析。
  */
 export function resolveGateOrderLimits(gateInfo, { binanceMinQty, binanceStepSize, gateSymbol }) {
   if (!gateInfo) {
@@ -12,6 +28,7 @@ export function resolveGateOrderLimits(gateInfo, { binanceMinQty, binanceStepSiz
   const enableDecimal = gateInfo.enable_decimal === true;
   const gateMinContracts = Number(gateInfo.order_size_min);
   const gateOrderSizeRound = Number(gateInfo.order_size_round || 0);
+  const gateDecimalMinBase = parseGateDecimalOrderSizeMin(gateInfo);
 
   if (enableDecimal) {
     if (!Number.isFinite(binanceMinQty) || binanceMinQty <= 0) {
@@ -20,15 +37,23 @@ export function resolveGateOrderLimits(gateInfo, { binanceMinQty, binanceStepSiz
     if (!Number.isFinite(binanceStepSize) || binanceStepSize <= 0) {
       throw new Error(`invalid Binance stepSize for decimal Gate contract ${name}`);
     }
+
+    const gateStep = gateOrderSizeRound > 0 ? gateOrderSizeRound : binanceStepSize;
+    let minBaseQty = binanceMinQty;
+    if (gateDecimalMinBase != null) {
+      minBaseQty = Math.max(minBaseQty, ceilByStep(gateDecimalMinBase, gateStep));
+    }
+
     return {
-      minQty: binanceMinQty,
-      stepSize: binanceStepSize,
+      minQty: minBaseQty,
+      stepSize: gateStep,
       quantityUnit: 'base',
       enableDecimal: true,
       quantoMultiplier: Number.isFinite(gateQuantoMultiplier) && gateQuantoMultiplier > 0
         ? gateQuantoMultiplier
         : null,
-      minBaseQty: binanceMinQty
+      minBaseQty,
+      gateOrderSizeMin: gateDecimalMinBase
     };
   }
 
@@ -46,8 +71,9 @@ export function resolveGateOrderLimits(gateInfo, { binanceMinQty, binanceStepSiz
       : null,
     minBaseQty: Number.isFinite(gateQuantoMultiplier) && gateQuantoMultiplier > 0
       ? gateMinContracts * gateQuantoMultiplier
-      : null
+      : null,
+    gateOrderSizeMin: null
   };
 }
 
-export default { resolveGateOrderLimits };
+export default { resolveGateOrderLimits, parseGateDecimalOrderSizeMin };

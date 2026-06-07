@@ -4,8 +4,13 @@ import { floorByStep } from './precision.js';
 /** Gate 最小基础币数量（张数合约：minQty 张 × multiplier） */
 export function resolveGateMinBaseQty(gateCfg) {
   if (!gateCfg) return 0;
+  const apiMin = Number(gateCfg.gateOrderSizeMin);
   const minBase = Number(gateCfg.minBaseQty);
+  if (Number.isFinite(apiMin) && apiMin > 0 && Number.isFinite(minBase) && minBase > 0) {
+    return Math.max(apiMin, minBase);
+  }
   if (Number.isFinite(minBase) && minBase > 0) return minBase;
+  if (Number.isFinite(apiMin) && apiMin > 0) return apiMin;
 
   const minQty = Number(gateCfg.minQty);
   const mul = Number(gateCfg.quantoMultiplier);

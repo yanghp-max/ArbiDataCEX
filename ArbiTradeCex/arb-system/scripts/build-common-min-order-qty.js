@@ -5,8 +5,7 @@
  *   liquidity_score = min(binance_24h_qv, gate_24h_qv)，降序；同分按 symbol_id 升序
  *
  * 输出：
- *   config/symbols_config.json  — 币种列表、rank、流动性
- *   config/min-order-qty.json   — 各 symbol 最小下单量/步进（供 PrecisionChecker）
+ *   config/min-order-qty.json   — selectedSymbols + 各 symbol 最小下单量/步进
  *
  * 用法：
  *   node scripts/build-common-min-order-qty.js
@@ -19,7 +18,9 @@ import process from 'node:process';
 import axios from 'axios';
 import { getRootDir } from '../config/global-config.js';
 import { resolveBinanceOrderLimits } from '../common/utils/binance-order-limits.js';
+import { resolveBinanceSymbolInfoForBuild } from '../common/utils/binance-symbol-info.js';
 import { resolveGateOrderLimits } from '../common/utils/gate-contract-limits.js';
+import { fetchGateContractsDecimal, mapWithConcurrency } from '../common/utils/fetch-market-metadata.js';
 
 const BINANCE_REST = process.env.BINANCE_REST_URL || 'https://fapi.binance.com';
 const GATE_REST = process.env.GATE_REST_URL || 'https://api.gateio.ws/api/v4';
@@ -28,7 +29,6 @@ function parseArgs(argv) {
   const rootDir = getRootDir();
   const args = {
     top: null,
-    outputSymbols: path.join(rootDir, 'config/symbols_config.json'),
     outputMinQty: path.join(rootDir, 'config/min-order-qty.json'),
     skipErrors: false
   };
@@ -37,11 +37,6 @@ function parseArgs(argv) {
     const token = argv[i];
     if (token === '--top' && argv[i + 1] != null) {
       args.top = Number(argv[i + 1]);
-      i += 1;
-      continue;
-    }
-    if (token === '--output-symbols' && argv[i + 1]) {
-      args.outputSymbols = path.resolve(rootDir, argv[i + 1]);
       i += 1;
       continue;
     }
@@ -188,9 +183,24 @@ function buildCommonSymbolRows(bnSet, gtSet, bnQv, gtQv) {
   return rows;
 }
 
-function buildMinQtyEntry({ symbolId, gateSymbol, binanceInfo, gateInfo, bTicker, gTicker, priceCollectedAt }) {
-  const binanceLimits = resolveBinanceOrderLimits(binanceInfo, {
-    refPrice: binanceRefPrice(bTicker)
+async function buildMinQtyEntry({
+  symbolId,
+  gateSymbol,
+  binanceInfo,
+  gateInfo,
+  bTicker,
+  gTicker,
+  priceCollectedAt
+}) {
+  const refPrice = binanceRefPrice(bTicker);
+  const { symbolInfo: resolvedBinanceInfo, refreshed } = await resolveBinanceSymbolInfoForBuild(
+    symbolId,
+    binanceInfo,
+    refPrice
+  );
+
+  const binanceLimits = resolveBinanceOrderLimits(resolvedBinanceInfo, {
+    refPrice
   });
 
   const gateLimits = resolveGateOrderLimits(gateInfo, {
@@ -206,6 +216,7 @@ function buildMinQtyEntry({ symbolId, gateSymbol, binanceInfo, gateInfo, bTicker
       minNotional: binanceLimits.minNotional,
       minQty: binanceLimits.minQty,
       stepSize: binanceLimits.stepSize,
+      exchangeInfoRefreshed: refreshed,
       priceRef: {
         collectedAt: priceCollectedAt,
         bid: bTicker?.bid ?? null,
@@ -221,6 +232,7 @@ function buildMinQtyEntry({ symbolId, gateSymbol, binanceInfo, gateInfo, bTicker
       enableDecimal: gateLimits.enableDecimal,
       quantoMultiplier: gateLimits.quantoMultiplier,
       minBaseQty: gateLimits.minBaseQty,
+      gateOrderSizeMin: gateLimits.gateOrderSizeMin,
       priceRef: {
         collectedAt: priceCollectedAt,
         bid: gTicker?.bid ?? null,
@@ -243,7 +255,7 @@ async function main() {
     binanceBookTickers
   ] = await Promise.all([
     axios.get(`${BINANCE_REST}/fapi/v1/exchangeInfo`, { timeout: 30000 }).then((r) => r.data),
-    axios.get(`${GATE_REST}/futures/usdt/contracts`, { timeout: 30000 }).then((r) => r.data),
+    fetchGateContractsDecimal(),
     axios.get(`${BINANCE_REST}/fapi/v1/ticker/24hr`, { timeout: 30000 }).then((r) => r.data),
     axios.get(`${GATE_REST}/futures/usdt/tickers`, { timeout: 30000 }).then((r) => r.data),
     axios.get(`${BINANCE_REST}/fapi/v1/ticker/bookTicker`, { timeout: 30000 }).then((r) => r.data)
@@ -267,11 +279,11 @@ async function main() {
   const minQtySymbols = {};
   const skipped = [];
 
-  for (const row of selectedRows) {
+  const builtRows = await mapWithConcurrency(selectedRows, 8, async (row) => {
     const symbolId = row.symbol_id;
     const gateSymbol = row.gate_symbol;
     try {
-      minQtySymbols[symbolId] = buildMinQtyEntry({
+      const entry = await buildMinQtyEntry({
         symbolId,
         gateSymbol,
         binanceInfo: binanceMap.get(symbolId),
@@ -280,29 +292,26 @@ async function main() {
         gTicker: gateTickerMap.get(gateSymbol) || null,
         priceCollectedAt
       });
+      return { symbolId, entry, error: null };
     } catch (err) {
       if (args.skipErrors) {
-        skipped.push({ symbol: symbolId, error: err.message });
-        continue;
+        return { symbolId, entry: null, error: err.message };
       }
       throw err;
     }
+  });
+
+  for (const row of builtRows) {
+    if (row.error) {
+      skipped.push({ symbol: row.symbolId, error: row.error });
+      continue;
+    }
+    minQtySymbols[row.symbolId] = row.entry;
   }
 
   const selectedSymbolIds = selectedRows
     .map((r) => r.symbol_id)
     .filter((s) => minQtySymbols[s]);
-
-  const symbolsPayload = {
-    generated_at: Date.now(),
-    source: 'binance_futures + gate_futures_usdt',
-    sort_rule: 'liquidity_score_desc_then_symbol_asc',
-    top_n: topN,
-    total_common_symbols: allRows.length,
-    selected_symbols_count: selectedSymbolIds.length,
-    selected_symbols: selectedSymbolIds,
-    symbols: selectedRows.filter((r) => minQtySymbols[r.symbol_id])
-  };
 
   const minQtyPayload = {
     generatedAt: new Date().toISOString(),
@@ -312,7 +321,7 @@ async function main() {
     selectedSymbols: selectedSymbolIds,
     source: {
       binance: `${BINANCE_REST}/fapi/v1/exchangeInfo`,
-      gate: `${GATE_REST}/futures/usdt/contracts`,
+      gate: `${GATE_REST}/futures/usdt/contracts (X-Gate-Size-Decimal: 1)`,
       binanceTicker: `${BINANCE_REST}/fapi/v1/ticker/bookTicker`,
       gateTicker: `${GATE_REST}/futures/usdt/tickers`,
       binance24h: `${BINANCE_REST}/fapi/v1/ticker/24hr`,
@@ -323,15 +332,11 @@ async function main() {
 
   if (skipped.length > 0) {
     minQtyPayload.skipped = skipped;
-    symbolsPayload.skipped = skipped;
   }
 
-  await fs.mkdir(path.dirname(args.outputSymbols), { recursive: true });
   await fs.mkdir(path.dirname(args.outputMinQty), { recursive: true });
-  await fs.writeFile(args.outputSymbols, `${JSON.stringify(symbolsPayload, null, 2)}\n`, 'utf8');
   await fs.writeFile(args.outputMinQty, `${JSON.stringify(minQtyPayload, null, 2)}\n`, 'utf8');
 
-  console.log(`written symbols: ${args.outputSymbols}`);
   console.log(`written min-qty: ${args.outputMinQty}`);
   console.log(`common symbols: ${allRows.length}`);
   console.log(`selected: ${selectedSymbolIds.length}${topN < allRows.length ? ` (top ${topN})` : ''}`);

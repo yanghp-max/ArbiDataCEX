@@ -33,7 +33,7 @@ async function main() {
 
   if (!symbols.length) {
     throw new Error(
-      'no tradable symbols resolved; run npm run build:symbols-min-qty and ensure symbols_config.json intersects min-order-qty.json'
+      'no tradable symbols resolved; run npm run build:symbols-min-qty to generate config/min-order-qty.json'
     );
   }
 

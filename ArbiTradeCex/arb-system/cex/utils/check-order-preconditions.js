@@ -7,6 +7,8 @@
 
 const BALANCE_BUFFER = 1.01;
 const MARGIN_RATE_ESTIMATE = 0.10;
+/** Gate 开空验资：按名义价值 1x 估算（更接近实盘 INSUFFICIENT_AVAILABLE） */
+const GATE_FUTURES_MARGIN_RATE = 1.0;
 
 function compactSymbol(symbol) {
   return String(symbol).replace(/[-_]/g, '').toUpperCase();
@@ -33,9 +35,12 @@ function signedPositionQty(pos) {
  * @param {object} params
  * @param {string} params.symbol - 如 WLDUSDT
  * @param {string} params.side - buy | sell
- * @param {number} params.amount - 基础币数量（与 Binance qty / Gate 持仓口径一致）
+ * @param {number} params.amount - 基础币数量（Binance qty）
+ * @param {number} [params.gateAmount] - Gate 下单 size（币本位）
  * @param {number} [params.maxPosition] - 最大持仓（基础币）
  * @param {number} [params.estimatedPrice] - 名义价（买用 ask，卖用 bid）
+ * @param {boolean} [params.decimalSize] - Gate 小数下单
+ * @param {number} [params.quantoMultiplier] - Gate 合约乘数
  * @param {boolean} [params.reduceOnly]
  * @param {boolean} [params.futuresMode=true]
  */
@@ -44,15 +49,19 @@ export async function checkOrderPreconditions(adapter, params = {}) {
     symbol,
     side,
     amount,
+    gateAmount,
     maxPosition,
     estimatedPrice,
+    decimalSize = false,
+    quantoMultiplier,
     reduceOnly = false,
     futuresMode = true
   } = params;
 
   const exchangeName = adapter?.config?.name || adapter?.id || 'CEX';
+  const isGate = String(adapter?.id || adapter?.config?.name || '').toLowerCase() === 'gate';
   const sideNorm = String(side || '').toLowerCase();
-  const qty = Number(amount);
+  const qty = Number(isGate && gateAmount != null ? gateAmount : amount);
 
   const result = {
     balanceCheck: { passed: false, details: {}, reason: '' },
@@ -79,13 +88,30 @@ export async function checkOrderPreconditions(adapter, params = {}) {
         result.balanceCheck.reason = '买入检查缺少 estimatedPrice';
         return result;
       }
-      requiredAmount = qty * priceForCalc * BALANCE_BUFFER;
+      const marginRate = isGate && futuresMode ? GATE_FUTURES_MARGIN_RATE : 1;
+      requiredAmount = qty * priceForCalc * marginRate * BALANCE_BUFFER;
     } else if (futuresMode) {
       if (!priceForCalc) {
         result.balanceCheck.reason = '卖出/开空检查缺少 estimatedPrice';
         return result;
       }
-      requiredAmount = qty * priceForCalc * MARGIN_RATE_ESTIMATE;
+      const marginRate = isGate ? GATE_FUTURES_MARGIN_RATE : MARGIN_RATE_ESTIMATE;
+      requiredAmount = qty * priceForCalc * marginRate * BALANCE_BUFFER;
+
+      // 小数单 size=1 若被当成 1 张合约，保证金 = multiplier × 价
+      const mult = Number(quantoMultiplier);
+      if (
+        isGate
+        && decimalSize
+        && Number.isFinite(mult)
+        && mult > 1
+        && qty > 0
+        && qty <= 1
+      ) {
+        const misreadMargin = mult * priceForCalc * BALANCE_BUFFER;
+        requiredAmount = Math.max(requiredAmount, misreadMargin);
+        result.balanceCheck.details.misreadContractMargin = misreadMargin;
+      }
     } else {
       const base = compactSymbol(symbol).replace(/USDT$/, '');
       requiredCurrency = base || compactSymbol(symbol);
@@ -95,7 +121,12 @@ export async function checkOrderPreconditions(adapter, params = {}) {
     const balance = (balances || []).find((b) => String(b.currency).toUpperCase() === requiredCurrency);
     const available = Number(balance?.available ?? 0);
 
-    result.balanceCheck.details = { currency: requiredCurrency, available, required: requiredAmount };
+    result.balanceCheck.details = {
+      ...result.balanceCheck.details,
+      currency: requiredCurrency,
+      available,
+      required: requiredAmount
+    };
 
     if (available < requiredAmount) {
       result.balanceCheck.reason =

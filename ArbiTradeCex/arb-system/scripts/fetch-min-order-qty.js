@@ -7,7 +7,9 @@ import process from 'node:process';
 import axios from 'axios';
 import { loadConfig, getRootDir } from '../config/global-config.js';
 import { resolveBinanceOrderLimits } from '../common/utils/binance-order-limits.js';
+import { resolveBinanceSymbolInfoForBuild } from '../common/utils/binance-symbol-info.js';
 import { resolveGateOrderLimits } from '../common/utils/gate-contract-limits.js';
+import { fetchGateContractsDecimal } from '../common/utils/fetch-market-metadata.js';
 
 const BINANCE_REST = process.env.BINANCE_REST_URL || 'https://fapi.binance.com';
 const GATE_REST = process.env.GATE_REST_URL || 'https://api.gateio.ws/api/v4';
@@ -38,7 +40,7 @@ function parseArgs(argv) {
   }
   if (args.symbols.length === 0) {
     throw new Error(
-      'missing --symbols; ensure config/symbols_config.json selected_symbols intersects config/min-order-qty.json symbols'
+      'missing --symbols; pass --symbols LABUSDT or set selectedSymbols in config/min-order-qty.json'
     );
   }
   return args;
@@ -94,8 +96,7 @@ async function fetchBinanceExchangeInfo() {
 }
 
 async function fetchGateContracts() {
-  const resp = await axios.get(`${GATE_REST}/futures/usdt/contracts`, { timeout: 15000 });
-  return resp.data;
+  return fetchGateContractsDecimal();
 }
 
 async function fetchBinanceBookTickers() {
@@ -177,7 +178,7 @@ async function main() {
     generatedAt: new Date().toISOString(),
     source: {
       binance: `${BINANCE_REST}/fapi/v1/exchangeInfo`,
-      gate: `${GATE_REST}/futures/usdt/contracts`,
+      gate: `${GATE_REST}/futures/usdt/contracts (X-Gate-Size-Decimal: 1)`,
       binanceTicker: `${BINANCE_REST}/fapi/v1/ticker/bookTicker`,
       gateTicker: `${GATE_REST}/futures/usdt/tickers`
     },
@@ -200,8 +201,14 @@ async function main() {
 
     const bTicker = binanceTickerMap.get(upper) || null;
     const gTicker = gateTickerMap.get(gateContract) || null;
-    const binanceLimits = resolveBinanceOrderLimits(b, {
-      refPrice: binanceRefPrice(bTicker)
+    const refPrice = binanceRefPrice(bTicker);
+    const { symbolInfo: resolvedBinanceInfo, refreshed } = await resolveBinanceSymbolInfoForBuild(
+      upper,
+      b,
+      refPrice
+    );
+    const binanceLimits = resolveBinanceOrderLimits(resolvedBinanceInfo, {
+      refPrice
     });
 
     const gateLimits = resolveGateOrderLimits(g, {
@@ -217,6 +224,7 @@ async function main() {
         minNotional: binanceLimits.minNotional,
         minQty: binanceLimits.minQty,
         stepSize: binanceLimits.stepSize,
+        exchangeInfoRefreshed: refreshed,
         priceRef: {
           collectedAt: priceCollectedAt,
           bid: bTicker?.bid ?? null,
@@ -232,6 +240,7 @@ async function main() {
         enableDecimal: gateLimits.enableDecimal,
         quantoMultiplier: gateLimits.quantoMultiplier,
         minBaseQty: gateLimits.minBaseQty,
+        gateOrderSizeMin: gateLimits.gateOrderSizeMin,
         priceRef: {
           collectedAt: priceCollectedAt,
           bid: gTicker?.bid ?? null,
