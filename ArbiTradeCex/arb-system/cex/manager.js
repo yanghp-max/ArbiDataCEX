@@ -104,6 +104,14 @@ export class CexManager {
     return this.#requireAdapter(exchange).checkOrder(orderData);
   }
 
+  async checkOrderPreconditions(exchange, params) {
+    const adapter = this.#requireAdapter(exchange);
+    if (typeof adapter.checkOrderPreconditions !== 'function') {
+      throw new Error(`checkOrderPreconditions not supported on ${exchange}`);
+    }
+    return adapter.checkOrderPreconditions(params);
+  }
+
   async getFundingRate(exchange, symbol) {
     const adapter = this.#requireAdapter(exchange);
     if (typeof adapter.getFundingRate !== 'function') {

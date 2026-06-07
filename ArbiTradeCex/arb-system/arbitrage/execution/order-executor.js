@@ -8,6 +8,7 @@ import { OrderStatus } from '../../cex/types.js';
 import { calcSpreads, legPricesForDirection, tradeLegSides } from '../services/spread-calculator.js';
 import { buildLegPnl, isFillPnlComplete } from './cex-leg-pnl.js';
 import { markLatency } from '../monitoring/trade-latency.js';
+import { formatPreconditionFail } from '../../cex/utils/check-order-preconditions.js';
 
 function quoteSnapshot(direction, tick, spreadOptions = {}) {
   const nominal = legPricesForDirection(direction, tick);
@@ -63,7 +64,8 @@ export class OrderExecutor {
     reduceOnly = false,
     lockedDirection = null,
     latencyTrace = null,
-    cexFeeBpsPerLeg = 2
+    cexFeeBpsPerLeg = 2,
+    maxPositionQty = null
   }) {
     const { qty, gateSize, gateDecimalSize } = order;
     const { aSide, bSide } = tradeLegSides(direction);
@@ -111,7 +113,16 @@ export class OrderExecutor {
       };
     }
 
-    const fallback = legPricesForDirection(direction, tick);
+    await this.#assertOrderPreconditions({
+      tick,
+      quote,
+      binanceSide,
+      gateSide,
+      qty,
+      reduceOnly,
+      maxPositionQty
+    });
+
     markLatency(latencyTrace, 'order_send_start');
 
     const placeBinance = () => this.cexManager.placeOrder('binance', {
@@ -263,6 +274,42 @@ export class OrderExecutor {
     }
 
     return fill;
+  }
+
+  async #assertOrderPreconditions({
+    tick,
+    quote,
+    binanceSide,
+    gateSide,
+    qty,
+    reduceOnly,
+    maxPositionQty
+  }) {
+    const [binanceCheck, gateCheck] = await Promise.all([
+      this.cexManager.checkOrderPreconditions('binance', {
+        symbol: tick.symbol,
+        side: binanceSide,
+        amount: qty,
+        maxPosition: maxPositionQty,
+        estimatedPrice: quote.aPriceNominal,
+        reduceOnly
+      }),
+      this.cexManager.checkOrderPreconditions('gate', {
+        symbol: tick.symbol,
+        side: gateSide,
+        amount: qty,
+        maxPosition: maxPositionQty,
+        estimatedPrice: quote.bPriceNominal,
+        reduceOnly
+      })
+    ]);
+
+    if (!binanceCheck.overall) {
+      throw new Error(formatPreconditionFail('Binance', binanceCheck));
+    }
+    if (!gateCheck.overall) {
+      throw new Error(formatPreconditionFail('Gate', gateCheck));
+    }
   }
 
   async #fetchOrderTradesWithRetry(exchange, orderId, symbol, options = {}) {

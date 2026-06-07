@@ -9,6 +9,9 @@ import { parseJsonPreserveBigIntIds, idToString } from '../../common/utils/parse
 import { BaseAdapter } from './base-adapter.js';
 import { Balance, Order, Position, OrderStatus, EventTypes } from '../types.js';
 import { cryptoUtils } from '../utils.js';
+import {
+  checkOrderPreconditions as runCheckOrderPreconditions
+} from '../utils/check-order-preconditions.js';
 
 export class GateAdapter extends BaseAdapter {
   constructor(config = {}) {
@@ -517,6 +520,14 @@ export class GateAdapter extends BaseAdapter {
     }
     const left = Math.abs(Number(response.left));
     return Math.max(0, size - left);
+  }
+
+  /** 发单前余额/持仓检查（对齐 ArbiTrade-1） */
+  async checkOrderPreconditions(params) {
+    return runCheckOrderPreconditions(this, {
+      ...params,
+      futuresMode: true
+    });
   }
 
   async placeOrder(orderData) {

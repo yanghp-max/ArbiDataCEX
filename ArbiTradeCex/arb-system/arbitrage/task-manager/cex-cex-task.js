@@ -385,7 +385,11 @@ export class CexCexTask {
           reduceOnly: action === 'close',
           lockedDirection,
           latencyTrace,
-          cexFeeBpsPerLeg: this.cexCost.cexFeeBpsPerLeg
+          cexFeeBpsPerLeg: this.cexCost.cexFeeBpsPerLeg,
+          maxPositionQty: this.risk.maxPositionQty(
+            freshTick,
+            action === 'close' ? (lockedDirection ?? execDirection) : execDirection
+          )
         });
       } catch (err) {
         await this.sr.accountCache.refreshFromCexManager(this.sr.cexManager).catch(() => {});
