@@ -7,12 +7,51 @@ import {
 
 /**
  * PnL — 对齐 ArbiTrade-1 pnl-csv-manager：
- *   netPnL = legA.usdtChange + legB.usdtChange（仅真实成交 fee 确认后计入累计）
- * 手续费、滑点已体现在各腿 usdtChange（来自成交价 + 交易所成交回执）
+ *   netPnLUSDT = legA.usdtChange + legB.usdtChange
+ *
+ * 单腿 usdtChange（成交额 ± 手续费，来自成交回执）：
+ *   sell: +quoteVolume − fee
+ *   buy:  −(quoteVolume + fee)
+ *
+ * 展示列：
+ *   gross_pnl = net_pnl + fee_cost（两腿 fee 之和）
+ *   a_usdt_change / b_usdt_change = 各腿 usdtChange（非价差毛利；旧版 CSV 曾把 gross/fee 误标在此两列）
  */
+
+const PNL_EPS = 1e-4;
 
 export function calcTradePnl(fill) {
   return calcTradePnlFromLegs(fill);
+}
+
+export function assertLegPnlConsistency(fill, netPnl = null) {
+  const a = Number(fill?.aLeg?.usdtChange) || 0;
+  const b = Number(fill?.bLeg?.usdtChange) || 0;
+  const legSum = a + b;
+  const legNet = calcTradePnlFromLegs(fill);
+  const issues = [];
+  if (legNet != null && Math.abs(legSum - legNet) > PNL_EPS) {
+    issues.push(`a+b=${legSum.toFixed(6)} vs legNet=${legNet.toFixed(6)}`);
+  }
+  if (
+    netPnl != null
+    && Number.isFinite(netPnl)
+    && legNet != null
+    && Math.abs(netPnl - legNet) > PNL_EPS
+  ) {
+    issues.push(`passed net=${netPnl.toFixed(6)} vs legNet=${legNet.toFixed(6)}`);
+  }
+  const gross = calcTradeGrossFromLegs(fill);
+  const fees = calcTradeFeeCost(fill);
+  if (
+    gross != null
+    && legNet != null
+    && fees != null
+    && Math.abs(gross - fees - legNet) > PNL_EPS
+  ) {
+    issues.push(`gross-fee=${(gross - fees).toFixed(6)} vs net=${legNet.toFixed(6)}`);
+  }
+  return { ok: issues.length === 0, legSum, legNet, issues };
 }
 
 export function calcTradeGross(fill) {
@@ -58,12 +97,21 @@ export class ResultReporter {
     dashboardBridge,
     latencyTrace = null
   }) {
-    const pnlComplete = fill?.pnlComplete !== false && netPnl != null && Number.isFinite(netPnl);
+    const aLeg = fill.aLeg ?? {};
+    const bLeg = fill.bLeg ?? {};
+    const legNet = calcTradePnlFromLegs(fill);
+    const pnlComplete = fill?.pnlComplete !== false && legNet != null && Number.isFinite(legNet);
+    const resolvedNetPnl = pnlComplete ? legNet : null;
+
     if (pnlComplete) {
-      this.cumPnl += netPnl;
-      if (netPnl >= 0) this.winCount += 1;
+      const check = assertLegPnlConsistency(fill, netPnl);
+      if (!check.ok) {
+        console.warn(`[PNL] 两腿与净盈亏不一致 (${symbol}): ${check.issues.join('; ')}`);
+      }
+      this.cumPnl += resolvedNetPnl;
+      if (resolvedNetPnl >= 0) this.winCount += 1;
       else this.lossCount += 1;
-      this.bySymbol[symbol] = (this.bySymbol[symbol] ?? 0) + netPnl;
+      this.bySymbol[symbol] = (this.bySymbol[symbol] ?? 0) + resolvedNetPnl;
     }
     this.tradeCount += 1;
     if (!pnlComplete) this.pendingPnlCount += 1;
@@ -72,8 +120,6 @@ export class ResultReporter {
     const quote = fill.quote ?? {};
     const grossPnl = calcTradeGross(fill);
     const feeCost = calcTradeFeeCost(fill);
-    const aLeg = fill.aLeg ?? {};
-    const bLeg = fill.bLeg ?? {};
     const row = {
       symbol,
       timestamp: ts,
@@ -115,7 +161,7 @@ export class ResultReporter {
       bFee: bLeg.fee ?? null,
       grossPnl,
       feeCost,
-      netPnl,
+      netPnl: resolvedNetPnl,
       cumPnl: this.cumPnl,
       pnlComplete,
       simulated: Boolean(fill.simulated),
@@ -134,7 +180,9 @@ export class ResultReporter {
     console.log('[TRADE]', JSON.stringify(row));
     if (pnlComplete) {
       console.log(
-        `[PNL] total=${this.cumPnl.toFixed(4)} USDT · trades=${this.tradeCount} · latest=${netPnl.toFixed(4)} (${symbol})`
+        `[PNL] total=${this.cumPnl.toFixed(4)} USDT · trades=${this.tradeCount} · latest=${resolvedNetPnl.toFixed(4)} (${symbol})`
+        + ` · legA${aLeg.usdtChange >= 0 ? '+' : ''}${Number(aLeg.usdtChange).toFixed(4)}`
+        + ` legB${bLeg.usdtChange >= 0 ? '+' : ''}${Number(bLeg.usdtChange).toFixed(4)}`
       );
     } else {
       console.warn(

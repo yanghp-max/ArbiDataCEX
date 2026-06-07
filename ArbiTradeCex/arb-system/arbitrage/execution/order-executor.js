@@ -194,6 +194,7 @@ export class OrderExecutor {
       ? Math.min(aFilled, bFilledBase, qty)
       : Math.max(aFilled, bFilledBase);
 
+    const fallback = legPricesForDirection(direction, tick);
     const aPricePost = aFilled > 0 && aOrder
       ? Number(aOrder.avgPrice || aOrder.price || fallback.aPrice)
       : null;
