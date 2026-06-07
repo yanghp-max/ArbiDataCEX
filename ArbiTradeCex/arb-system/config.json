@@ -23,7 +23,7 @@
     "gateAccountMode": "single",
     "listenKeyKeepaliveMin": 60,
     "reservationTtlMs": 30000,
-    "maxInFlightTrades": 5,
+    "maxInFlightTrades": 0,
     "tradeLogCsv": "logs/live-trades.csv",
     "processHealthLog": "logs/process-health.jsonl",
     "processLastExitJson": "logs/last-exit.json",

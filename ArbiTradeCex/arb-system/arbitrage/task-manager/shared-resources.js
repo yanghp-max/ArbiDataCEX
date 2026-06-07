@@ -81,7 +81,9 @@ export class SharedResources {
     });
     this.orderExecutor = new OrderExecutor({
       cexManager: this.cexManager,
-      tradingEnabled: this.tradingEnabled
+      tradingEnabled: this.tradingEnabled,
+      accountCache: this.accountCache,
+      reservationManager: this.reservationManager
     });
 
     if (this.tradingEnabled && strat.tradeLogCsv) {

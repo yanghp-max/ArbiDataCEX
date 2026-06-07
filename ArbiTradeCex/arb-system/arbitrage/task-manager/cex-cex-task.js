@@ -163,7 +163,10 @@ export class CexCexTask {
     const sinceOrder = Date.now() - this.lastOrderTs.get(symbol);
     if (sinceOrder < this.cfg.cooldownMs) return;
     if (this.executingSymbols.has(symbol)) return;
-    if (this.sr.inFlightCount >= this.cfg.maxInFlightTrades) return;
+    const maxInFlight = Number(this.cfg.maxInFlightTrades);
+    if (Number.isFinite(maxInFlight) && maxInFlight > 0 && this.sr.inFlightCount >= maxInFlight) {
+      return;
+    }
 
     let tradePlan = null;
 
@@ -262,10 +265,17 @@ export class CexCexTask {
     const { aNeed, bNeed } = this.precision.calcUsdtNeed(execDirection, qty, tick, this.cfg.balanceCheckRate);
 
     if (!this.sr.useMockAccount) {
-      try {
-        await this.sr.accountCache.ensureFresh(this.sr.cexManager);
-      } catch {
-        return;
+      const cache = this.sr.accountCache;
+      const maxAge = cache.accountCacheMaxAgeMs ?? 5000;
+      const needFresh = ['binance', 'gate'].some(
+        (ex) => !cache.isReliable(ex) || cache.isStale(ex, maxAge)
+      );
+      if (needFresh) {
+        try {
+          await cache.ensureFresh(this.sr.cexManager);
+        } catch {
+          return;
+        }
       }
     }
     markLatency(latencyTrace, 'account_fresh_done');

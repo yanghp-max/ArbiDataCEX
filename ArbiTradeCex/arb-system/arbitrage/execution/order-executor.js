@@ -8,7 +8,10 @@ import { OrderStatus } from '../../cex/types.js';
 import { calcSpreads, legPricesForDirection, tradeLegSides } from '../services/spread-calculator.js';
 import { buildLegPnl, isFillPnlComplete } from './cex-leg-pnl.js';
 import { markLatency } from '../monitoring/trade-latency.js';
-import { formatPreconditionFail } from '../../cex/utils/check-order-preconditions.js';
+import {
+  checkOrderPreconditionsFromCache,
+  formatPreconditionFail
+} from '../../cex/utils/check-order-preconditions.js';
 
 function quoteSnapshot(direction, tick, spreadOptions = {}) {
   const nominal = legPricesForDirection(direction, tick);
@@ -51,9 +54,11 @@ export function gateFillToBaseQty(filledContracts, order) {
 }
 
 export class OrderExecutor {
-  constructor({ cexManager, tradingEnabled }) {
+  constructor({ cexManager, tradingEnabled, accountCache, reservationManager }) {
     this.cexManager = cexManager;
     this.tradingEnabled = tradingEnabled;
+    this.accountCache = accountCache;
+    this.reservationManager = reservationManager;
   }
 
   async executeBothLegs({
@@ -112,7 +117,7 @@ export class OrderExecutor {
       };
     }
 
-    await this.#assertOrderPreconditions({
+    this.#assertOrderPreconditionsFromCache({
       tick,
       quote,
       order,
@@ -276,7 +281,7 @@ export class OrderExecutor {
     return fill;
   }
 
-  async #assertOrderPreconditions({
+  #assertOrderPreconditionsFromCache({
     tick,
     quote,
     order,
@@ -286,28 +291,38 @@ export class OrderExecutor {
     reduceOnly,
     maxPositionQty
   }) {
+    if (!this.accountCache) {
+      throw new Error('[OrderExecutor] accountCache 未注入，无法缓存预检');
+    }
+
     const gateSize = Number(order?.gateSize ?? qty);
-    const [binanceCheck, gateCheck] = await Promise.all([
-      this.cexManager.checkOrderPreconditions('binance', {
-        symbol: tick.symbol,
-        side: binanceSide,
-        amount: qty,
-        maxPosition: maxPositionQty,
-        estimatedPrice: quote.aPriceNominal,
-        reduceOnly
-      }),
-      this.cexManager.checkOrderPreconditions('gate', {
-        symbol: tick.symbol,
-        side: gateSide,
-        amount: qty,
-        gateAmount: gateSize,
-        maxPosition: maxPositionQty,
-        estimatedPrice: quote.bPriceNominal,
-        decimalSize: Boolean(order?.gateDecimalSize),
-        quantoMultiplier: Number(order?.gateQuantoMultiplier) || null,
-        reduceOnly
-      })
-    ]);
+    const cacheOpts = {
+      reservationManager: this.reservationManager,
+      trustReservation: Boolean(this.reservationManager)
+    };
+
+    const binanceCheck = checkOrderPreconditionsFromCache(this.accountCache, {
+      exchange: 'binance',
+      symbol: tick.symbol,
+      side: binanceSide,
+      amount: qty,
+      maxPosition: maxPositionQty,
+      estimatedPrice: quote.aPriceNominal,
+      reduceOnly,
+      ...cacheOpts
+    });
+    const gateCheck = checkOrderPreconditionsFromCache(this.accountCache, {
+      exchange: 'gate',
+      symbol: tick.symbol,
+      side: gateSide,
+      amount: qty,
+      gateAmount: gateSize,
+      maxPosition: maxPositionQty,
+      estimatedPrice: quote.bPriceNominal,
+      quantoMultiplier: Number(order?.gateQuantoMultiplier) || null,
+      reduceOnly,
+      ...cacheOpts
+    });
 
     if (!binanceCheck.overall) {
       throw new Error(formatPreconditionFail('Binance', binanceCheck));
