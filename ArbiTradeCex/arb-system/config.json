@@ -13,7 +13,7 @@
     "maxWsLatencyMs": 100,
     "signalMaxAgeMs": 50,
     "fundingMin": -0.1,
-    "binanceBpsPerLeg": 4,
+    "binanceBpsPerLeg": 6,
     "gateBpsPerLeg": 4,
     "cexFeeBpsPerLeg": 4,
     "mockBalanceUsdt": 10000,
