@@ -27,6 +27,7 @@ import { calcTradePnl, calcTradeGross, calcTradeFeeCost } from '../execution/res
 import {
   createTradeLatencyTrace,
   formatLatencyLogLines,
+  markLatency,
   setFreshTickOnLatencyTrace
 } from '../monitoring/trade-latency.js';
 
@@ -248,6 +249,8 @@ export class CexCexTask {
 
     if (this.enforceLatency && !tickSignalAgePass(tick, this.latencyLimits.signalMaxAgeMs)) return;
 
+    markLatency(latencyTrace, 'prep_done');
+
     const priceSnapshot = tickPriceSnapshot(symbol, tick);
 
     const posBefore = {
@@ -265,6 +268,7 @@ export class CexCexTask {
         return;
       }
     }
+    markLatency(latencyTrace, 'account_fresh_done');
 
     // 在 await 之前占位（对齐 ArbiTrade-1 预占前互斥 + 单路径 tick）
     if (this.executingSymbols.has(symbol)) return;
@@ -297,6 +301,7 @@ export class CexCexTask {
       this.#releaseSymbolClaim(symbol, { restoreCooldown: true });
       return;
     }
+    markLatency(latencyTrace, 'reserve_done');
 
     this.sr.inFlightCount += 1;
     this.sr.reservationManager.markExecuting(tradeId);
@@ -317,10 +322,15 @@ export class CexCexTask {
     }).catch((err) => console.error(`[CexCexTask] execute error ${symbol}:`, err.message));
   }
 
-  #logLatency(trace, { reason = null } = {}) {
+  #logLatency(trace, { reason = null, partial = false } = {}) {
     if (!trace) return;
     if (reason) {
       console.warn(`[延迟·中止] ${reason}`);
+      if (partial) {
+        for (const line of formatLatencyLogLines(trace)) {
+          console.warn(line);
+        }
+      }
       return;
     }
     for (const line of formatLatencyLogLines(trace)) {
@@ -357,12 +367,18 @@ export class CexCexTask {
     } = ctx;
     const tradeId = reservations?.tradeId;
     try {
+      markLatency(latencyTrace, 'exec_async_start');
       const freshTick = this.sr.quoteAggregator.buildTick(symbol);
       const latencyOk = !this.enforceLatency || tickLatencyPass(freshTick, this.latencyLimits);
       const priceOk = freshTick && tickPriceSnapshotMatch(priceSnapshot, freshTick);
       if (!freshTick || !latencyOk || !priceOk) {
+        if (freshTick) {
+          setFreshTickOnLatencyTrace(latencyTrace, freshTick);
+          markLatency(latencyTrace, 'fresh_tick_done');
+        }
         this.#logLatency(latencyTrace, {
-          reason: !freshTick ? '无行情' : !latencyOk ? '延迟检查未过' : '价格快照不一致'
+          reason: !freshTick ? '无行情' : !latencyOk ? '延迟检查未过' : '价格快照不一致',
+          partial: true
         });
         this.#releaseSymbolClaim(symbol, { restoreCooldown: true });
         return;
@@ -375,6 +391,7 @@ export class CexCexTask {
       }
 
       setFreshTickOnLatencyTrace(latencyTrace, freshTick);
+      markLatency(latencyTrace, 'fresh_tick_done');
 
       let fill;
       try {

@@ -122,7 +122,7 @@ export class OrderExecutor {
       reduceOnly,
       maxPositionQty
     });
-
+    markLatency(latencyTrace, 'pre_order_done');
     markLatency(latencyTrace, 'order_send_start');
 
     const placeBinance = () => this.cexManager.placeOrder('binance', {
@@ -174,7 +174,6 @@ export class OrderExecutor {
       const polled = await this.#ensureOrderFill('gate', bOrder, tick.symbol, gateSize, gateDecimalSize);
       bOrder = polled.order;
     }
-
     const aFilled = aOrder ? readFilled(aOrder, qty) : 0;
     const bFilledBase = bOrder ? gateFillToBaseQty(readFilled(bOrder, gateSize), order) : 0;
 
