@@ -556,6 +556,33 @@ body {
   align-items: center;
   gap: 6px;
 }
+.log-item.trade .trade-leg-stages {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  margin-top: 4px;
+}
+.log-item.trade .trade-leg-stage-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+.log-item.trade .trade-leg-stage-label {
+  min-width: 2.5em;
+  color: var(--muted);
+  font-weight: 600;
+}
+.log-item.trade .trade-leg-stage-price {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  color: var(--text);
+}
+.log-item.trade .trade-leg-stage-delta {
+  color: var(--warn);
+  font-size: 11px;
+}
 .log-item.trade .trade-leg-arrow {
   color: var(--muted);
 }

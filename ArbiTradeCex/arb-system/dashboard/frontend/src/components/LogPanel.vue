@@ -16,33 +16,42 @@ function hasFill(qty) {
   return Number(qty) > 0;
 }
 
+function buildLegRow(base) {
+  const stages = legPriceStages(base);
+  return { ...base, stages };
+}
+
 function filledLegs(trade) {
   const legs = [];
   if (hasFill(trade.aFilledQty)) {
-    legs.push({
+    legs.push(buildLegRow({
       key: 'binance',
       exchange: 'Binance',
       side: trade.aSide,
       bid: trade.aBid,
       ask: trade.aAsk,
+      accept: trade.acceptAPrice,
+      send: trade.sendAPrice ?? trade.aPriceNominal,
       nominal: trade.aPriceNominal,
       fill: trade.aFillPrice,
       qty: trade.aFilledQty,
       orderId: trade.aOrderId
-    });
+    }));
   }
   if (hasFill(trade.bFilledQty)) {
-    legs.push({
+    legs.push(buildLegRow({
       key: 'gate',
       exchange: 'Gate',
       side: trade.bSide,
       bid: trade.bBid,
       ask: trade.bAsk,
+      accept: trade.acceptBPrice,
+      send: trade.sendBPrice ?? trade.bPriceNominal,
       nominal: trade.bPriceNominal,
       fill: trade.bFillPrice,
       qty: trade.bFilledQty,
       orderId: trade.bOrderId
-    });
+    }));
   }
   return legs;
 }
@@ -62,23 +71,16 @@ function roundPrice(price, decimals) {
   return Math.round(Number(price) * f) / f;
 }
 
-function nominalPriceForLeg(leg) {
-  if (leg.nominal != null && Number.isFinite(Number(leg.nominal))) return Number(leg.nominal);
-  if (leg.side === 'sell' && leg.bid != null) return Number(leg.bid);
-  if (leg.side === 'buy' && leg.ask != null) return Number(leg.ask);
-  return null;
-}
-
-function calcLegSlippageBps(leg) {
-  const nominal = nominalPriceForLeg(leg);
-  const fill = Number(leg.fill);
-  if (!Number.isFinite(nominal) || nominal === 0 || !Number.isFinite(fill)) return null;
-  const dp = Math.max(decimalPlacesFromPrice(nominal), 6);
-  const refR = roundPrice(nominal, dp);
-  const fillR = roundPrice(fill, dp);
-  if (refR === fillR) return 0;
-  const raw = ((fillR - refR) / refR) * 10000;
-  return leg.side === 'sell' ? -raw : raw;
+function calcSlippageBpsFromRef(side, refPrice, targetPrice) {
+  const ref = Number(refPrice);
+  const target = Number(targetPrice);
+  if (!Number.isFinite(ref) || ref === 0 || !Number.isFinite(target)) return null;
+  const dp = Math.max(decimalPlacesFromPrice(ref), 6);
+  const refR = roundPrice(ref, dp);
+  const targetR = roundPrice(target, dp);
+  if (refR === targetR) return 0;
+  const raw = ((targetR - refR) / refR) * 10000;
+  return side === 'sell' ? -raw : raw;
 }
 
 function formatPriceForDisplay(price, refPrice = price) {
@@ -95,25 +97,25 @@ function formatSlippageBps(bps) {
   return `${sign}${bps.toFixed(2)} bps`;
 }
 
-/** 名义价 = 下单时用的盘口：卖@bid，买@ask（与后端 legPricesForDirection 一致） */
-function legQuoteRef(leg) {
-  const nominal = nominalPriceForLeg(leg);
-  if (nominal == null) return null;
-  if (leg.side === 'sell') return { tag: 'bid', price: nominal };
-  if (leg.side === 'buy') return { tag: 'ask', price: nominal };
-  return { tag: '名义', price: nominal };
-}
-
-function legExecLine(leg, fmtFn) {
-  const ref = legQuoteRef(leg);
-  if (!ref) {
-    return `成交 ${leg.fill != null ? fmtFn(leg.fill, 6) : '—'}`;
-  }
-  const fill = leg.fill != null ? formatPriceForDisplay(leg.fill, ref.price) : '—';
-  const quote = formatPriceForDisplay(ref.price, ref.price);
-  const slip = formatSlippageBps(calcLegSlippageBps(leg));
-  const slipPart = slip ? `  滑点 ${slip}` : '';
-  return `盘口 ${ref.tag} ${quote} → 成交价 ${fill}${slipPart}`;
+function legPriceStages(leg) {
+  const ref = leg.accept ?? leg.send ?? leg.fill ?? leg.nominal ?? 1;
+  const accept = leg.accept != null ? formatPriceForDisplay(leg.accept, ref) : null;
+  const send = leg.send != null ? formatPriceForDisplay(leg.send, ref) : null;
+  const fill = leg.fill != null ? formatPriceForDisplay(leg.fill, ref) : null;
+  const acceptToSend = accept != null && send != null
+    ? formatSlippageBps(calcSlippageBpsFromRef(leg.side, leg.accept, leg.send))
+    : null;
+  const sendToFill = send != null && fill != null
+    ? formatSlippageBps(calcSlippageBpsFromRef(leg.side, leg.send, leg.fill))
+    : null;
+  return {
+    accept,
+    send,
+    fill,
+    acceptToSend,
+    sendToFill,
+    hasAccept: leg.accept != null && Number.isFinite(Number(leg.accept))
+  };
 }
 
 function sideLabel(side) {
@@ -191,8 +193,25 @@ const combinedLogs = computed(() => {
                 {{ leg.exchange }} {{ sideLabel(leg.side) }}
                 <span class="trade-leg-qty">成交 {{ fmt(leg.qty, 4) }}</span>
               </div>
-              <div class="trade-leg-prices">
-                {{ legExecLine(leg, fmt) }}
+              <div class="trade-leg-prices trade-leg-stages">
+                <div class="trade-leg-stage-line">
+                  <span class="trade-leg-stage-label">接受</span>
+                  <span class="trade-leg-stage-price">{{ leg.stages.accept ?? '—' }}</span>
+                </div>
+                <div class="trade-leg-stage-line">
+                  <span class="trade-leg-stage-label">发单</span>
+                  <span class="trade-leg-stage-price">{{ leg.stages.send ?? '—' }}</span>
+                  <span v-if="leg.stages.acceptToSend" class="trade-leg-stage-delta">
+                    Δ {{ leg.stages.acceptToSend }}
+                  </span>
+                </div>
+                <div class="trade-leg-stage-line">
+                  <span class="trade-leg-stage-label">成交</span>
+                  <span class="trade-leg-stage-price">{{ leg.stages.fill ?? '—' }}</span>
+                  <span v-if="leg.stages.sendToFill" class="trade-leg-stage-delta">
+                    滑点 {{ leg.stages.sendToFill }}
+                  </span>
+                </div>
               </div>
               <div v-if="leg.orderId" class="trade-leg-order">订单 {{ leg.orderId }}</div>
             </div>
