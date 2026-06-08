@@ -27,7 +27,13 @@ export class BinanceAdapter extends BaseAdapter {
     this.accountType = 'PORTFOLIO_MARGIN';
     this.activeSubscriptions = new Set();
     this.subscriptionQueue = [];
+    this.subscribedSymbols = [];
+    this.subscribedChannels = ['bookTicker'];
     this.processing = false;
+    this._lastPublicMessageAt = 0;
+    this._subscribedAt = 0;
+    this._feedWatchdog = null;
+    this._reconnectingPublicWs = false;
     this._balanceCache = null;
     this._positionCache = new Map();
     this.privateWs = null;
@@ -35,6 +41,9 @@ export class BinanceAdapter extends BaseAdapter {
     this.privateWsConnected = false;
     this.listenKeyKeepaliveMin = Number(config.listenKeyKeepaliveMin) || 60;
     this._listenKeyTimer = null;
+    this._privateWsGen = 0;
+    this._privateWsReconnecting = false;
+    this._privateWsReconnectAt = 0;
     this.pmWsUrl = process.env.BINANCE_PM_WS_URL || 'wss://fstream.binance.com/pm/ws';
     this._dualSidePosition = null;
   }
@@ -63,6 +72,7 @@ export class BinanceAdapter extends BaseAdapter {
   }
 
   async disconnect() {
+    this.#stopFeedWatchdog();
     await this.stopPrivateAccountStream();
     if (this.ws) {
       this.ws.removeAllListeners();
@@ -104,10 +114,8 @@ export class BinanceAdapter extends BaseAdapter {
     await new Promise((resolve, reject) => {
       this.ws = new WebSocket(this.config.wsUrl);
       this.ws.on('open', async () => {
-        if (this.activeSubscriptions.size > 0) {
-          this.subscriptionQueue = [...this.activeSubscriptions];
-          await this.processQueue();
-        }
+        this.connected = true;
+        await this.#flushSubscriptions({ forceResubscribe: true });
         resolve();
       });
       this.ws.on('message', (raw) => this.handleMessage(raw));
@@ -115,11 +123,14 @@ export class BinanceAdapter extends BaseAdapter {
         if (this._shuttingDown) return;
         this.connected = false;
         setTimeout(() => {
-          this.connectWebSocket().catch(() => {});
+          this.connectWebSocket().catch((err) => {
+            console.warn('[Binance] public WS reconnect failed:', err.message);
+          });
         }, 1000);
       });
       this.ws.on('error', reject);
     });
+    this.#startFeedWatchdog();
   }
 
   handleWebSocketMessage(raw) {
@@ -129,6 +140,9 @@ export class BinanceAdapter extends BaseAdapter {
   /** 支持单 symbol 或批量 symbols（ArbiTradeCex task-manager 使用批量） */
   async subscribe(symbolsOrSymbol, channels = ['bookTicker']) {
     const symbols = Array.isArray(symbolsOrSymbol) ? symbolsOrSymbol : [symbolsOrSymbol];
+    this.subscribedSymbols = symbols.map((symbol) => this.normalizeSymbol(symbol));
+    this.subscribedChannels = [...channels];
+    this._subscribedAt = Date.now();
     for (const symbol of symbols) {
       await super.subscribe(this.normalizeSymbol(symbol), channels);
       const exSymbol = this.toExchangeSymbol(symbol).toLowerCase();
@@ -136,7 +150,62 @@ export class BinanceAdapter extends BaseAdapter {
         this.subscriptionQueue.push(`${exSymbol}@${ch}`);
       }
     }
+    await this.#flushSubscriptions();
+  }
+
+  async #flushSubscriptions({ forceResubscribe = false } = {}) {
+    const streams = new Set(this.subscriptionQueue);
+    if (forceResubscribe || streams.size === 0) {
+      for (const symbol of this.subscribedSymbols) {
+        const exSymbol = this.toExchangeSymbol(symbol).toLowerCase();
+        for (const ch of this.subscribedChannels) {
+          streams.add(`${exSymbol}@${ch}`);
+        }
+      }
+    } else {
+      for (const stream of this.activeSubscriptions) streams.add(stream);
+    }
+    this.subscriptionQueue = [...streams];
     await this.processQueue();
+  }
+
+  #startFeedWatchdog() {
+    this.#stopFeedWatchdog();
+    this._feedWatchdog = setInterval(() => {
+      if (this._shuttingDown || this.subscribedSymbols.length === 0) return;
+      const anchor = Math.max(this._lastPublicMessageAt, this._subscribedAt);
+      if (!anchor) return;
+      const staleMs = Date.now() - anchor;
+      if (staleMs > 60_000) {
+        console.warn(`[Binance] public WS stale ${staleMs}ms, forcing reconnect...`);
+        this.#forcePublicWsReconnect().catch(() => {});
+      }
+    }, 15_000);
+    if (typeof this._feedWatchdog.unref === 'function') {
+      this._feedWatchdog.unref();
+    }
+  }
+
+  #stopFeedWatchdog() {
+    if (this._feedWatchdog) {
+      clearInterval(this._feedWatchdog);
+      this._feedWatchdog = null;
+    }
+  }
+
+  async #forcePublicWsReconnect() {
+    if (this._reconnectingPublicWs || this._shuttingDown) return;
+    this._reconnectingPublicWs = true;
+    try {
+      if (this.ws) {
+        this.ws.removeAllListeners();
+        this.ws.terminate();
+        this.ws = null;
+      }
+      await this.connectWebSocket();
+    } finally {
+      this._reconnectingPublicWs = false;
+    }
   }
 
   async processQueue() {
@@ -160,6 +229,12 @@ export class BinanceAdapter extends BaseAdapter {
   handleMessage(raw) {
     try {
       const msg = JSON.parse(raw.toString());
+      if (msg?.error) {
+        console.warn('[Binance] public WS error:', msg.error.msg || msg.error);
+        return;
+      }
+      if (msg?.result !== undefined && msg?.id != null) return;
+
       const payload = msg?.data && (msg.stream || msg.data?.s) ? msg.data : msg;
       if (!(payload?.s && payload.b != null && payload.a != null)) return;
 
@@ -167,12 +242,16 @@ export class BinanceAdapter extends BaseAdapter {
       const ask = Number(payload.a);
       if (!(Number.isFinite(bid) && bid > 0 && Number.isFinite(ask) && ask > 0)) return;
 
-      const serverTimestamp = payload.E || null;
+      const serverTimestamp = payload.E ?? payload.T ?? null;
+      const timestamp = serverTimestamp != null
+        ? (Number(serverTimestamp) > 1e12 ? Number(serverTimestamp) : Number(serverTimestamp) * 1000)
+        : Date.now();
+      this._lastPublicMessageAt = Date.now();
       const ticker = {
         symbol: this.normalizeSymbol(payload.s),
         bid,
         ask,
-        timestamp: serverTimestamp || Date.now(),
+        timestamp,
         serverTimestamp,
         localTimestamp: Date.now(),
         source: 'binance'
@@ -521,8 +600,13 @@ export class BinanceAdapter extends BaseAdapter {
   }
 
   async #keepaliveListenKey() {
-    if (!this.listenKey) return;
+    if (!this.listenKey || this._privateWsReconnecting) return;
     await this.#signedRequest('PUT', '/papi/v1/listenKey', {});
+  }
+
+  #isListenKeyMissingError(err) {
+    const msg = String(err?.message || '');
+    return msg.includes('-1125') || msg.toLowerCase().includes('listenkey does not exist');
   }
 
   #scheduleBalanceRestSync() {
@@ -545,8 +629,14 @@ export class BinanceAdapter extends BaseAdapter {
     this._listenKeyTimer = setInterval(() => {
       this.#keepaliveListenKey().catch((err) => {
         console.warn('[Binance] listenKey keepalive failed:', err.message);
+        if (this.#isListenKeyMissingError(err)) {
+          this.#schedulePrivateWsReconnect('keepalive');
+        }
       });
     }, ms);
+    if (typeof this._listenKeyTimer.unref === 'function') {
+      this._listenKeyTimer.unref();
+    }
   }
 
   #emitBalanceMerge(rows) {
@@ -587,7 +677,10 @@ export class BinanceAdapter extends BaseAdapter {
       const msg = JSON.parse(raw.toString());
       if (msg.e === 'listenKeyExpired') {
         console.warn('[Binance] listenKey expired, reconnecting private WS...');
-        this.#reconnectPrivateWs().catch(() => {});
+        if (this.privateWs) {
+          this.privateWs.removeAllListeners();
+        }
+        this.#schedulePrivateWsReconnect('listenKeyExpired');
         return;
       }
       if (msg.e !== 'ACCOUNT_UPDATE' || !msg.a) return;
@@ -608,31 +701,60 @@ export class BinanceAdapter extends BaseAdapter {
     }
   }
 
-  async #reconnectPrivateWs() {
+  #schedulePrivateWsReconnect(reason = 'unknown') {
+    if (this._shuttingDown) return;
+    const now = Date.now();
     if (this._privateWsReconnecting) return;
+    if (now - this._privateWsReconnectAt < 5000) return;
+    this._privateWsReconnectAt = now;
+    this.#reconnectPrivateWs(reason).catch((err) => {
+      console.warn(`[Binance] private WS reconnect (${reason}) failed:`, err.message);
+    });
+  }
+
+  async #reconnectPrivateWs(reason = 'unknown') {
+    if (this._privateWsReconnecting || this._shuttingDown) return;
     this._privateWsReconnecting = true;
     try {
-      await this.stopPrivateAccountStream();
-      await this.startPrivateAccountStream();
+      await this.#teardownPrivateWs({ deleteListenKey: false });
+      await this.#connectPrivateWs();
+      console.log(`[Binance] private WS reconnected (${reason})`);
     } finally {
       this._privateWsReconnecting = false;
     }
   }
 
-  async startPrivateAccountStream() {
-    if (!process.env.BINANCE_API_KEY || !process.env.BINANCE_API_SECRET) {
-      return;
-    }
+  async #teardownPrivateWs({ deleteListenKey = true } = {}) {
+    this.#stopListenKeyTimer();
     if (this.privateWs) {
-      await this.stopPrivateAccountStream();
+      this.privateWs.removeAllListeners();
+      this.privateWs.close();
+      this.privateWs = null;
     }
+    this.privateWsConnected = false;
+    this._privateWsGen += 1;
+    if (this.listenKey && deleteListenKey) {
+      try {
+        await this.#signedRequest('DELETE', '/papi/v1/listenKey', {});
+      } catch {
+        // ignore
+      }
+    }
+    this.listenKey = null;
+    this.emit('PRIVATE_WS_DISCONNECTED', { exchange: 'binance' });
+  }
 
+  async #connectPrivateWs() {
     this.listenKey = await this.#createListenKey();
     const url = `${this.pmWsUrl}/${this.listenKey}`;
+    const gen = this._privateWsGen;
 
     await new Promise((resolve, reject) => {
-      this.privateWs = new WebSocket(url);
-      this.privateWs.on('open', async () => {
+      const ws = new WebSocket(url);
+      this.privateWs = ws;
+
+      ws.on('open', async () => {
+        if (gen !== this._privateWsGen || this.privateWs !== ws) return;
         this.privateWsConnected = true;
         try {
           await this.syncAccountSnapshot({ silent: true });
@@ -645,20 +767,31 @@ export class BinanceAdapter extends BaseAdapter {
         this.#startListenKeyTimer();
         resolve();
       });
-      this.privateWs.on('message', (raw) => this.#handlePrivateMessage(raw));
-      this.privateWs.on('close', () => {
+      ws.on('message', (raw) => this.#handlePrivateMessage(raw));
+      ws.on('close', () => {
+        if (gen !== this._privateWsGen || this.privateWs !== ws) return;
         this.privateWsConnected = false;
         this.emit('PRIVATE_WS_DISCONNECTED', { exchange: 'binance' });
-        if (this._shuttingDown) return;
+        if (this._shuttingDown || this._privateWsReconnecting) return;
         setTimeout(() => {
-          this.#reconnectPrivateWs().catch(() => {});
+          this.#schedulePrivateWsReconnect('close');
         }, 2000);
       });
-      this.privateWs.on('error', (err) => {
+      ws.on('error', (err) => {
+        if (gen !== this._privateWsGen || this.privateWs !== ws) return;
         console.error('[Binance] private WS error:', err.message);
         reject(err);
       });
     });
+  }
+
+  async startPrivateAccountStream() {
+    if (!process.env.BINANCE_API_KEY || !process.env.BINANCE_API_SECRET) {
+      return;
+    }
+    if (this._privateWsReconnecting) return;
+    await this.#teardownPrivateWs({ deleteListenKey: false });
+    await this.#connectPrivateWs();
   }
 
   /** 公开深度 REST（下单前预检用） */
@@ -684,22 +817,7 @@ export class BinanceAdapter extends BaseAdapter {
   }
 
   async stopPrivateAccountStream() {
-    this.#stopListenKeyTimer();
-    if (this.privateWs) {
-      this.privateWs.removeAllListeners();
-      this.privateWs.close();
-      this.privateWs = null;
-    }
-    this.privateWsConnected = false;
-    if (this.listenKey) {
-      try {
-        await this.#signedRequest('DELETE', '/papi/v1/listenKey', {});
-      } catch {
-        // ignore
-      }
-      this.listenKey = null;
-    }
-    this.emit('PRIVATE_WS_DISCONNECTED', { exchange: 'binance' });
+    await this.#teardownPrivateWs({ deleteListenKey: true });
   }
 }
 
