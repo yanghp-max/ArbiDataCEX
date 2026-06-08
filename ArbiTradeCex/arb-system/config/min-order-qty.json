@@ -7,7 +7,7 @@
     "ALLOUSDT",
     "HOMEUSDT",
     "SIRENUSDT",
-    "EDENUSDT"
+    "WLDUSDT"
   ],
   "source": {
     "binance": "https://fapi.binance.com/fapi/v1/exchangeInfo",
