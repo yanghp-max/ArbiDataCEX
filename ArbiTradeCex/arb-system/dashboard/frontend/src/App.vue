@@ -18,6 +18,7 @@ const {
 } = useDashboardWs();
 const {
   fmt,
+  fmtMs,
   fmtPct,
   spreadClass,
   formatTime,
@@ -77,7 +78,10 @@ const {
       :key="card.symbol"
       :card="card"
       :show-latency="state.enforceLatency"
+      :enforce-latency="state.enforceLatency"
+      :latency-limits="state.latencyLimits"
       :fmt="fmt"
+      :fmt-ms="fmtMs"
       :fmt-pct="fmtPct"
       :spread-class="spreadClass"
       :status-label="statusLabel"

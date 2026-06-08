@@ -1,10 +1,16 @@
 export function useFormatters() {
-  function fmt(v, digits = 6) {
+  function fmt(v, digits = null) {
     if (v == null || !Number.isFinite(Number(v))) return '-';
     const n = Number(v);
+    if (digits != null) return n.toFixed(digits);
     if (Math.abs(n) >= 1000) return n.toFixed(2);
     if (Math.abs(n) >= 1) return n.toFixed(4);
-    return n.toFixed(digits);
+    return n.toFixed(6);
+  }
+
+  function fmtMs(v) {
+    if (v == null || !Number.isFinite(Number(v))) return '-';
+    return String(Math.round(Number(v)));
   }
 
   function fmtPct(v) {
@@ -84,6 +90,7 @@ export function useFormatters() {
 
   return {
     fmt,
+    fmtMs,
     fmtPct,
     spreadClass,
     formatTime,

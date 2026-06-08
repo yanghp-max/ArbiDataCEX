@@ -8,6 +8,11 @@ function emptyState() {
     startedAt: Date.now(),
     tradingEnabled: false,
     enforceLatency: false,
+    latencyLimits: {
+      maxPriceAgeMs: 1000,
+      maxLegSkewMs: 2000,
+      maxWsLatencyMs: 100
+    },
     useMockAccount: false,
     progress: {
       overallPct: 0,
@@ -33,11 +38,14 @@ function emptyState() {
 function mergeSnapshot(state, data) {
   if (!data) return;
   const topKeys = [
-    'startedAt', 'tradingEnabled', 'enforceLatency', 'useMockAccount',
+    'startedAt', 'tradingEnabled', 'enforceLatency', 'latencyLimits', 'useMockAccount',
     'account', 'accountBaseline'
   ];
   for (const key of topKeys) {
     if (data[key] !== undefined) state[key] = data[key];
+  }
+  if (data.latencyLimits) {
+    Object.assign(state.latencyLimits, data.latencyLimits);
   }
   if (data.progress) {
     Object.assign(state.progress, data.progress);

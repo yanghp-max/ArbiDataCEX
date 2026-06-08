@@ -58,6 +58,7 @@ const CSV_COLUMNS = [
   'lat_stage_precheck_ms',
   'lat_stage_presend_ms',
   'lat_stage_order_send_ms',
+  'lat_decision_to_submit_done_ms',
   'lat_local_old_to_order_ms',
   'lat_local_new_to_order_ms',
   'lat_old_data_freshness_ms',

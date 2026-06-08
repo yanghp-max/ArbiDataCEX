@@ -12,7 +12,7 @@ const PROCESS_STAGES = [
   ['exec_async_start', 'fresh_tick_done', '拉新价'],
   ['fresh_tick_done', 'pre_order_done', '预检'],
   ['pre_order_done', 'order_send_start', '待发'],
-  ['order_send_start', 'order_send_done', '提交']
+  ['order_send_start', 'order_send_done', '发单提交']
 ];
 
 function tickPriceReceiveMs(tick) {
@@ -220,6 +220,29 @@ export function latDecisionToOrderMs(trace) {
   return markDelta(trace, 'trace_start', 'order_send_start');
 }
 
+/** 信号决策 → placeOrder 全部返回 */
+export function latDecisionToSubmitDoneMs(trace) {
+  return markDelta(trace, 'trace_start', 'order_send_done');
+}
+
+function anchorToSubmitDone(trace, anchorMs) {
+  const doneMs = trace?.marks?.order_send_done;
+  if (anchorMs == null || doneMs == null) return null;
+  return Math.max(0, doneMs - anchorMs);
+}
+
+/** WS 推送 → placeOrder 全部返回 */
+export function latWsPushToSubmitDoneMs(trace) {
+  const push = trace?.orderQuote?.wsPushMs ?? trace?.signalQuote?.wsPushMs;
+  return anchorToSubmitDone(trace, push);
+}
+
+/** 本机接收 → placeOrder 全部返回 */
+export function latReceiveToSubmitDoneMs(trace) {
+  const recv = trace?.orderQuote?.receiveMs ?? trace?.signalQuote?.receiveMs;
+  return anchorToSubmitDone(trace, recv);
+}
+
 export function latToOrderMs(trace) {
   return latDecisionToOrderMs(trace) ?? latWsPushToOrderMs(trace);
 }
@@ -241,24 +264,48 @@ export function formatLatencyLogLines(trace) {
     parts.push(`WS传输(推送→接收) ${roundMs(wsTransit)}ms`);
   }
 
-  const stageText = stages
+  const submitStage = stages.find((s) => s.from === 'order_send_start' && s.to === 'order_send_done');
+  const otherStages = stages.filter((s) => s.from !== 'order_send_start' || s.to !== 'order_send_done');
+  const stageText = otherStages
     .filter((s) => s.ms > 0)
     .map((s) => `${s.label} ${roundMs(s.ms)}ms`);
   if (stageText.length > 0) {
     parts.push(...stageText);
   }
 
+  const submitMs = trace?.orderSubmitMs;
+  if (submitStage?.ms > 0 || submitMs) {
+    const parallel = roundMs(submitStage?.ms ?? submitMs?.parallel);
+    let submitLine = `发单提交(placeOrder) 并行${parallel}ms`;
+    if (submitMs?.binance != null && submitMs?.gate != null) {
+      submitLine += ` [Binance ${roundMs(submitMs.binance)}ms Gate ${roundMs(submitMs.gate)}ms]`;
+    }
+    parts.push(submitLine);
+  }
+
   const totalDecision = latDecisionToOrderMs(trace);
+  const totalDecisionDone = latDecisionToSubmitDoneMs(trace);
   const totalPush = latWsPushToOrderMs(trace);
+  const totalPushDone = latWsPushToSubmitDoneMs(trace);
   const totalRecv = latReceiveToOrderMs(trace);
+  const totalRecvDone = latReceiveToSubmitDoneMs(trace);
   if (totalDecision != null) {
-    parts.push(`总计(信号→发单) ${roundMs(totalDecision)}ms`);
+    parts.push(`总计(信号→发单开始) ${roundMs(totalDecision)}ms`);
+  }
+  if (totalDecisionDone != null) {
+    parts.push(`总计(信号→提交完成) ${roundMs(totalDecisionDone)}ms`);
   }
   if (totalPush != null) {
-    parts.push(`总计(推送→发单) ${roundMs(totalPush)}ms`);
+    parts.push(`总计(推送→发单开始) ${roundMs(totalPush)}ms`);
+  }
+  if (totalPushDone != null && totalPushDone !== totalPush) {
+    parts.push(`总计(推送→提交完成) ${roundMs(totalPushDone)}ms`);
   }
   if (totalRecv != null && totalRecv !== totalPush) {
-    parts.push(`总计(接收→发单) ${roundMs(totalRecv)}ms`);
+    parts.push(`总计(接收→发单开始) ${roundMs(totalRecv)}ms`);
+  }
+  if (totalRecvDone != null && totalRecvDone !== totalRecv && totalRecvDone !== totalPushDone) {
+    parts.push(`总计(接收→提交完成) ${roundMs(totalRecvDone)}ms`);
   }
 
   const priceAge = latPriceAgeAtOrderMs(trace);
@@ -329,7 +376,8 @@ export function latencyCsvFields(trace) {
     lat_stage_fresh_tick_ms: byLabel['拉新价'] ?? '',
     lat_stage_precheck_ms: byLabel['预检'] ?? '',
     lat_stage_presend_ms: byLabel['待发'] ?? '',
-    lat_stage_order_send_ms: byLabel['提交'] ?? '',
+    lat_stage_order_send_ms: byLabel['发单提交'] ?? '',
+    lat_decision_to_submit_done_ms: latDecisionToSubmitDoneMs(trace) ?? '',
     ...priceStagesCsvFields(trace)
   };
 }
@@ -354,6 +402,9 @@ export default {
   latFreshExchangeToOrderMs,
   exchangeSpanSignalToFreshMs,
   latDecisionToOrderMs,
+  latDecisionToSubmitDoneMs,
+  latWsPushToSubmitDoneMs,
+  latReceiveToSubmitDoneMs,
   latToOrderMs,
   formatLatencyLogLines,
   formatPriceStageLines,

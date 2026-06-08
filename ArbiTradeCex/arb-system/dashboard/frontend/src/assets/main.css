@@ -386,6 +386,16 @@ body {
 .symbol-card.stale { border-color: rgba(255,176,32,.5); }
 .symbol-card.ready { border-color: rgba(61,214,140,.35); }
 
+.stale-hint {
+  margin: 8px 0 4px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(255, 176, 32, 0.12);
+  color: #ffb020;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
 .card-head {
   display: flex;
   justify-content: space-between;
