@@ -229,6 +229,7 @@ export function resolveLatencyLimits(strategyConfig, enforceLatency) {
       maxPriceAgeMs: Infinity,
       maxLegSkewMs: Infinity,
       maxWsLatencyMs: Infinity,
+      maxCrossLegMidBps: Infinity,
       signalMaxAgeMs: Infinity
     };
   }
@@ -236,6 +237,7 @@ export function resolveLatencyLimits(strategyConfig, enforceLatency) {
     maxPriceAgeMs: strategyConfig.maxPriceAgeMs ?? 1000,
     maxLegSkewMs: strategyConfig.maxLegSkewMs ?? 2000,
     maxWsLatencyMs: strategyConfig.maxWsLatencyMs ?? 100,
+    maxCrossLegMidBps: strategyConfig.maxCrossLegMidBps ?? 50,
     signalMaxAgeMs: strategyConfig.signalMaxAgeMs ?? 50
   };
 }
@@ -250,6 +252,26 @@ export function latencyChecksEnabled(limits) {
 export function tickExchangeAgePass(tick, maxPriceAgeMs) {
   if (!Number.isFinite(maxPriceAgeMs)) return true;
   return tick.priceAgeMs <= maxPriceAgeMs;
+}
+
+/** CEX-CEX：两腿各自接收年龄均须达标（对齐 ArbiTrade-1 lastPriceUpdate 按源检查） */
+export function tickEachLegAgePass(tick, maxPriceAgeMs) {
+  if (!Number.isFinite(maxPriceAgeMs)) return true;
+  const a = tick.aAgeMs;
+  const b = tick.bAgeMs;
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
+  return a <= maxPriceAgeMs && b <= maxPriceAgeMs;
+}
+
+/** 两腿 mid 偏离过大 → 一侧 WS 疑似过期（全 CEX 无 DEX 轮询兜底） */
+export function tickCrossLegMidPass(tick, maxCrossLegMidBps) {
+  if (!Number.isFinite(maxCrossLegMidBps) || maxCrossLegMidBps <= 0) return true;
+  const aMid = (Number(tick.aBid) + Number(tick.aAsk)) / 2;
+  const bMid = (Number(tick.bBid) + Number(tick.bAsk)) / 2;
+  if (!(aMid > 0 && bMid > 0)) return false;
+  const ref = Math.min(aMid, bMid);
+  const diffBps = (Math.abs(aMid - bMid) / ref) * 10000;
+  return diffBps <= maxCrossLegMidBps;
 }
 
 /** 两腿本机接收时间差过大：一侧刚收到、另一侧长期无推送 */
@@ -275,8 +297,10 @@ export function tickWsLatencyPass(tick, maxWsLatencyMs) {
 export function tickLatencyPass(tick, limits) {
   if (!latencyChecksEnabled(limits)) return true;
   return tickExchangeAgePass(tick, limits.maxPriceAgeMs)
+    && tickEachLegAgePass(tick, limits.maxPriceAgeMs)
     && tickLegSkewPass(tick, limits.maxLegSkewMs)
-    && tickWsLatencyPass(tick, limits.maxWsLatencyMs);
+    && tickWsLatencyPass(tick, limits.maxWsLatencyMs)
+    && tickCrossLegMidPass(tick, limits.maxCrossLegMidBps);
 }
 
 /** 本机收到价格后的处理延迟（对齐 stable priceReceiveTime → 执行） */
@@ -421,6 +445,14 @@ export function describeLatencyFail(tick, limits) {
   if (!latencyChecksEnabled(limits)) return null;
   if (!tickExchangeAgePass(tick, limits.maxPriceAgeMs)) {
     return `行情太旧（${tick.priceAgeMs}ms，上限${limits.maxPriceAgeMs}ms）`;
+  }
+  if (!tickEachLegAgePass(tick, limits.maxPriceAgeMs)) {
+    return `单腿行情过旧（A=${tick.aAgeMs}ms B=${tick.bAgeMs}ms，上限${limits.maxPriceAgeMs}ms）`;
+  }
+  if (!tickCrossLegMidPass(tick, limits.maxCrossLegMidBps)) {
+    const aMid = ((tick.aBid + tick.aAsk) / 2).toFixed(6);
+    const bMid = ((tick.bBid + tick.bAsk) / 2).toFixed(6);
+    return `两腿 mid 偏离过大（A=${aMid} B=${bMid}，上限${limits.maxCrossLegMidBps}bps）`;
   }
   if (!tickLegSkewPass(tick, limits.maxLegSkewMs)) {
     return `两腿不同步（时间差${tick.legSkewMs}ms，上限${limits.maxLegSkewMs}ms）`;

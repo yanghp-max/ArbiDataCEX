@@ -965,6 +965,25 @@ export class GateAdapter extends BaseAdapter {
     }
   }
 
+  /** REST 最优买卖（对齐 ArbiTrade-1 getTicker 回退） */
+  async getBookTicker(symbol, options = {}) {
+    const book = await this.getOrderBook(symbol, 1, options);
+    const bid = book.bids[0]?.price;
+    const ask = book.asks[0]?.price;
+    if (!(Number.isFinite(bid) && bid > 0 && Number.isFinite(ask) && ask > 0)) {
+      throw new Error(`Invalid Gate bookTicker ${symbol}`);
+    }
+    const localTs = Date.now();
+    return {
+      symbol: this.normalizeSymbol(symbol),
+      bid,
+      ask,
+      timestamp: localTs,
+      serverTimestamp: null,
+      restReason: options.reason ?? 'rest'
+    };
+  }
+
   /** 公开深度 REST；size 换算为 base 数量（contracts × quanto_multiplier） */
   async getOrderBook(symbol, limit = 20, options = {}) {
     const contract = this.toGateContract(symbol);

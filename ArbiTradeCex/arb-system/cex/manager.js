@@ -128,6 +128,15 @@ export class CexManager {
     return adapter.getOrderBook(symbol, limit, options);
   }
 
+  /** REST 最优买卖（发单前校正 WS 缓存，对齐 ArbiTrade-1 getTicker） */
+  async getBookTicker(exchange, symbol, options = {}) {
+    const adapter = this.#requireAdapter(exchange);
+    if (typeof adapter.getBookTicker !== 'function') {
+      throw new Error(`getBookTicker not supported on ${exchange}`);
+    }
+    return adapter.getBookTicker(symbol, options);
+  }
+
   normalizeSymbol(exchange, symbol) {
     return this.#requireAdapter(exchange).normalizeSymbol(symbol);
   }

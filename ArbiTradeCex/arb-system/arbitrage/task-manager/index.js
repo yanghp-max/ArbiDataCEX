@@ -25,6 +25,8 @@ export class TaskManager {
     /** 同 symbol 同一事件循环内合并为一次 onTick（来价驱动，非定频） */
     this._priceTickCoalesce = new Set();
     this._symbolSet = new Set();
+    /** CEX-CEX both 模式：两腿均更新后才触发信号（对齐 ArbiTrade-1 dex-driven 思路） */
+    this._legReady = new Map();
   }
 
   async start() {
@@ -52,10 +54,25 @@ export class TaskManager {
     const binance = cexManager.getAdapter('binance');
     const gate = cexManager.getAdapter('gate');
 
-    // 对齐 ArbiTrade-1 priceUpdateMode=any：任意腿 WS 来价 → 更新缓存 → 触发该 symbol 策略计算
+    // CEX-CEX 默认 both：两腿 WS 均更新后才触发（ArbiTrade-1 DEX-CEX 用 dex-driven 保证新鲜腿驱动）
+    const priceUpdateMode = strat.priceUpdateMode ?? 'both';
     const onPriceTicker = (source, ticker) => {
       this.sharedResources.quoteAggregator.onTicker(source, ticker);
-      this.#schedulePriceTick(ticker.symbol);
+      const sym = compactSymbol(ticker.symbol);
+      if (!this._symbolSet.has(sym)) return;
+
+      if (priceUpdateMode === 'both') {
+        if (!this._legReady.has(sym)) {
+          this._legReady.set(sym, { binance: false, gate: false });
+        }
+        const legs = this._legReady.get(sym);
+        legs[source] = true;
+        if (!legs.binance || !legs.gate) return;
+        legs.binance = false;
+        legs.gate = false;
+      }
+
+      this.#schedulePriceTick(sym);
     };
     binance.on(EventTypes.TICKER, (t) => onPriceTicker('binance', t));
     gate.on(EventTypes.TICKER, (t) => onPriceTicker('gate', t));
@@ -115,8 +132,9 @@ export class TaskManager {
 
     console.log(
       `[TaskManager] started symbols=${strat.symbols.join(',')} trading=${this.tradingEnabled}`
-      + ` priceMode=ws-driven(any-leg) windowSeconds=${strat.windowSeconds}`
+      + ` priceMode=ws-driven(${priceUpdateMode}) windowSeconds=${strat.windowSeconds}`
       + ` minDataPoints=${strat.minDataPoints} enforceLatency=${this.sharedResources.enforceLatency}`
+      + ` restBeforeOrder=${strat.restRefreshBeforeOrder !== false}`
     );
   }
 

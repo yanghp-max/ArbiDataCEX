@@ -38,6 +38,8 @@ export class BinanceAdapter extends BaseAdapter {
     this._reconnectingPublicWs = false;
     this._publicWsGen = 0;
     this._restRefreshPending = false;
+    /** 按 symbol 记录最后 WS 消息时刻（HOME 可死、BTC 仍活时单独补价） */
+    this._lastSymbolMessageAt = new Map();
     this._balanceCache = null;
     this._positionCache = new Map();
     this.privateWs = null;
@@ -206,9 +208,14 @@ export class BinanceAdapter extends BaseAdapter {
       const sinceOpen = Date.now() - (this._publicWsOpenedAt || 0);
       if (sinceOpen < this._PUBLIC_WS_RECONNECT_GRACE_MS) return;
       const staleMs = Date.now() - anchor;
-      if (staleMs > 30_000 && staleMs <= 60_000 && !this._restRefreshPending) {
+      const staleSymbols = this.subscribedSymbols.filter((sym) => {
+        const key = this.normalizeSymbol(sym);
+        const last = this._lastSymbolMessageAt.get(key) ?? anchor;
+        return Date.now() - last > 30_000;
+      });
+      if (staleSymbols.length > 0 && staleMs <= 60_000 && !this._restRefreshPending) {
         this._restRefreshPending = true;
-        this.#refreshBookTickerViaRest('watchdog-preflight').finally(() => {
+        this.#refreshBookTickerViaRest('watchdog-per-symbol', staleSymbols).finally(() => {
           this._restRefreshPending = false;
         });
         return;
@@ -246,33 +253,54 @@ export class BinanceAdapter extends BaseAdapter {
     }
   }
 
+  /** REST bookTicker（对齐 ArbiTrade-1 getTicker 回退） */
+  async getBookTicker(symbol, options = {}) {
+    const exSymbol = this.toExchangeSymbol(symbol);
+    const timeout = Number(options.timeoutMs) || this.config.timeout || 5000;
+    const { data } = await axios.get(`${this.config.restUrl}/fapi/v1/ticker/bookTicker`, {
+      params: { symbol: exSymbol },
+      timeout
+    });
+    const bid = Number(data.bidPrice);
+    const ask = Number(data.askPrice);
+    if (!(Number.isFinite(bid) && bid > 0 && Number.isFinite(ask) && ask > 0)) {
+      throw new Error(`Invalid bookTicker ${exSymbol}`);
+    }
+    const localTs = Date.now();
+    return {
+      symbol: this.normalizeSymbol(data.symbol || exSymbol),
+      bid,
+      ask,
+      timestamp: localTs,
+      serverTimestamp: null,
+      restReason: options.reason ?? 'rest'
+    };
+  }
+
+  #emitBookTicker(ticker, { viaRest = false, restReason = null } = {}) {
+    const localTs = Date.now();
+    this._lastPublicMessageAt = localTs;
+    const sym = this.normalizeSymbol(ticker.symbol);
+    this._lastSymbolMessageAt.set(sym, localTs);
+    this.emit(EventTypes.TICKER, {
+      ...ticker,
+      symbol: sym,
+      localTimestamp: localTs,
+      wsDelayMs: viaRest ? null : ticker.wsDelayMs,
+      source: 'binance',
+      viaRest,
+      restReason
+    });
+  }
+
   /** 重连后 bookTicker 可能长时间不推（盘口未变）；REST 立即补一条新鲜价 */
-  async #refreshBookTickerViaRest(reason = 'rest') {
-    if (!this.subscribedSymbols.length) return;
-    for (const symbol of this.subscribedSymbols) {
+  async #refreshBookTickerViaRest(reason = 'rest', symbols = null) {
+    const list = symbols?.length ? symbols : this.subscribedSymbols;
+    if (!list.length) return;
+    for (const symbol of list) {
       try {
-        const exSymbol = this.toExchangeSymbol(symbol);
-        const { data } = await axios.get(`${this.config.restUrl}/fapi/v1/ticker/bookTicker`, {
-          params: { symbol: exSymbol },
-          timeout: this.config.timeout || 5000
-        });
-        const bid = Number(data.bidPrice);
-        const ask = Number(data.askPrice);
-        if (!(Number.isFinite(bid) && bid > 0 && Number.isFinite(ask) && ask > 0)) continue;
-        const localTs = Date.now();
-        this._lastPublicMessageAt = localTs;
-        this.emit(EventTypes.TICKER, {
-          symbol: this.normalizeSymbol(data.symbol || exSymbol),
-          bid,
-          ask,
-          timestamp: localTs,
-          serverTimestamp: null,
-          localTimestamp: localTs,
-          wsDelayMs: null,
-          source: 'binance',
-          viaRest: true,
-          restReason: reason
-        });
+        const row = await this.getBookTicker(symbol, { reason });
+        this.#emitBookTicker(row, { viaRest: true, restReason: reason });
       } catch (err) {
         console.warn(`[Binance] REST bookTicker refresh ${symbol} (${reason}):`, err.message);
       }
@@ -326,18 +354,15 @@ export class BinanceAdapter extends BaseAdapter {
         exchangeMs = localTs;
         wsDelayMs = null;
       }
-      this._lastPublicMessageAt = localTs;
       const ticker = {
         symbol: this.normalizeSymbol(payload.s),
         bid,
         ask,
         timestamp: exchangeMs,
         serverTimestamp: rawEventTs,
-        localTimestamp: localTs,
-        wsDelayMs,
-        source: 'binance'
+        wsDelayMs
       };
-      this.emit(EventTypes.TICKER, ticker);
+      this.#emitBookTicker(ticker);
     } catch {
       // ignore
     }

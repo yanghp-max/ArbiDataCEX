@@ -36,6 +36,7 @@ import {
   markLatency,
   setFreshTickOnLatencyTrace
 } from '../monitoring/trade-latency.js';
+import { refreshTickFromRest } from '../services/quote-refresh.js';
 
 import {
   calcLegSlippageBps,
@@ -476,7 +477,10 @@ export class CexCexTask {
     const tradeId = reservations?.tradeId;
     try {
       markLatency(latencyTrace, 'exec_async_start');
-      const freshTick = this.sr.quoteAggregator.buildTick(symbol);
+      const restBeforeOrder = this.cfg.restRefreshBeforeOrder !== false;
+      const freshTick = restBeforeOrder
+        ? await refreshTickFromRest(this.sr.cexManager, this.sr.quoteAggregator, symbol)
+        : this.sr.quoteAggregator.buildTick(symbol);
       const latencyOk = !this.enforceLatency || tickLatencyPass(freshTick, this.latencyLimits);
       const symbolCost = resolveCexCostConfigForSymbol(this.cfg, symbol);
       const slipCheck = freshTick
