@@ -262,7 +262,13 @@ export function tickLegSkewPass(tick, maxLegSkewMs) {
 /** WS 传输延迟：任一端超阈即不通过（对齐 stable _wsDelay > 100） */
 export function tickWsLatencyPass(tick, maxWsLatencyMs) {
   if (!Number.isFinite(maxWsLatencyMs)) return true;
-  const ws = tick.maxWsLatencyMs ?? Math.max(tick.aLatencyMs ?? 0, tick.bLatencyMs ?? 0);
+  const a = tick.aLatencyMs;
+  const b = tick.bLatencyMs;
+  const ws = tick.maxWsLatencyMs
+    ?? (Number.isFinite(a) || Number.isFinite(b)
+      ? Math.max(Number.isFinite(a) ? a : -1, Number.isFinite(b) ? b : -1)
+      : null);
+  if (ws == null || ws < 0) return true;
   return ws <= maxWsLatencyMs;
 }
 

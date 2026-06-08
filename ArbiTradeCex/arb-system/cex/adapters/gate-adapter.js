@@ -313,7 +313,7 @@ export class GateAdapter extends BaseAdapter {
         ? (Number(serverTimestamp) > 1e12 ? Number(serverTimestamp) : Number(serverTimestamp) * 1000)
         : null;
       const timestamp = exchangeMsRaw ?? localTs;
-      const wsDelayMs = exchangeMsRaw != null ? Math.max(0, localTs - exchangeMsRaw) : 0;
+      const wsDelayMs = exchangeMsRaw != null ? Math.max(0, localTs - exchangeMsRaw) : null;
 
       const symbol = this.normalizeSymbol(this.toCompactSymbol(contract));
       this.emit(EventTypes.TICKER, {

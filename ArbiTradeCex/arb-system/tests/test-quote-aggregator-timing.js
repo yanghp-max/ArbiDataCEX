@@ -11,7 +11,7 @@ agg.onTicker('binance', {
   timestamp: now - 300_000,
   serverTimestamp: now - 300_000,
   localTimestamp: now - 50,
-  wsDelayMs: 0
+  wsDelayMs: null
 });
 agg.onTicker('gate', {
   symbol: 'ALLO-USDT',
@@ -25,8 +25,9 @@ agg.onTicker('gate', {
 
 const tick = agg.buildTick('ALLOUSDT');
 assert.ok(tick);
-assert.equal(tick.aLatencyMs, 0);
+assert.equal(tick.aLatencyMs, null);
 assert.equal(tick.bLatencyMs, 12);
+assert.equal(tick.maxWsLatencyMs, 12);
 assert.ok(tick.aAgeMs <= 60, `aAgeMs should be receive-based (~50ms), got ${tick.aAgeMs}`);
 assert.ok(tick.bAgeMs <= 30, `bAgeMs should be receive-based (~20ms), got ${tick.bAgeMs}`);
 assert.ok(tick.legSkewMs <= 60, `legSkewMs should be receive delta, got ${tick.legSkewMs}`);

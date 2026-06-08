@@ -273,6 +273,11 @@ export class DashboardBridge {
     const sym = this.state.symbols[symbol] || this.#emptySymbol(symbol);
     if (!tick) {
       sym.status = 'waiting_quotes';
+      sym.priceAgeMs = null;
+      sym.aAgeMs = null;
+      sym.bAgeMs = null;
+      sym.aLatencyMs = null;
+      sym.bLatencyMs = null;
       sym.updatedAt = Date.now();
       this.state.symbols[symbol] = sym;
       this.#markMarketDirty(symbol);

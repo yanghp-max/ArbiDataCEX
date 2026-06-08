@@ -32,11 +32,7 @@ function legWsDelayMs(leg) {
   if (leg?.wsDelayMs != null && Number.isFinite(Number(leg.wsDelayMs))) {
     return Math.max(0, Number(leg.wsDelayMs));
   }
-  if (leg?.serverTimestamp == null || leg?.localTimestamp == null) return null;
-  const serverMs = legExchangeTimestampMs(leg);
-  const localMs = Number(leg.localTimestamp);
-  if (serverMs == null || !Number.isFinite(localMs)) return null;
-  return Math.max(0, localMs - serverMs);
+  return null;
 }
 
 export class QuoteAggregator {
@@ -93,7 +89,11 @@ export class QuoteAggregator {
     const priceReceiveMs = Math.max(aReceiveMs, bReceiveMs);
     const priceAgeMs = Math.max(0, now - priceReceiveMs);
     const legSkewMs = Math.abs(aReceiveMs - bReceiveMs);
-    const maxWsLatencyMs = Math.max(aLatencyMs ?? 0, bLatencyMs ?? 0);
+    const maxWsLatencyMs = Math.max(
+      aLatencyMs ?? -1,
+      bLatencyMs ?? -1
+    );
+    const maxWsLatency = maxWsLatencyMs >= 0 ? maxWsLatencyMs : null;
 
     return {
       symbol: sym,
@@ -103,7 +103,7 @@ export class QuoteAggregator {
       priceAgeMs,
       legSkewMs,
       priceReceiveMs,
-      maxWsLatencyMs,
+      maxWsLatencyMs: maxWsLatency,
       aAgeMs,
       bAgeMs,
       aLatencyMs,
