@@ -106,12 +106,9 @@ export class TaskManager {
       this.positionReconcileTimer.unref();
     }
 
-    const timingMs = Number(this.config.dashboard?.broadcastIntervalMs) > 0
-      ? Number(this.config.dashboard.broadcastIntervalMs)
-      : 1000;
     this.marketTimingTimer = setInterval(() => {
       this.#refreshAllMarketTiming();
-    }, timingMs);
+    }, 200);
     if (typeof this.marketTimingTimer.unref === 'function') {
       this.marketTimingTimer.unref();
     }

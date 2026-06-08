@@ -61,7 +61,7 @@ function applyMarketPatch(state, data) {
   if (!data) return;
   if (data.symbols) {
     for (const [sym, row] of Object.entries(data.symbols)) {
-      state.symbols[sym] = row;
+      state.symbols[sym] = { ...(state.symbols[sym] || {}), ...row };
     }
   }
   if (data.progress) {

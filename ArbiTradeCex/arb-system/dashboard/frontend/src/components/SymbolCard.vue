@@ -29,8 +29,8 @@ function legAgeMs(localTs) {
   return Math.max(0, nowMs.value - ts);
 }
 
-const aAgeLive = computed(() => legAgeMs(props.card.aLocalTimestamp));
-const bAgeLive = computed(() => legAgeMs(props.card.bLocalTimestamp));
+const aAgeLive = computed(() => legAgeMs(props.card.aLocalTimestamp) ?? props.card.aAgeMs ?? null);
+const bAgeLive = computed(() => legAgeMs(props.card.bLocalTimestamp) ?? props.card.bAgeMs ?? null);
 
 const priceAgeLive = computed(() => {
   const ages = [aAgeLive.value, bAgeLive.value].filter((v) => v != null);

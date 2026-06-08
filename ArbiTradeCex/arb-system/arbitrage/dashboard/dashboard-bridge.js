@@ -290,11 +290,7 @@ export class DashboardBridge {
 
     const stale = this.enforceLatency && !tickLatencyPass(tick, this.latencyLimits);
     sym.status = stale ? 'stale' : (signal?.windowReady ? 'ready' : 'collecting');
-    sym.priceAgeMs = tick.priceAgeMs;
-    sym.aAgeMs = tick.aAgeMs ?? null;
-    sym.bAgeMs = tick.bAgeMs ?? null;
-    sym.aLatencyMs = tick.aLatencyMs ?? null;
-    sym.bLatencyMs = tick.bLatencyMs ?? null;
+    // 价格/价差随 onTick 更新；leg age / lat 仅由 refreshMarketTiming 定频写入，避免 any-leg 触发腿恒为 0
     sym.aLocalTimestamp = tick.aLocalTimestamp ?? null;
     sym.bLocalTimestamp = tick.bLocalTimestamp ?? null;
     sym.aBid = tick.aBid;
