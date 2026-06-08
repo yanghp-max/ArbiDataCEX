@@ -11,7 +11,7 @@
     "maxPriceAgeMs": 1000,
     "maxLegSkewMs": 2000,
     "maxWsLatencyMs": 100,
-    "maxCrossLegMidBps": 50,
+    "maxCrossLegMidBps": 15,
     "priceUpdateMode": "both",
     "restRefreshBeforeOrder": true,
     "signalMaxAgeMs": 50,
@@ -48,7 +48,7 @@
     "processLastExitJson": "logs/last-exit.json",
     "processHealthIntervalMs": 30000,
     "minQtyJson": "config/min-order-qty.json",
-    "windowSeconds": 600,
+    "windowSeconds": 3600,
     "enforceLatency": true,
     "useMockAccount": false
   },

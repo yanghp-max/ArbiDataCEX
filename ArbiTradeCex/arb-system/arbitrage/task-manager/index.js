@@ -79,6 +79,10 @@ export class TaskManager {
     const onBinanceMarketRefresh = (payload = {}) => {
       this.sharedResources.quoteAggregator.clearSource('binance');
       for (const sym of strat.symbols) {
+        const key = compactSymbol(sym);
+        this._legReady.delete(key);
+      }
+      for (const sym of strat.symbols) {
         this.#schedulePriceTick(sym);
       }
       if (payload.reason) {

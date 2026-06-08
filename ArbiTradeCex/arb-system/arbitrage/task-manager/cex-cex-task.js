@@ -189,6 +189,7 @@ export class CexCexTask {
 
     const symbolCost = resolveCexCostConfigForSymbol(this.cfg, symbol);
     const spreads = calcSpreads(tick, symbolCost);
+    // 对齐 ArbiTrade-1 dataManager.addData：所有 tick 入滚动窗口，不在入窗阶段过滤
     const signal = engine.updateAndCalc({
       timestamp: tick.timestamp,
       spreadAb: spreads.spreadAb,
@@ -212,8 +213,10 @@ export class CexCexTask {
       }
     });
 
-    if (this.enforceLatency && !tickLatencyPass(tick, this.latencyLimits)) return;
     if (!signal.windowReady || signal.openZAb == null || signal.openZBa == null) return;
+
+    // 延迟/跨腿检查只拦下单，不拦入窗（同 ArbiTrade-1 活跃 zscore 路径）
+    if (this.enforceLatency && !tickLatencyPass(tick, this.latencyLimits)) return;
 
     if (tick.fundingA != null && tick.fundingA < this.cfg.fundingMin) return;
     if (tick.fundingB != null && tick.fundingB < this.cfg.fundingMin) return;
@@ -321,8 +324,6 @@ export class CexCexTask {
       qty = finalized.qty;
     }
 
-    if (this.enforceLatency && !tickSignalAgePass(tick, this.latencyLimits.signalMaxAgeMs)) return;
-
     const priceSnapshot = tickPriceSnapshot(symbol, tick);
     const latencyTrace = createTradeLatencyTrace(tick, {
       direction: execDirection,
@@ -353,6 +354,8 @@ export class CexCexTask {
       }
     }
     markLatency(latencyTrace, 'account_fresh_done');
+
+    if (this.enforceLatency && !tickSignalAgePass(tick, this.latencyLimits.signalMaxAgeMs)) return;
 
     // 在 await 之前占位（对齐 ArbiTrade-1 预占前互斥 + 单路径 tick）
     if (this.executingSymbols.has(symbol)) return;
