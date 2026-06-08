@@ -134,27 +134,49 @@ export class OrderExecutor {
     markLatency(latencyTrace, 'pre_order_done');
     markLatency(latencyTrace, 'order_send_start');
 
-    const placeBinance = () => this.cexManager.placeOrder('binance', {
-      symbol: tick.symbol,
-      side: binanceSide,
-      type: 'market',
-      amount: qty,
-      stepSize: binanceStepSize,
-      reduceOnly,
-      positionDirection,
-      positionSide: binancePositionSide
-    });
+    const submitMs = { binance: null, gate: null };
+    const placeBinance = async () => {
+      const t0 = Date.now();
+      try {
+        return await this.cexManager.placeOrder('binance', {
+          symbol: tick.symbol,
+          side: binanceSide,
+          type: 'market',
+          amount: qty,
+          stepSize: binanceStepSize,
+          reduceOnly,
+          positionDirection,
+          positionSide: binancePositionSide
+        });
+      } finally {
+        submitMs.binance = Date.now() - t0;
+      }
+    };
 
-    const placeGate = () => this.cexManager.placeOrder('gate', {
-      symbol: tick.symbol,
-      side: gateSide,
-      type: 'market',
-      amount: gateSize,
-      decimalSize: gateDecimalSize,
-      reduceOnly
-    });
+    const placeGate = async () => {
+      const t0 = Date.now();
+      try {
+        return await this.cexManager.placeOrder('gate', {
+          symbol: tick.symbol,
+          side: gateSide,
+          type: 'market',
+          amount: gateSize,
+          decimalSize: gateDecimalSize,
+          reduceOnly
+        });
+      } finally {
+        submitMs.gate = Date.now() - t0;
+      }
+    };
 
     const [aResult, bResult] = await Promise.allSettled([placeBinance(), placeGate()]);
+    markLatency(latencyTrace, 'order_send_done');
+    const parallelMs = Math.max(0, (latencyTrace?.marks?.order_send_done ?? 0)
+      - (latencyTrace?.marks?.order_send_start ?? 0));
+    if (latencyTrace) {
+      latencyTrace.orderSubmitMs = { ...submitMs, parallel: parallelMs };
+    }
+    this.#logPlaceOrderSubmit(tick.symbol, submitMs, parallelMs, aResult, bResult);
 
     if (aResult.status === 'rejected' && bResult.status === 'rejected') {
       throw new Error(
@@ -334,6 +356,24 @@ export class OrderExecutor {
     if (!gateCheck.overall) {
       throw new Error(formatPreconditionFail('Gate', gateCheck));
     }
+  }
+
+  #logPlaceOrderSubmit(symbol, submitMs, parallelMs, aResult, bResult) {
+    if (!this.tradingEnabled) return;
+    const fmtLeg = (name, ms, result) => {
+      if (ms == null) return `${name} -`;
+      if (result.status === 'fulfilled') {
+        return `${name} ${ms}ms id=${result.value?.orderId ?? '?'}`;
+      }
+      const msg = result.reason?.message || 'unknown';
+      return `${name} FAIL ${ms}ms (${msg})`;
+    };
+    console.log(
+      `[发单·提交] ${symbol}`
+      + ` ${fmtLeg('Binance', submitMs.binance, aResult)}`
+      + ` | ${fmtLeg('Gate', submitMs.gate, bResult)}`
+      + ` | 并行 ${parallelMs}ms（placeOrder 返回，不含等成交）`
+    );
   }
 
   async #fetchOrderTradesWithRetry(exchange, orderId, symbol, options = {}) {

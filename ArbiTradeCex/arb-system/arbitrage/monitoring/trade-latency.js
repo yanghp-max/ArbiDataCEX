@@ -11,7 +11,8 @@ const PROCESS_STAGES = [
   ['reserve_done', 'exec_async_start', '排队'],
   ['exec_async_start', 'fresh_tick_done', '拉新价'],
   ['fresh_tick_done', 'pre_order_done', '预检'],
-  ['pre_order_done', 'order_send_start', '待发']
+  ['pre_order_done', 'order_send_start', '待发'],
+  ['order_send_start', 'order_send_done', '提交']
 ];
 
 function tickPriceReceiveMs(tick) {
@@ -328,6 +329,7 @@ export function latencyCsvFields(trace) {
     lat_stage_fresh_tick_ms: byLabel['拉新价'] ?? '',
     lat_stage_precheck_ms: byLabel['预检'] ?? '',
     lat_stage_presend_ms: byLabel['待发'] ?? '',
+    lat_stage_order_send_ms: byLabel['提交'] ?? '',
     ...priceStagesCsvFields(trace)
   };
 }
