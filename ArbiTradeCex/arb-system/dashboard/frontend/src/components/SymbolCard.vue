@@ -19,31 +19,67 @@ let tickTimer = null;
 onMounted(() => {
   tickTimer = setInterval(() => {
     nowMs.value = Date.now();
-  }, 100);
+  }, 50);
 });
 
 onUnmounted(() => {
   if (tickTimer) clearInterval(tickTimer);
 });
 
-function legAgeMs(localTs) {
-  const ts = Number(localTs);
-  if (!Number.isFinite(ts) || ts <= 0) return null;
-  return Math.max(0, nowMs.value - ts);
+function ageFromTs(ts) {
+  const n = Number(ts);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.max(0, nowMs.value - n);
 }
 
-const aAgeLive = computed(() => legAgeMs(props.card.aLocalTimestamp) ?? props.card.aAgeMs ?? null);
-const bAgeLive = computed(() => legAgeMs(props.card.bLocalTimestamp) ?? props.card.bAgeMs ?? null);
+function legReceiveAge(localTs, serverAgeMs) {
+  const live = ageFromTs(localTs);
+  if (live != null) return live;
+  if (serverAgeMs != null && Number.isFinite(Number(serverAgeMs))) {
+    const pushedAt = Number(props.card.marketTickAt);
+    if (Number.isFinite(pushedAt) && pushedAt > 0) {
+      return Math.max(0, nowMs.value - pushedAt + Number(serverAgeMs));
+    }
+    return Number(serverAgeMs);
+  }
+  return null;
+}
+
+function legExchangeAge(exchangeTs, serverAgeMs) {
+  const live = ageFromTs(exchangeTs);
+  if (live != null) return live;
+  return legReceiveAge(null, serverAgeMs);
+}
+
+const aReceiveAgeLive = computed(() => legReceiveAge(
+  props.card.aLocalTimestamp,
+  props.card.aAgeMs
+));
+const bReceiveAgeLive = computed(() => legReceiveAge(
+  props.card.bLocalTimestamp,
+  props.card.bAgeMs
+));
+
+const aExchangeAgeLive = computed(() => legExchangeAge(
+  props.card.aExchangeTimestampMs,
+  props.card.aAgeMs
+));
+const bExchangeAgeLive = computed(() => legExchangeAge(
+  props.card.bExchangeTimestampMs,
+  props.card.bAgeMs
+));
 
 const priceAgeLive = computed(() => {
-  const ages = [aAgeLive.value, bAgeLive.value].filter((v) => v != null);
-  if (!ages.length) return props.card.priceAgeMs ?? null;
-  return Math.max(...ages);
+  const ages = [aReceiveAgeLive.value, bReceiveAgeLive.value].filter((v) => v != null);
+  if (ages.length) return Math.max(...ages);
+  const exAges = [aExchangeAgeLive.value, bExchangeAgeLive.value].filter((v) => v != null);
+  if (exAges.length) return Math.max(...exAges);
+  return props.card.priceAgeMs ?? null;
 });
 
 const legSkewLive = computed(() => {
-  if (aAgeLive.value != null && bAgeLive.value != null) {
-    return Math.abs(aAgeLive.value - bAgeLive.value);
+  if (aReceiveAgeLive.value != null && bReceiveAgeLive.value != null) {
+    return Math.abs(aReceiveAgeLive.value - bReceiveAgeLive.value);
   }
   return props.card.legSkewMs ?? null;
 });
@@ -65,19 +101,19 @@ function liveStaleReason() {
   const ws = wsLatencyLive.value;
 
   if (priceAge != null && priceAge > limits.maxPriceAgeMs) {
-    return `行情太旧 ${Math.round(priceAge)}/${limits.maxPriceAgeMs}ms`;
+    return `行情太旧 ${Math.ceil(priceAge)}/${limits.maxPriceAgeMs}ms`;
   }
   if (legSkew > limits.maxLegSkewMs) {
-    return `两腿不同步 ${Math.round(legSkew)}/${limits.maxLegSkewMs}ms`;
+    return `两腿不同步 ${Math.ceil(legSkew)}/${limits.maxLegSkewMs}ms`;
   }
   if (ws != null && ws >= 0 && ws > limits.maxWsLatencyMs) {
-    return `WS延迟 ${Math.round(ws)}/${limits.maxWsLatencyMs}ms`;
+    return `WS延迟 ${Math.ceil(ws)}/${limits.maxWsLatencyMs}ms`;
   }
   return null;
 }
 
 const effectiveStatus = computed(() => {
-  if (props.card.status === 'waiting_quotes' || props.card.aBid == null) {
+  if (props.card.aBid == null || props.card.bBid == null) {
     return 'waiting_quotes';
   }
   if (!props.enforceLatency) {
@@ -133,27 +169,35 @@ const staleHint = computed(() => liveStaleReason() ?? props.card.staleReason ?? 
     <div class="card-metrics">
       <template v-if="showLatency">
         <div class="meta-line">
-          <span class="meta-label">行情年龄</span>
+          <span class="meta-label">行情年龄(接收)</span>
           <span class="meta-value">{{ fmtMs(priceAgeLive) }} ms</span>
         </div>
         <div class="meta-line">
-          <span class="meta-label">A腿年龄 (Binance)</span>
-          <span class="meta-value">{{ fmtMs(aAgeLive) }} ms</span>
+          <span class="meta-label">A腿接收 (Binance)</span>
+          <span class="meta-value">{{ fmtMs(aReceiveAgeLive) }} ms</span>
         </div>
         <div class="meta-line">
-          <span class="meta-label">B腿年龄 (Gate)</span>
-          <span class="meta-value">{{ fmtMs(bAgeLive) }} ms</span>
+          <span class="meta-label">B腿接收 (Gate)</span>
+          <span class="meta-value">{{ fmtMs(bReceiveAgeLive) }} ms</span>
+        </div>
+        <div class="meta-line">
+          <span class="meta-label">A腿交易所时钟</span>
+          <span class="meta-value">{{ fmtMs(aExchangeAgeLive) }} ms</span>
+        </div>
+        <div class="meta-line">
+          <span class="meta-label">B腿交易所时钟</span>
+          <span class="meta-value">{{ fmtMs(bExchangeAgeLive) }} ms</span>
         </div>
         <div class="meta-line">
           <span class="meta-label">两腿时差</span>
           <span class="meta-value">{{ fmtMs(legSkewLive) }} ms</span>
         </div>
         <div class="meta-line">
-          <span class="meta-label">WS延迟 A (Binance)</span>
+          <span class="meta-label">WS延迟 A</span>
           <span class="meta-value">{{ fmtMs(card.aLatencyMs) }} ms</span>
         </div>
         <div class="meta-line">
-          <span class="meta-label">WS延迟 B (Gate)</span>
+          <span class="meta-label">WS延迟 B</span>
           <span class="meta-value">{{ fmtMs(card.bLatencyMs) }} ms</span>
         </div>
       </template>

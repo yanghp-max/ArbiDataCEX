@@ -10,7 +10,9 @@ export function useFormatters() {
 
   function fmtMs(v) {
     if (v == null || !Number.isFinite(Number(v))) return '-';
-    return String(Math.round(Number(v)));
+    const n = Number(v);
+    if (n <= 0) return '0';
+    return String(Math.ceil(n));
   }
 
   function fmtPct(v) {

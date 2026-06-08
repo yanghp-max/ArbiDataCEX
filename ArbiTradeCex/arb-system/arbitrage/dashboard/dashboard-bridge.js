@@ -99,6 +99,9 @@ export class DashboardBridge {
       bLatencyMs: null,
       aLocalTimestamp: null,
       bLocalTimestamp: null,
+      aExchangeTimestampMs: null,
+      bExchangeTimestampMs: null,
+      marketTickAt: null,
       legSkewMs: null,
       maxWsLatencyMs: null,
       staleReason: null,
@@ -294,6 +297,9 @@ export class DashboardBridge {
   #applyTickTiming(sym, tick) {
     sym.aLocalTimestamp = tick.aLocalTimestamp ?? null;
     sym.bLocalTimestamp = tick.bLocalTimestamp ?? null;
+    sym.aExchangeTimestampMs = tick.aExchangeTimestampMs ?? null;
+    sym.bExchangeTimestampMs = tick.bExchangeTimestampMs ?? null;
+    sym.marketTickAt = Date.now();
     sym.priceAgeMs = tick.priceAgeMs;
     sym.aAgeMs = tick.aAgeMs ?? null;
     sym.bAgeMs = tick.bAgeMs ?? null;
@@ -304,13 +310,14 @@ export class DashboardBridge {
   }
 
   #syncSymbolLatencyStatus(sym, tick, { windowReady = sym.windowReady } = {}) {
-    if (!tick || !this.enforceLatency) {
+    if (!tick) return;
+    if (!this.enforceLatency) {
       sym.staleReason = null;
+      sym.status = windowReady ? 'ready' : 'collecting';
       return;
     }
     const pass = tickLatencyPass(tick, this.latencyLimits);
     sym.staleReason = pass ? null : describeLatencyFail(tick, this.latencyLimits);
-    if (sym.status === 'waiting_quotes') return;
     if (!pass) {
       sym.status = 'stale';
       return;
@@ -331,6 +338,9 @@ export class DashboardBridge {
       sym.bLatencyMs = null;
       sym.aLocalTimestamp = null;
       sym.bLocalTimestamp = null;
+      sym.aExchangeTimestampMs = null;
+      sym.bExchangeTimestampMs = null;
+      sym.marketTickAt = null;
       sym.legSkewMs = null;
       sym.maxWsLatencyMs = null;
       sym.staleReason = null;

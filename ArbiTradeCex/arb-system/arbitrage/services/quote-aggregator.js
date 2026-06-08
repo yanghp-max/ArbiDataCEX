@@ -115,6 +115,8 @@ export class QuoteAggregator {
       bAsk: g.ask,
       aServerTimestamp: b.serverTimestamp ?? null,
       bServerTimestamp: g.serverTimestamp ?? null,
+      aExchangeTimestampMs: aExchangeTs,
+      bExchangeTimestampMs: bExchangeTs,
       aLocalTimestamp: b.localTimestamp ?? null,
       bLocalTimestamp: g.localTimestamp ?? null,
       fundingA: funding.a ?? null,
