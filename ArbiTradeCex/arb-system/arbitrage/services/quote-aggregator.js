@@ -1,11 +1,15 @@
 /**
- * 合并 A/B ticker → tick
- * - aAgeMs / bAgeMs：各腿距上次本机接收的时间（now - localTimestamp）
- * - priceAgeMs：取 max(aAgeMs, bAgeMs) — 最旧腿年龄（any-leg 触发时不会恒为 0）
- * - priceReceiveMs：取 min(A/B localTimestamp) — 最旧腿接收时刻
+ * 合并 A/B ticker → tick（对齐 ArbiTrade-1 priceData：各 source 缓存最后一条）
+ * - aAgeMs / bAgeMs：各腿距上次本机接收的时间（now - receiveMs）
+ * - priceAgeMs：max(aAgeMs, bAgeMs) — 最旧腿年龄
+ * - priceReceiveMs：max(A/B receiveMs) — 最近一条腿到达时刻（对齐 ArbiTrade-1 _receiveTime 取 max）
  * - aLatencyMs / bLatencyMs：WS 入站时固定的 wsDelayMs
- * - timestamp：两腿交易所时间取 max（adapter 已对异常 E/T 做修正）
+ * - timestamp：两腿交易所时间取 max
  */
+
+function compactSymbol(symbol) {
+  return String(symbol).replace(/[-_]/g, '').toUpperCase();
+}
 
 function legExchangeTimestampMs(leg) {
   if (leg?.timestamp != null && Number.isFinite(Number(leg.timestamp))) {
@@ -19,6 +23,8 @@ function legExchangeTimestampMs(leg) {
 }
 
 function legReceiveTimestampMs(leg) {
+  const receiveMs = Number(leg?.receiveMs);
+  if (Number.isFinite(receiveMs)) return receiveMs;
   const localMs = Number(leg?.localTimestamp);
   return Number.isFinite(localMs) ? localMs : null;
 }
@@ -38,20 +44,31 @@ function legWsDelayMs(leg) {
 
 export class QuoteAggregator {
   constructor() {
+    /** symbol(compact) -> { binance, gate, funding } */
     this.latest = new Map();
   }
 
   onTicker(source, ticker) {
-    const sym = ticker.symbol.replace('-', '');
+    const sym = compactSymbol(ticker.symbol);
+    if (!sym) return;
+
+    const receiveMs = Date.now();
+    const cached = {
+      ...ticker,
+      symbol: sym,
+      receiveMs,
+      localTimestamp: receiveMs
+    };
+
     if (!this.latest.has(sym)) {
       this.latest.set(sym, { binance: null, gate: null, funding: {} });
     }
     const row = this.latest.get(sym);
-    if (source === 'binance') row.binance = ticker;
-    else row.gate = ticker;
+    if (source === 'binance') row.binance = cached;
+    else if (source === 'gate') row.gate = cached;
   }
 
-  /** 公共 WS 重连后清掉陈旧 Binance 腿，避免 Gate 单独来价时用旧 localTimestamp 累加延迟 */
+  /** 公共 WS 重连后清掉陈旧腿，避免单腿来价时拼到断线前的旧价 */
   clearSource(source) {
     for (const row of this.latest.values()) {
       if (source === 'binance') row.binance = null;
@@ -60,13 +77,13 @@ export class QuoteAggregator {
   }
 
   setFunding(symbol, fundingA, fundingB) {
-    const sym = symbol.replace('-', '');
+    const sym = compactSymbol(symbol);
     if (!this.latest.has(sym)) this.latest.set(sym, { binance: null, gate: null, funding: {} });
     this.latest.get(sym).funding = { a: fundingA, b: fundingB };
   }
 
   buildTick(symbol) {
-    const sym = symbol.replace('-', '');
+    const sym = compactSymbol(symbol);
     const row = this.latest.get(sym);
     if (!row?.binance || !row?.gate) return null;
     const { binance: b, gate: g, funding } = row;
@@ -87,7 +104,7 @@ export class QuoteAggregator {
     const bAgeMs = legReceiveAgeMs(g, now);
     const aLatencyMs = legWsDelayMs(b);
     const bLatencyMs = legWsDelayMs(g);
-    const priceReceiveMs = Math.min(aReceiveMs, bReceiveMs);
+    const priceReceiveMs = Math.max(aReceiveMs, bReceiveMs);
     const priceAgeMs = Math.max(aAgeMs ?? 0, bAgeMs ?? 0);
     const legSkewMs = Math.abs(aReceiveMs - bReceiveMs);
     const maxWsLatencyMs = Math.max(
@@ -117,12 +134,13 @@ export class QuoteAggregator {
       bServerTimestamp: g.serverTimestamp ?? null,
       aExchangeTimestampMs: aExchangeTs,
       bExchangeTimestampMs: bExchangeTs,
-      aLocalTimestamp: b.localTimestamp ?? null,
-      bLocalTimestamp: g.localTimestamp ?? null,
+      aLocalTimestamp: b.receiveMs ?? b.localTimestamp ?? null,
+      bLocalTimestamp: g.receiveMs ?? g.localTimestamp ?? null,
       fundingA: funding.a ?? null,
       fundingB: funding.b ?? null
     };
   }
 }
 
+export { compactSymbol };
 export default QuoteAggregator;

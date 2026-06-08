@@ -12,7 +12,7 @@
     "maxLegSkewMs": 2000,
     "maxWsLatencyMs": 100,
     "maxCrossLegMidBps": 15,
-    "priceUpdateMode": "both",
+    "priceUpdateMode": "any",
     "restRefreshBeforeOrder": true,
     "signalMaxAgeMs": 50,
     "fundingMin": -0.1,

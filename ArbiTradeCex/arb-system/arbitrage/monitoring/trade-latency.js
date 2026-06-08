@@ -46,8 +46,13 @@ function snapshotQuoteTiming(tick) {
     receiveMs,
     wsTransitMs,
     priceAgeMs: Number.isFinite(Number(tick.priceAgeMs)) ? Number(tick.priceAgeMs) : null,
-    aWsTransitMs: legWsTransitMs(tick.aServerTimestamp ?? tick.timestamp, tick.aLocalTimestamp),
-    bWsTransitMs: legWsTransitMs(tick.bServerTimestamp ?? tick.timestamp, tick.bLocalTimestamp)
+    aAgeMs: Number.isFinite(Number(tick.aAgeMs)) ? Number(tick.aAgeMs) : null,
+    bAgeMs: Number.isFinite(Number(tick.bAgeMs)) ? Number(tick.bAgeMs) : null,
+    legSkewMs: Number.isFinite(Number(tick.legSkewMs)) ? Number(tick.legSkewMs) : null,
+    aLatencyMs: Number.isFinite(Number(tick.aLatencyMs)) ? Number(tick.aLatencyMs) : null,
+    bLatencyMs: Number.isFinite(Number(tick.bLatencyMs)) ? Number(tick.bLatencyMs) : null,
+    aWsTransitMs: legWsTransitMs(tick.aServerTimestamp ?? tick.aExchangeTimestampMs, tick.aLocalTimestamp),
+    bWsTransitMs: legWsTransitMs(tick.bServerTimestamp ?? tick.bExchangeTimestampMs, tick.bLocalTimestamp)
   };
 }
 
@@ -309,8 +314,15 @@ export function formatLatencyLogLines(trace) {
   }
 
   const priceAge = latPriceAgeAtOrderMs(trace);
+  const oq = trace?.orderQuote ?? {};
+  if (oq.aAgeMs != null || oq.bAgeMs != null) {
+    parts.push(
+      `腿龄 A=${roundMs(oq.aAgeMs) ?? '-'}ms B=${roundMs(oq.bAgeMs) ?? '-'}ms`
+      + (oq.legSkewMs != null ? ` 差${roundMs(oq.legSkewMs)}ms` : '')
+    );
+  }
   if (priceAge != null) {
-    parts.push(`发单时行情龄 ${roundMs(priceAge)}ms`);
+    parts.push(`发单时最旧腿 ${roundMs(priceAge)}ms`);
   }
 
   if (parts.length === 0) return [];
@@ -363,6 +375,11 @@ export function latencyCsvFields(trace) {
     lat_ws_push_to_order_ms: latWsPushToOrderMs(trace) ?? '',
     lat_receive_to_order_ms: latReceiveToOrderMs(trace) ?? '',
     lat_price_age_at_order_ms: latPriceAgeAtOrderMs(trace) ?? '',
+    lat_a_age_ms: quote.aAgeMs ?? '',
+    lat_b_age_ms: quote.bAgeMs ?? '',
+    lat_leg_skew_ms: quote.legSkewMs ?? '',
+    lat_a_ws_transit_ms: quote.aWsTransitMs ?? '',
+    lat_b_ws_transit_ms: quote.bWsTransitMs ?? '',
     lat_local_old_to_order_ms: latLocalOldToOrderMs(trace) ?? '',
     lat_local_new_to_order_ms: latLocalNewToOrderMs(trace) ?? '',
     lat_old_data_freshness_ms: latOldDataFreshnessMs(trace) ?? '',

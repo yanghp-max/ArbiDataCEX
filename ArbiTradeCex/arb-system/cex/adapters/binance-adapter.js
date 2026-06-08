@@ -211,7 +211,7 @@ export class BinanceAdapter extends BaseAdapter {
       const staleSymbols = this.subscribedSymbols.filter((sym) => {
         const key = this.normalizeSymbol(sym);
         const last = this._lastSymbolMessageAt.get(key) ?? anchor;
-        return Date.now() - last > 30_000;
+        return Date.now() - last > 2_000;
       });
       if (staleSymbols.length > 0 && staleMs <= 60_000 && !this._restRefreshPending) {
         this._restRefreshPending = true;

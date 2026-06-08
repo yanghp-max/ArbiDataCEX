@@ -3,9 +3,7 @@
  * CEX-CEX 全链路不依赖 DEX 轮询，发单前必须拉 REST 校正两腿 book。
  */
 
-function compactSymbol(symbol) {
-  return String(symbol).replace(/-/g, '');
-}
+import { compactSymbol } from './quote-aggregator.js';
 
 function emitRestTicker(aggregator, source, payload) {
   if (!payload) return;
