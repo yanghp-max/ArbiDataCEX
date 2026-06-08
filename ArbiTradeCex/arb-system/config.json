@@ -15,21 +15,21 @@
     "fundingMin": -0.1,
     "binanceFeeBps": 5,
     "gateFeeBps": 5,
-    "binanceSlippageBps": 4,
-    "gateSlippageBps": 4,
+    "binanceSlippageBps": 10,
+    "gateSlippageBps": 10,
     "cexFeeBpsPerLeg": 5,
     "symbolOverrides": {
       "HOMEUSDT": {
-        "binanceSlippageBps": 2,
-        "gateSlippageBps": 2
+        "binanceSlippageBps": 10,
+        "gateSlippageBps":10
       },
       "SIRENUSDT": {
-        "binanceSlippageBps": 2,
-        "gateSlippageBps": 2
+        "binanceSlippageBps": 4,
+        "gateSlippageBps": 4
       },
       "EDENUSDT": {
-        "binanceSlippageBps": 2,
-        "gateSlippageBps": 2
+        "binanceSlippageBps": 10,
+        "gateSlippageBps": 10
       }
     },
     "mockBalanceUsdt": 10000,
