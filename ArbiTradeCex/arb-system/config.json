@@ -48,7 +48,7 @@
     "processLastExitJson": "logs/last-exit.json",
     "processHealthIntervalMs": 30000,
     "minQtyJson": "config/min-order-qty.json",
-    "windowSeconds": 3600,
+    "windowSeconds": 600,
     "enforceLatency": true,
     "useMockAccount": false
   },
