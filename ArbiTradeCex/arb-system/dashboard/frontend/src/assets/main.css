@@ -386,14 +386,29 @@ body {
 .symbol-card.stale { border-color: rgba(255,176,32,.5); }
 .symbol-card.ready { border-color: rgba(61,214,140,.35); }
 
-.stale-hint {
+.stale-hint-slot {
+  flex-shrink: 0;
+  min-height: 34px;
   margin: 8px 0 4px;
+}
+
+.stale-hint {
+  min-height: 28px;
   padding: 6px 8px;
   border-radius: 8px;
-  background: rgba(255, 176, 32, 0.12);
-  color: #ffb020;
   font-size: 11px;
   line-height: 1.4;
+  opacity: 0;
+  visibility: hidden;
+  background: transparent;
+  color: #ffb020;
+  transition: opacity 0.15s ease;
+}
+
+.stale-hint--on {
+  opacity: 1;
+  visibility: visible;
+  background: rgba(255, 176, 32, 0.12);
 }
 
 .card-head {

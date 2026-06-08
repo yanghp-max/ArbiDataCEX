@@ -11,8 +11,8 @@ export function useFormatters() {
   function fmtMs(v) {
     if (v == null || !Number.isFinite(Number(v))) return '-';
     const n = Number(v);
-    if (n <= 0) return '0';
-    return String(Math.ceil(n));
+    if (n < 1) return n.toFixed(1);
+    return String(Math.round(n));
   }
 
   function fmtPct(v) {
