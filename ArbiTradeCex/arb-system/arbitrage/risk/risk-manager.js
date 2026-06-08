@@ -246,13 +246,13 @@ export function latencyChecksEnabled(limits) {
     && limits.maxPriceAgeMs !== Infinity;
 }
 
-/** 组合行情：距最近一次任一侧交易所活动时间（now - max(A_ts,B_ts)） */
+/** 组合行情：距最近一次任一侧本机接收时间（now - max(A_recv,B_recv)） */
 export function tickExchangeAgePass(tick, maxPriceAgeMs) {
   if (!Number.isFinite(maxPriceAgeMs)) return true;
   return tick.priceAgeMs <= maxPriceAgeMs;
 }
 
-/** 两腿交易所时间差过大：一侧刚动、另一侧长期未推送（价可能仍显示在屏幕上） */
+/** 两腿本机接收时间差过大：一侧刚收到、另一侧长期无推送 */
 export function tickLegSkewPass(tick, maxLegSkewMs) {
   if (!Number.isFinite(maxLegSkewMs)) return true;
   const skew = tick.legSkewMs ?? 0;

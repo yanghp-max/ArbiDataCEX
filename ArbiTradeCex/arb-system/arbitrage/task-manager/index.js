@@ -58,6 +58,12 @@ export class TaskManager {
     };
     binance.on(EventTypes.TICKER, (t) => onPriceTicker('binance', t));
     gate.on(EventTypes.TICKER, (t) => onPriceTicker('gate', t));
+    binance.on('PUBLIC_WS_RECONNECTED', () => {
+      this.sharedResources.quoteAggregator.clearSource('binance');
+      for (const sym of strat.symbols) {
+        this.#schedulePriceTick(sym);
+      }
+    });
 
     await Promise.all([
       cexManager.subscribe('binance', adapterSymbols, ['bookTicker']),

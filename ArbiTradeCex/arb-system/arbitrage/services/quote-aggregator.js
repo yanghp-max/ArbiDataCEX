@@ -1,10 +1,9 @@
 /**
  * 合并 A/B ticker → tick
- * - timestamp / priceAgeMs：取 max(A,B) 交易所时间 →「组合行情最近一次活动时间」
- *   （一侧刚更新、另一侧价未变仅时间戳旧时，不因最旧腿误杀）
- * - legSkewMs = |A_ts - B_ts|：两腿交易所时间差过大 → 不同步（对齐 stable CEX-DEX 2s 思路）
- * - aAgeMs / bAgeMs：各腿年龄，仅展示/诊断
- * - maxWsLatencyMs：两腿 WS 传输延迟取 max
+ * - priceAgeMs / legSkewMs：基于本机接收时间（localTimestamp），反映真实行情新鲜度
+ * - aAgeMs / bAgeMs：各腿接收年龄（now - localTimestamp）
+ * - aLatencyMs / bLatencyMs：WS 收到时的传输延迟（wsDelayMs，在 adapter 入站时固定）
+ * - timestamp：两腿交易所时间取 max（adapter 已对异常 E/T 做修正）
  */
 
 function legExchangeTimestampMs(leg) {
@@ -18,13 +17,21 @@ function legExchangeTimestampMs(leg) {
   return null;
 }
 
-function legExchangeAgeMs(leg, now) {
-  const ts = legExchangeTimestampMs(leg);
-  if (ts == null) return null;
-  return Math.max(0, now - ts);
+function legReceiveTimestampMs(leg) {
+  const localMs = Number(leg?.localTimestamp);
+  return Number.isFinite(localMs) ? localMs : null;
 }
 
-function legLatencyMs(leg) {
+function legReceiveAgeMs(leg, now) {
+  const localMs = legReceiveTimestampMs(leg);
+  if (localMs == null) return null;
+  return Math.max(0, now - localMs);
+}
+
+function legWsDelayMs(leg) {
+  if (leg?.wsDelayMs != null && Number.isFinite(Number(leg.wsDelayMs))) {
+    return Math.max(0, Number(leg.wsDelayMs));
+  }
   if (leg?.serverTimestamp == null || leg?.localTimestamp == null) return null;
   const serverMs = legExchangeTimestampMs(leg);
   const localMs = Number(leg.localTimestamp);
@@ -47,6 +54,14 @@ export class QuoteAggregator {
     else row.gate = ticker;
   }
 
+  /** 公共 WS 重连后清掉陈旧 Binance 腿，避免 Gate 单独来价时用旧 localTimestamp 累加延迟 */
+  clearSource(source) {
+    for (const row of this.latest.values()) {
+      if (source === 'binance') row.binance = null;
+      else if (source === 'gate') row.gate = null;
+    }
+  }
+
   setFunding(symbol, fundingA, fundingB) {
     const sym = symbol.replace('-', '');
     if (!this.latest.has(sym)) this.latest.set(sym, { binance: null, gate: null, funding: {} });
@@ -65,17 +80,19 @@ export class QuoteAggregator {
     const bExchangeTs = legExchangeTimestampMs(g);
     if (aExchangeTs == null || bExchangeTs == null) return null;
 
+    const aReceiveMs = legReceiveTimestampMs(b);
+    const bReceiveMs = legReceiveTimestampMs(g);
+    if (aReceiveMs == null || bReceiveMs == null) return null;
+
     const timestamp = Math.max(aExchangeTs, bExchangeTs);
     const oldestLegExchangeMs = Math.min(aExchangeTs, bExchangeTs);
-    const aAgeMs = legExchangeAgeMs(b, now);
-    const bAgeMs = legExchangeAgeMs(g, now);
-    const aLatencyMs = legLatencyMs(b);
-    const bLatencyMs = legLatencyMs(g);
-    const priceAgeMs = Math.max(0, now - timestamp);
-    const legSkewMs = Math.abs(aExchangeTs - bExchangeTs);
-    const aReceiveMs = Number.isFinite(Number(b.localTimestamp)) ? Number(b.localTimestamp) : now;
-    const bReceiveMs = Number.isFinite(Number(g.localTimestamp)) ? Number(g.localTimestamp) : now;
+    const aAgeMs = legReceiveAgeMs(b, now);
+    const bAgeMs = legReceiveAgeMs(g, now);
+    const aLatencyMs = legWsDelayMs(b);
+    const bLatencyMs = legWsDelayMs(g);
     const priceReceiveMs = Math.max(aReceiveMs, bReceiveMs);
+    const priceAgeMs = Math.max(0, now - priceReceiveMs);
+    const legSkewMs = Math.abs(aReceiveMs - bReceiveMs);
     const maxWsLatencyMs = Math.max(aLatencyMs ?? 0, bLatencyMs ?? 0);
 
     return {
@@ -106,4 +123,3 @@ export class QuoteAggregator {
 }
 
 export default QuoteAggregator;
-

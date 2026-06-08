@@ -32,8 +32,12 @@ export class BinanceAdapter extends BaseAdapter {
     this.processing = false;
     this._lastPublicMessageAt = 0;
     this._subscribedAt = 0;
+    this._publicWsOpenedAt = 0;
+    this._publicWsReconnectAt = 0;
     this._feedWatchdog = null;
     this._reconnectingPublicWs = false;
+    this._publicWsGen = 0;
+    this._restRefreshPending = false;
     this._balanceCache = null;
     this._positionCache = new Map();
     this.privateWs = null;
@@ -44,7 +48,10 @@ export class BinanceAdapter extends BaseAdapter {
     this._privateWsGen = 0;
     this._privateWsReconnecting = false;
     this._privateWsReconnectAt = 0;
+    this._privateWsOpenedAt = 0;
     this.pmWsUrl = process.env.BINANCE_PM_WS_URL || 'wss://fstream.binance.com/pm/ws';
+    this._PUBLIC_WS_RECONNECT_GRACE_MS = 120_000;
+    this._PRIVATE_WS_KEEPALIVE_GRACE_MS = 90_000;
     this._dualSidePosition = null;
   }
 
@@ -111,26 +118,47 @@ export class BinanceAdapter extends BaseAdapter {
       this.ws.close();
       this.ws = null;
     }
+    const gen = ++this._publicWsGen;
     await new Promise((resolve, reject) => {
-      this.ws = new WebSocket(this.config.wsUrl);
-      this.ws.on('open', async () => {
+      const ws = new WebSocket(this.config.wsUrl);
+      this.ws = ws;
+      ws.on('open', async () => {
+        if (gen !== this._publicWsGen || this.ws !== ws) return;
         this.connected = true;
+        this._publicWsOpenedAt = Date.now();
+        this._lastPublicMessageAt = this._publicWsOpenedAt;
         await this.#flushSubscriptions({ forceResubscribe: true });
+        this.emit('PUBLIC_WS_RECONNECTED', { exchange: 'binance' });
+        await this.#refreshBookTickerViaRest('public-ws-open');
         resolve();
       });
-      this.ws.on('message', (raw) => this.handleMessage(raw));
-      this.ws.on('close', () => {
-        if (this._shuttingDown) return;
-        this.connected = false;
-        setTimeout(() => {
-          this.connectWebSocket().catch((err) => {
-            console.warn('[Binance] public WS reconnect failed:', err.message);
-          });
-        }, 1000);
+      ws.on('message', (raw) => {
+        if (gen !== this._publicWsGen || this.ws !== ws) return;
+        this.handleMessage(raw);
       });
-      this.ws.on('error', reject);
+      ws.on('close', () => {
+        if (gen !== this._publicWsGen || this.ws !== ws) return;
+        this.connected = false;
+        if (this._shuttingDown || this._reconnectingPublicWs) return;
+        this.#schedulePublicWsReconnect('close');
+      });
+      ws.on('error', (err) => {
+        if (gen !== this._publicWsGen || this.ws !== ws) return;
+        reject(err);
+      });
     });
     this.#startFeedWatchdog();
+  }
+
+  #schedulePublicWsReconnect(reason = 'unknown') {
+    if (this._shuttingDown) return;
+    const now = Date.now();
+    if (this._reconnectingPublicWs) return;
+    if (now - this._publicWsReconnectAt < 3000) return;
+    this._publicWsReconnectAt = now;
+    this.#forcePublicWsReconnect(reason).catch((err) => {
+      console.warn(`[Binance] public WS reconnect (${reason}) failed:`, err.message);
+    });
   }
 
   handleWebSocketMessage(raw) {
@@ -175,10 +203,19 @@ export class BinanceAdapter extends BaseAdapter {
       if (this._shuttingDown || this.subscribedSymbols.length === 0) return;
       const anchor = Math.max(this._lastPublicMessageAt, this._subscribedAt);
       if (!anchor) return;
+      const sinceOpen = Date.now() - (this._publicWsOpenedAt || 0);
+      if (sinceOpen < this._PUBLIC_WS_RECONNECT_GRACE_MS) return;
       const staleMs = Date.now() - anchor;
+      if (staleMs > 30_000 && staleMs <= 60_000 && !this._restRefreshPending) {
+        this._restRefreshPending = true;
+        this.#refreshBookTickerViaRest('watchdog-preflight').finally(() => {
+          this._restRefreshPending = false;
+        });
+        return;
+      }
       if (staleMs > 60_000) {
         console.warn(`[Binance] public WS stale ${staleMs}ms, forcing reconnect...`);
-        this.#forcePublicWsReconnect().catch(() => {});
+        this.#schedulePublicWsReconnect('watchdog');
       }
     }, 15_000);
     if (typeof this._feedWatchdog.unref === 'function') {
@@ -193,7 +230,7 @@ export class BinanceAdapter extends BaseAdapter {
     }
   }
 
-  async #forcePublicWsReconnect() {
+  async #forcePublicWsReconnect(reason = 'unknown') {
     if (this._reconnectingPublicWs || this._shuttingDown) return;
     this._reconnectingPublicWs = true;
     try {
@@ -203,8 +240,42 @@ export class BinanceAdapter extends BaseAdapter {
         this.ws = null;
       }
       await this.connectWebSocket();
+      console.log(`[Binance] public WS reconnected (${reason})`);
     } finally {
       this._reconnectingPublicWs = false;
+    }
+  }
+
+  /** 重连后 bookTicker 可能长时间不推（盘口未变）；REST 立即补一条新鲜价 */
+  async #refreshBookTickerViaRest(reason = 'rest') {
+    if (!this.subscribedSymbols.length) return;
+    for (const symbol of this.subscribedSymbols) {
+      try {
+        const exSymbol = this.toExchangeSymbol(symbol);
+        const { data } = await axios.get(`${this.config.restUrl}/fapi/v1/ticker/bookTicker`, {
+          params: { symbol: exSymbol },
+          timeout: this.config.timeout || 5000
+        });
+        const bid = Number(data.bidPrice);
+        const ask = Number(data.askPrice);
+        if (!(Number.isFinite(bid) && bid > 0 && Number.isFinite(ask) && ask > 0)) continue;
+        const localTs = Date.now();
+        this._lastPublicMessageAt = localTs;
+        this.emit(EventTypes.TICKER, {
+          symbol: this.normalizeSymbol(data.symbol || exSymbol),
+          bid,
+          ask,
+          timestamp: localTs,
+          serverTimestamp: null,
+          localTimestamp: localTs,
+          wsDelayMs: 0,
+          source: 'binance',
+          viaRest: true,
+          restReason: reason
+        });
+      } catch (err) {
+        console.warn(`[Binance] REST bookTicker refresh ${symbol} (${reason}):`, err.message);
+      }
     }
   }
 
@@ -242,18 +313,28 @@ export class BinanceAdapter extends BaseAdapter {
       const ask = Number(payload.a);
       if (!(Number.isFinite(bid) && bid > 0 && Number.isFinite(ask) && ask > 0)) return;
 
-      const serverTimestamp = payload.E ?? payload.T ?? null;
-      const timestamp = serverTimestamp != null
-        ? (Number(serverTimestamp) > 1e12 ? Number(serverTimestamp) : Number(serverTimestamp) * 1000)
-        : Date.now();
-      this._lastPublicMessageAt = Date.now();
+      const localTs = Date.now();
+      const rawEventTs = payload.E ?? payload.T ?? null;
+      const exchangeMsRaw = rawEventTs != null && Number.isFinite(Number(rawEventTs))
+        ? (Number(rawEventTs) > 1e12 ? Number(rawEventTs) : Number(rawEventTs) * 1000)
+        : null;
+      let exchangeMs = exchangeMsRaw ?? localTs;
+      let wsDelayMs = exchangeMsRaw != null ? Math.max(0, localTs - exchangeMsRaw) : 0;
+      // bookTicker 偶发 E/T 长期不刷新但 bid/ask 在变：异常 wsDelay 时用本机接收时间
+      const MAX_SANE_WS_DELAY_MS = 30_000;
+      if (exchangeMsRaw != null && wsDelayMs > MAX_SANE_WS_DELAY_MS) {
+        exchangeMs = localTs;
+        wsDelayMs = 0;
+      }
+      this._lastPublicMessageAt = localTs;
       const ticker = {
         symbol: this.normalizeSymbol(payload.s),
         bid,
         ask,
-        timestamp,
-        serverTimestamp,
-        localTimestamp: Date.now(),
+        timestamp: exchangeMs,
+        serverTimestamp: rawEventTs,
+        localTimestamp: localTs,
+        wsDelayMs,
         source: 'binance'
       };
       this.emit(EventTypes.TICKER, ticker);
@@ -600,7 +681,7 @@ export class BinanceAdapter extends BaseAdapter {
   }
 
   async #keepaliveListenKey() {
-    if (!this.listenKey || this._privateWsReconnecting) return;
+    if (!this.listenKey || !this.privateWsConnected || this._privateWsReconnecting) return;
     await this.#signedRequest('PUT', '/papi/v1/listenKey', {});
   }
 
@@ -628,6 +709,9 @@ export class BinanceAdapter extends BaseAdapter {
     const ms = Math.max(1, this.listenKeyKeepaliveMin) * 60 * 1000;
     this._listenKeyTimer = setInterval(() => {
       this.#keepaliveListenKey().catch((err) => {
+        if (!this.privateWsConnected || this._privateWsReconnecting) return;
+        const sinceOpen = Date.now() - (this._privateWsOpenedAt || 0);
+        if (sinceOpen < this._PRIVATE_WS_KEEPALIVE_GRACE_MS) return;
         console.warn('[Binance] listenKey keepalive failed:', err.message);
         if (this.#isListenKeyMissingError(err)) {
           this.#schedulePrivateWsReconnect('keepalive');
@@ -718,6 +802,8 @@ export class BinanceAdapter extends BaseAdapter {
     try {
       await this.#teardownPrivateWs({ deleteListenKey: false });
       await this.#connectPrivateWs();
+      // 私有 WS 重连后补刷公共 bookTicker，避免 QuoteAggregator 仍用重连前的旧时间戳
+      await this.#refreshBookTickerViaRest(`after-private-${reason}`);
       console.log(`[Binance] private WS reconnected (${reason})`);
     } finally {
       this._privateWsReconnecting = false;
@@ -756,6 +842,7 @@ export class BinanceAdapter extends BaseAdapter {
       ws.on('open', async () => {
         if (gen !== this._privateWsGen || this.privateWs !== ws) return;
         this.privateWsConnected = true;
+        this._privateWsOpenedAt = Date.now();
         try {
           await this.syncAccountSnapshot({ silent: true });
           this.emit('PRIVATE_WS_CONNECTED', { exchange: 'binance' });

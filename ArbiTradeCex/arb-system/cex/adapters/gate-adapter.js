@@ -307,10 +307,13 @@ export class GateAdapter extends BaseAdapter {
       const ask = Number(r.a);
       if (!(Number.isFinite(bid) && bid > 0 && Number.isFinite(ask) && ask > 0)) return;
 
+      const localTs = Date.now();
       const serverTimestamp = r.t ?? null;
-      const timestamp = serverTimestamp != null
+      const exchangeMsRaw = serverTimestamp != null && Number.isFinite(Number(serverTimestamp))
         ? (Number(serverTimestamp) > 1e12 ? Number(serverTimestamp) : Number(serverTimestamp) * 1000)
-        : Date.now();
+        : null;
+      const timestamp = exchangeMsRaw ?? localTs;
+      const wsDelayMs = exchangeMsRaw != null ? Math.max(0, localTs - exchangeMsRaw) : 0;
 
       const symbol = this.normalizeSymbol(this.toCompactSymbol(contract));
       this.emit(EventTypes.TICKER, {
@@ -319,7 +322,8 @@ export class GateAdapter extends BaseAdapter {
         ask,
         timestamp,
         serverTimestamp,
-        localTimestamp: Date.now(),
+        localTimestamp: localTs,
+        wsDelayMs,
         source: 'gate'
       });
     } catch {
