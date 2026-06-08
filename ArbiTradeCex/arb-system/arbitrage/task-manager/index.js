@@ -21,6 +21,7 @@ export class TaskManager {
     this.fundingTimer = null;
     this.maintenanceTimer = null;
     this.positionReconcileTimer = null;
+    this.marketTimingTimer = null;
     /** 同 symbol 同一事件循环内合并为一次 onTick（来价驱动，非定频） */
     this._priceTickCoalesce = new Set();
     this._symbolSet = new Set();
@@ -105,11 +106,33 @@ export class TaskManager {
       this.positionReconcileTimer.unref();
     }
 
+    const timingMs = Number(this.config.dashboard?.broadcastIntervalMs) > 0
+      ? Number(this.config.dashboard.broadcastIntervalMs)
+      : 1000;
+    this.marketTimingTimer = setInterval(() => {
+      this.#refreshAllMarketTiming();
+    }, timingMs);
+    if (typeof this.marketTimingTimer.unref === 'function') {
+      this.marketTimingTimer.unref();
+    }
+
     console.log(
       `[TaskManager] started symbols=${strat.symbols.join(',')} trading=${this.tradingEnabled}`
       + ` priceMode=ws-driven(any-leg) windowSeconds=${strat.windowSeconds}`
       + ` minDataPoints=${strat.minDataPoints} enforceLatency=${this.sharedResources.enforceLatency}`
     );
+  }
+
+  /** 定频从 QuoteAggregator 重算两腿 age/lat，不依赖哪条腿刚触发 onTick */
+  #refreshAllMarketTiming() {
+    const agg = this.sharedResources?.quoteAggregator;
+    const bridge = this.sharedResources?.dashboardBridge;
+    if (!agg || !bridge) return;
+    for (const sym of this.config.strategy.symbols || []) {
+      const key = compactSymbol(sym);
+      const tick = agg.buildTick(key);
+      if (tick) bridge.refreshMarketTiming({ symbol: key, tick });
+    }
   }
 
   /** WS 来价驱动 onTick；同 symbol 同批 WS 合并为一次，避免无意义重入 */
@@ -128,6 +151,7 @@ export class TaskManager {
     if (this.fundingTimer) clearInterval(this.fundingTimer);
     if (this.maintenanceTimer) clearInterval(this.maintenanceTimer);
     if (this.positionReconcileTimer) clearInterval(this.positionReconcileTimer);
+    if (this.marketTimingTimer) clearInterval(this.marketTimingTimer);
     await this.sharedResources?.shutdown();
   }
 }

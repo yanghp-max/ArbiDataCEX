@@ -94,6 +94,8 @@ export class DashboardBridge {
       bAgeMs: null,
       aLatencyMs: null,
       bLatencyMs: null,
+      aLocalTimestamp: null,
+      bLocalTimestamp: null,
       aBid: null,
       aAsk: null,
       bBid: null,
@@ -278,6 +280,8 @@ export class DashboardBridge {
       sym.bAgeMs = null;
       sym.aLatencyMs = null;
       sym.bLatencyMs = null;
+      sym.aLocalTimestamp = null;
+      sym.bLocalTimestamp = null;
       sym.updatedAt = Date.now();
       this.state.symbols[symbol] = sym;
       this.#markMarketDirty(symbol);
@@ -291,6 +295,8 @@ export class DashboardBridge {
     sym.bAgeMs = tick.bAgeMs ?? null;
     sym.aLatencyMs = tick.aLatencyMs ?? null;
     sym.bLatencyMs = tick.bLatencyMs ?? null;
+    sym.aLocalTimestamp = tick.aLocalTimestamp ?? null;
+    sym.bLocalTimestamp = tick.bLocalTimestamp ?? null;
     sym.aBid = tick.aBid;
     sym.aAsk = tick.aAsk;
     sym.bBid = tick.bBid;
@@ -327,6 +333,32 @@ export class DashboardBridge {
       return;
     }
 
+    this.#markMarketDirty(symbol);
+  }
+
+  /** 定频刷新 leg/lat/priceAge，避免 any-leg 来价时仅触发腿显示 0ms */
+  refreshMarketTiming({ symbol, tick }) {
+    if (!this.enabled || !tick) return;
+    const sym = this.state.symbols[symbol];
+    if (!sym || sym.aBid == null) return;
+
+    sym.priceAgeMs = tick.priceAgeMs;
+    sym.aAgeMs = tick.aAgeMs ?? null;
+    sym.bAgeMs = tick.bAgeMs ?? null;
+    sym.aLatencyMs = tick.aLatencyMs ?? null;
+    sym.bLatencyMs = tick.bLatencyMs ?? null;
+    sym.aLocalTimestamp = tick.aLocalTimestamp ?? null;
+    sym.bLocalTimestamp = tick.bLocalTimestamp ?? null;
+
+    if (this.enforceLatency) {
+      const stale = !tickLatencyPass(tick, this.latencyLimits);
+      if (sym.windowReady) {
+        sym.status = stale ? 'stale' : 'ready';
+      } else if (sym.status !== 'waiting_quotes') {
+        sym.status = stale ? 'stale' : 'collecting';
+      }
+    }
+    sym.updatedAt = Date.now();
     this.#markMarketDirty(symbol);
   }
 

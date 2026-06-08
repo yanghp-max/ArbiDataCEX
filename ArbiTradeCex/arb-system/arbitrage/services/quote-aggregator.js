@@ -1,8 +1,9 @@
 /**
  * 合并 A/B ticker → tick
- * - priceAgeMs / legSkewMs：基于本机接收时间（localTimestamp），反映真实行情新鲜度
- * - aAgeMs / bAgeMs：各腿接收年龄（now - localTimestamp）
- * - aLatencyMs / bLatencyMs：WS 收到时的传输延迟（wsDelayMs，在 adapter 入站时固定）
+ * - aAgeMs / bAgeMs：各腿距上次本机接收的时间（now - localTimestamp）
+ * - priceAgeMs：取 max(aAgeMs, bAgeMs) — 最旧腿年龄（any-leg 触发时不会恒为 0）
+ * - priceReceiveMs：取 min(A/B localTimestamp) — 最旧腿接收时刻
+ * - aLatencyMs / bLatencyMs：WS 入站时固定的 wsDelayMs
  * - timestamp：两腿交易所时间取 max（adapter 已对异常 E/T 做修正）
  */
 
@@ -86,8 +87,8 @@ export class QuoteAggregator {
     const bAgeMs = legReceiveAgeMs(g, now);
     const aLatencyMs = legWsDelayMs(b);
     const bLatencyMs = legWsDelayMs(g);
-    const priceReceiveMs = Math.max(aReceiveMs, bReceiveMs);
-    const priceAgeMs = Math.max(0, now - priceReceiveMs);
+    const priceReceiveMs = Math.min(aReceiveMs, bReceiveMs);
+    const priceAgeMs = Math.max(aAgeMs ?? 0, bAgeMs ?? 0);
     const legSkewMs = Math.abs(aReceiveMs - bReceiveMs);
     const maxWsLatencyMs = Math.max(
       aLatencyMs ?? -1,

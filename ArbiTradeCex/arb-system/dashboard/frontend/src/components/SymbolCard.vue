@@ -1,11 +1,41 @@
 <script setup>
-defineProps({
+import { computed, onMounted, onUnmounted, ref } from 'vue';
+
+const props = defineProps({
   card: { type: Object, required: true },
   showLatency: { type: Boolean, default: true },
   fmt: { type: Function, required: true },
   fmtPct: { type: Function, required: true },
   spreadClass: { type: Function, required: true },
   statusLabel: { type: Function, required: true }
+});
+
+const nowMs = ref(Date.now());
+let tickTimer = null;
+
+onMounted(() => {
+  tickTimer = setInterval(() => {
+    nowMs.value = Date.now();
+  }, 200);
+});
+
+onUnmounted(() => {
+  if (tickTimer) clearInterval(tickTimer);
+});
+
+function legAgeMs(localTs) {
+  const ts = Number(localTs);
+  if (!Number.isFinite(ts) || ts <= 0) return null;
+  return Math.max(0, nowMs.value - ts);
+}
+
+const aAgeLive = computed(() => legAgeMs(props.card.aLocalTimestamp));
+const bAgeLive = computed(() => legAgeMs(props.card.bLocalTimestamp));
+
+const priceAgeLive = computed(() => {
+  const ages = [aAgeLive.value, bAgeLive.value].filter((v) => v != null);
+  if (!ages.length) return props.card.priceAgeMs ?? null;
+  return Math.max(...ages);
 });
 </script>
 
@@ -53,15 +83,15 @@ defineProps({
       <template v-if="showLatency">
         <div class="meta-line">
           <span class="meta-label">Price age</span>
-          <span class="meta-value">{{ fmt(card.priceAgeMs, 0) }} ms</span>
+          <span class="meta-value">{{ fmt(priceAgeLive, 0) }} ms</span>
         </div>
         <div class="meta-line">
           <span class="meta-label">Leg A age (Binance)</span>
-          <span class="meta-value">{{ fmt(card.aAgeMs, 0) }} ms</span>
+          <span class="meta-value">{{ fmt(aAgeLive, 0) }} ms</span>
         </div>
         <div class="meta-line">
           <span class="meta-label">Leg B age (Gate)</span>
-          <span class="meta-value">{{ fmt(card.bAgeMs, 0) }} ms</span>
+          <span class="meta-value">{{ fmt(bAgeLive, 0) }} ms</span>
         </div>
         <div class="meta-line">
           <span class="meta-label">Lat A (Binance)</span>

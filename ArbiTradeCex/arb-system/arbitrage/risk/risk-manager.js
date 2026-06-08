@@ -246,7 +246,7 @@ export function latencyChecksEnabled(limits) {
     && limits.maxPriceAgeMs !== Infinity;
 }
 
-/** 组合行情：距最近一次任一侧本机接收时间（now - max(A_recv,B_recv)） */
+/** 组合行情：最旧腿接收年龄 max(aAgeMs, bAgeMs) */
 export function tickExchangeAgePass(tick, maxPriceAgeMs) {
   if (!Number.isFinite(maxPriceAgeMs)) return true;
   return tick.priceAgeMs <= maxPriceAgeMs;

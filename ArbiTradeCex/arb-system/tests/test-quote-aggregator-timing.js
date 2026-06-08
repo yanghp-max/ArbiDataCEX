@@ -31,6 +31,7 @@ assert.equal(tick.maxWsLatencyMs, 12);
 assert.ok(tick.aAgeMs <= 60, `aAgeMs should be receive-based (~50ms), got ${tick.aAgeMs}`);
 assert.ok(tick.bAgeMs <= 30, `bAgeMs should be receive-based (~20ms), got ${tick.bAgeMs}`);
 assert.ok(tick.legSkewMs <= 60, `legSkewMs should be receive delta, got ${tick.legSkewMs}`);
-assert.ok(tick.priceAgeMs <= 60, `priceAgeMs should follow freshest receive, got ${tick.priceAgeMs}`);
+assert.ok(tick.priceAgeMs >= 45, `priceAgeMs should be stalest leg (~50ms), got ${tick.priceAgeMs}`);
+assert.ok(tick.priceAgeMs <= 70, `priceAgeMs should be stalest leg (~50ms), got ${tick.priceAgeMs}`);
 
 console.log('test-quote-aggregator-timing: OK');
