@@ -49,8 +49,8 @@
     "processHealthIntervalMs": 30000,
     "minQtyJson": "config/min-order-qty.json",
     "windowSeconds": 600,
-    "enforceLatency": false,
-    "useMockAccount": true
+    "enforceLatency": true,
+    "useMockAccount": false
   },
   "dashboard": {
     "enabled": true,
