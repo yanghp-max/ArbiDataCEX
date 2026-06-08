@@ -2,7 +2,7 @@
   "strategy": {
     "minDataPoints": 50,
     "zOpen": 2.0,
-    "zClose": 2.0,
+    "zClose": 1.0,
     "orderUsd": 5,
     "defaultLeverage": 1,
     "minOrderLotQtySymbols": [],
@@ -48,7 +48,7 @@
     "processLastExitJson": "logs/last-exit.json",
     "processHealthIntervalMs": 30000,
     "minQtyJson": "config/min-order-qty.json",
-    "windowSeconds": 3600,
+    "windowSeconds": 600,
     "enforceLatency": true,
     "useMockAccount": false
   },
