@@ -38,6 +38,8 @@ export class DashboardBridge {
     this.server = null;
     this.accountServices = null;
     this._flushInterval = null;
+    this._marketFlushTimer = null;
+    this._marketPushThrottleMs = 200;
     this._dirtySymbols = new Set();
     this._dirtyProgress = false;
     this._dirtyLogs = false;
@@ -201,6 +203,10 @@ export class DashboardBridge {
       clearInterval(this._flushInterval);
       this._flushInterval = null;
     }
+    if (this._marketFlushTimer) {
+      clearTimeout(this._marketFlushTimer);
+      this._marketFlushTimer = null;
+    }
     await this.server?.stop();
   }
 
@@ -269,6 +275,28 @@ export class DashboardBridge {
     this._dirtyProgress = false;
   }
 
+  /** 行情有更新时尽快推前端（200ms 节流），避免等 1s 定频导致 age 起步就几百 ms */
+  #scheduleMarketFlush() {
+    if (this._marketFlushTimer) return;
+    this._marketFlushTimer = setTimeout(() => {
+      this._marketFlushTimer = null;
+      this.#flushMarketUpdate();
+    }, this._marketPushThrottleMs);
+    if (typeof this._marketFlushTimer.unref === 'function') {
+      this._marketFlushTimer.unref();
+    }
+  }
+
+  #applyTickTiming(sym, tick) {
+    sym.aLocalTimestamp = tick.aLocalTimestamp ?? null;
+    sym.bLocalTimestamp = tick.bLocalTimestamp ?? null;
+    sym.priceAgeMs = tick.priceAgeMs;
+    sym.aAgeMs = tick.aAgeMs ?? null;
+    sym.bAgeMs = tick.bAgeMs ?? null;
+    sym.aLatencyMs = tick.aLatencyMs ?? null;
+    sym.bLatencyMs = tick.bLatencyMs ?? null;
+  }
+
   updateMarketSnapshot({ symbol, tick, spreads, signal, lock }) {
     if (!this.enabled) return;
 
@@ -285,14 +313,13 @@ export class DashboardBridge {
       sym.updatedAt = Date.now();
       this.state.symbols[symbol] = sym;
       this.#markMarketDirty(symbol);
+      this.#scheduleMarketFlush();
       return;
     }
 
     const stale = this.enforceLatency && !tickLatencyPass(tick, this.latencyLimits);
     sym.status = stale ? 'stale' : (signal?.windowReady ? 'ready' : 'collecting');
-    // 价格/价差随 onTick 更新；leg age / lat 仅由 refreshMarketTiming 定频写入，避免 any-leg 触发腿恒为 0
-    sym.aLocalTimestamp = tick.aLocalTimestamp ?? null;
-    sym.bLocalTimestamp = tick.bLocalTimestamp ?? null;
+    this.#applyTickTiming(sym, tick);
     sym.aBid = tick.aBid;
     sym.aAsk = tick.aAsk;
     sym.bBid = tick.bBid;
@@ -326,25 +353,21 @@ export class DashboardBridge {
       this.state.progress.symbols[symbol] = prog;
       this.#recalcOverallProgress();
       this.#markMarketDirty(symbol, { progress: true });
+      this.#scheduleMarketFlush();
       return;
     }
 
     this.#markMarketDirty(symbol);
+    this.#scheduleMarketFlush();
   }
 
-  /** 定频刷新 leg/lat/priceAge，避免 any-leg 来价时仅触发腿显示 0ms */
+  /** 定频刷新 leg/lat（两腿 age 在两次来价之间继续涨） */
   refreshMarketTiming({ symbol, tick }) {
     if (!this.enabled || !tick) return;
     const sym = this.state.symbols[symbol];
     if (!sym || sym.aBid == null) return;
 
-    sym.priceAgeMs = tick.priceAgeMs;
-    sym.aAgeMs = tick.aAgeMs ?? null;
-    sym.bAgeMs = tick.bAgeMs ?? null;
-    sym.aLatencyMs = tick.aLatencyMs ?? null;
-    sym.bLatencyMs = tick.bLatencyMs ?? null;
-    sym.aLocalTimestamp = tick.aLocalTimestamp ?? null;
-    sym.bLocalTimestamp = tick.bLocalTimestamp ?? null;
+    this.#applyTickTiming(sym, tick);
 
     if (this.enforceLatency) {
       const stale = !tickLatencyPass(tick, this.latencyLimits);
@@ -356,6 +379,7 @@ export class DashboardBridge {
     }
     sym.updatedAt = Date.now();
     this.#markMarketDirty(symbol);
+    this.#scheduleMarketFlush();
   }
 
   recordTrade(tradeRow, summary = null) {
