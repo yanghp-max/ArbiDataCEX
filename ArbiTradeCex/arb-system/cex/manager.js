@@ -164,13 +164,16 @@ export class CexManager {
   static async createDefault(strategyConfig = {}, options = {}) {
     const mgr = new CexManager();
     const enablePublicStream = options.enablePublicStream !== false;
+    const enablePrivateAccountStream = options.enablePrivateAccountStream
+      ?? (enablePublicStream === false);
     const binance = new BinanceAdapter({
       listenKeyKeepaliveMin: strategyConfig.listenKeyKeepaliveMin ?? 30,
       enablePublicStream
     });
     const gate = new GateAdapter({
       accountMode: strategyConfig.gateAccountMode,
-      enablePublicStream
+      enablePublicStream,
+      enablePrivateAccountStream
     });
     await Promise.all([binance.connect(), gate.connect()]);
     mgr.register('binance', binance);

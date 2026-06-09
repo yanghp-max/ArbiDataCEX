@@ -14,6 +14,7 @@ const MSG_WS_RECONNECTED = 'wsReconnected';
 const MSG_DIAG = 'diag';
 
 export const MARKET_TICKER_FLUSH = 'marketTickerFlush';
+export const WORKER_EXIT = 'workerExit';
 
 const CMD_INIT = 'init';
 const CMD_SUBSCRIBE = 'subscribeTicker';
@@ -77,6 +78,8 @@ export class CexMarketWorkerClient extends EventEmitter {
         console.warn(`[CexMarketWorkerClient] worker exited code=${code} signal=${signal}`);
       }
       if (!this._closing) {
+        this.latestTickerByKey.clear();
+        this.emit(WORKER_EXIT, { reason: 'worker-exit', code, signal });
         setTimeout(() => {
           this.initialize()
             .then(() => this._restoreSubscriptions())

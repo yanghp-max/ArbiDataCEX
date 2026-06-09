@@ -3,7 +3,7 @@
  */
 import { EventEmitter } from 'events';
 import { EventTypes } from '../../cex/types.js';
-import { MARKET_TICKER_FLUSH } from './cex-market-worker-client.js';
+import { MARKET_TICKER_FLUSH, WORKER_EXIT } from './cex-market-worker-client.js';
 
 export class CexPriceHub extends EventEmitter {
   constructor({ marketWorker = null, binanceSource = null, gateAdapter = null } = {}) {
@@ -20,6 +20,8 @@ export class CexPriceHub extends EventEmitter {
     this._onMarketRefresh = null;
     this._reconnectHandler = null;
     this._workerFlushHandler = null;
+    this._workerExitHandler = null;
+    this._workerDisconnectHandler = null;
   }
 
   async start({
@@ -39,6 +41,24 @@ export class CexPriceHub extends EventEmitter {
       });
     };
 
+    this._workerExitHandler = () => {
+      for (const exchange of ['binance', 'gate']) {
+        this._onMarketRefresh?.({
+          exchange,
+          reason: 'worker-exit',
+          clearCache: true
+        });
+      }
+    };
+
+    this._workerDisconnectHandler = (payload = {}) => {
+      this._onMarketRefresh?.({
+        exchange: payload.exchange === 'gate' ? 'gate' : 'binance',
+        reason: 'ws-disconnected',
+        clearCache: true
+      });
+    };
+
     if (this._useWorker) {
       if (!this.marketWorker?.isWorkerAvailable?.()) {
         throw new Error('CEX market worker configured but unavailable (main adapters have no public WS)');
@@ -50,6 +70,8 @@ export class CexPriceHub extends EventEmitter {
       };
       this.marketWorker.on(MARKET_TICKER_FLUSH, this._workerFlushHandler);
       this.marketWorker.on('PUBLIC_WS_RECONNECTED', this._reconnectHandler);
+      this.marketWorker.on(WORKER_EXIT, this._workerExitHandler);
+      this.marketWorker.on(EventTypes.DISCONNECTED, this._workerDisconnectHandler);
       await this.marketWorker.subscribe(adapterSymbols);
       this._started = true;
       console.log(`[CexPriceHub] started mode=worker symbols=${adapterSymbols.length}`);
@@ -106,7 +128,11 @@ export class CexPriceHub extends EventEmitter {
     if (this._workerFlushHandler) {
       this.marketWorker?.off(MARKET_TICKER_FLUSH, this._workerFlushHandler);
       this.marketWorker?.off('PUBLIC_WS_RECONNECTED', this._reconnectHandler);
+      this.marketWorker?.off(WORKER_EXIT, this._workerExitHandler);
+      this.marketWorker?.off(EventTypes.DISCONNECTED, this._workerDisconnectHandler);
       this._workerFlushHandler = null;
+      this._workerExitHandler = null;
+      this._workerDisconnectHandler = null;
     }
 
     for (const [, { adapter, handler }] of this._handlers) {

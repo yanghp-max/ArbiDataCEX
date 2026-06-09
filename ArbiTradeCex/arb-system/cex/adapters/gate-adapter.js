@@ -28,6 +28,15 @@ export class GateAdapter extends BaseAdapter {
     this.id = 'gate';
     /** 公共 book_ticker WS；主进程用 market worker 时可关 */
     this.enablePublicStream = config.enablePublicStream !== false;
+    /** worker 模式下主进程单独 fx-ws，仅 balances/positions（不订 book_ticker） */
+    this.enablePrivateAccountStream = config.enablePrivateAccountStream
+      ?? (config.enablePublicStream === false);
+    /** 与 this.ws（公共行情）分离的账户专用连接 */
+    this.accountWs = null;
+    this._privateAccountSymbols = [];
+    this._reconnectingAccountWs = false;
+    this._accountWsReconnectAttempts = 0;
+    this._maxAccountWsReconnectAttempts = 20;
     this.accountMode = String(
       config.accountMode || process.env.GATE_ACCOUNT_MODE || 'single'
     ).toLowerCase();
@@ -39,6 +48,7 @@ export class GateAdapter extends BaseAdapter {
     this._publicReconnectAttempts = 0;
     this._maxPublicReconnectAttempts = 20;
     this._publicWsReconnectAt = 0;
+    this._publicWsEverOpened = false;
     this._nextReconnectAllowedAt = 0;
     this._restRefreshPending = false;
     this._shuttingDown = false;
@@ -122,6 +132,33 @@ export class GateAdapter extends BaseAdapter {
     return Boolean(this.enablePublicStream && this.ws?.readyState === WebSocket.OPEN);
   }
 
+  /** single 模式下私有 futures 订阅所用的 fx-ws（公共开则用 this.ws，否则 accountWs） */
+  #getPrivateFxWs() {
+    if (this.enablePublicStream) return this.ws;
+    return this.accountWs;
+  }
+
+  #isPrivateFxOpen() {
+    const ws = this.#getPrivateFxWs();
+    return ws?.readyState === WebSocket.OPEN;
+  }
+
+  #privateAccountStreamReady() {
+    if (this.#isUnifiedMode()) {
+      return this.unifiedWsConnected
+        || (this.#isPrivateFxOpen() && this.privatePositionsSubscribed);
+    }
+    if (!this.#isPrivateFxOpen()) return false;
+    return this.privateBalancesSubscribed || this.privatePositionsSubscribed;
+  }
+
+  #emitPrivateWsConnected() {
+    this.emit('PRIVATE_WS_CONNECTED', {
+      exchange: 'gate',
+      positionsReady: this.privatePositionsSubscribed
+    });
+  }
+
   async reconnectWebSocket() {
     if (!this.enablePublicStream || this._reconnectingPublicWs || this._shuttingDown) return;
     this._reconnectingPublicWs = true;
@@ -162,12 +199,21 @@ export class GateAdapter extends BaseAdapter {
     this.#stopWsIdleMonitor();
     this.#stopReconnectRecovery();
     await this.stopPrivateAccountStream();
+    this.#teardownAccountWebSocket();
     if (this.ws) {
       this.ws.removeAllListeners();
       this.ws.close();
       this.ws = null;
     }
     await super.disconnect();
+  }
+
+  #teardownAccountWebSocket() {
+    if (this.accountWs) {
+      this.accountWs.removeAllListeners();
+      this.accountWs.close();
+      this.accountWs = null;
+    }
   }
 
   #signV4({ method, path, queryString, body, timestamp }) {
@@ -279,17 +325,20 @@ export class GateAdapter extends BaseAdapter {
               console.warn('[Gate] resubscribe balances failed:', err.message);
             });
           }
-          if (this.privatePositionsSubscribed || this.privateBalancesSubscribed || this.unifiedWsConnected) {
-            this.emit('PRIVATE_WS_CONNECTED', {
-              exchange: 'gate',
-              positionsReady: this.privatePositionsSubscribed
-            });
+          if (this.#privateAccountStreamReady()) {
+            this.#emitPrivateWsConnected();
           }
         }
         this.#startFeedWatchdog();
         this.#startWsIdleMonitor();
         this._lastWsRawMessageAt = Date.now();
-        this.emit('PUBLIC_WS_RECONNECTED', { exchange: 'gate', reason: 'public-ws-open', clearCache: false });
+        const clearCache = this._publicWsEverOpened;
+        this._publicWsEverOpened = true;
+        this.emit('PUBLIC_WS_RECONNECTED', {
+          exchange: 'gate',
+          reason: 'public-ws-open',
+          clearCache
+        });
         resolve();
       });
       ws.on('message', (raw) => {
@@ -318,6 +367,77 @@ export class GateAdapter extends BaseAdapter {
           });
         }, delay);
       });
+      ws.on('error', (err) => {
+        if (ws.readyState === WebSocket.CONNECTING) {
+          reject(err);
+        }
+      });
+    });
+  }
+
+  /** worker 模式：主进程单独 fx-ws，只用于 futures.balances / futures.positions */
+  async #connectAccountWebSocket() {
+    if (this.enablePublicStream || !this.enablePrivateAccountStream || this._shuttingDown) return;
+    const wsState = this.accountWs?.readyState;
+    if (wsState === WebSocket.OPEN || wsState === WebSocket.CONNECTING) return;
+
+    this.#teardownAccountWebSocket();
+
+    await new Promise((resolve, reject) => {
+      const ws = new WebSocket(this.config.wsUrl);
+      this.accountWs = ws;
+
+      ws.on('open', async () => {
+        this._accountWsReconnectAttempts = 0;
+        try {
+          const resubscribe = this.privateBalancesSubscribed || this.privatePositionsSubscribed;
+          if (!this.#isUnifiedMode() && this.privateBalancesSubscribed) {
+            await this.#subscribeBalances();
+          }
+          if (this.privatePositionsSubscribed) {
+            await this.#subscribePositions(this._privateAccountSymbols);
+          }
+          console.log('[Gate] account fx-ws connected (worker mode: balances/positions only)');
+          if (resubscribe && this.#privateAccountStreamReady()) {
+            this.#emitPrivateWsConnected();
+          }
+          resolve();
+        } catch (err) {
+          reject(err);
+        }
+      });
+
+      ws.on('message', (raw) => this.#handleAccountWsMessage(raw));
+
+      ws.on('close', (code) => {
+        if (this._shuttingDown || this._reconnectingAccountWs) return;
+
+        if (this._accountWsReconnectAttempts >= this._maxAccountWsReconnectAttempts) {
+          console.error(
+            `[Gate] account fx-ws max reconnect attempts (${this._maxAccountWsReconnectAttempts}), retry in ${this._reconnectRecoveryMs / 1000}s`
+          );
+          this.emit('PRIVATE_WS_DISCONNECTED', { exchange: 'gate' });
+          setTimeout(() => {
+            this._accountWsReconnectAttempts = 0;
+            this.#connectAccountWebSocket().catch(() => {});
+          }, this._reconnectRecoveryMs);
+          return;
+        }
+
+        this._accountWsReconnectAttempts += 1;
+        const delay = Math.min(1000 * (2 ** (this._accountWsReconnectAttempts - 1)), 30_000);
+        console.warn(
+          `[Gate] account fx-ws closed (code=${code}), reconnect in ${delay}ms `
+          + `(${this._accountWsReconnectAttempts}/${this._maxAccountWsReconnectAttempts})`
+        );
+        this.emit('PRIVATE_WS_DISCONNECTED', { exchange: 'gate' });
+        setTimeout(() => {
+          this.#connectAccountWebSocket().catch((err) => {
+            console.warn('[Gate] account fx-ws reconnect failed:', err.message);
+          });
+        }, delay);
+      });
+
       ws.on('error', (err) => {
         if (ws.readyState === WebSocket.CONNECTING) {
           reject(err);
@@ -468,14 +588,8 @@ export class GateAdapter extends BaseAdapter {
   handleMessage(raw) {
     try {
       const msg = JSON.parse(raw.toString());
-      if (msg.channel === 'futures.positions' && msg.event === 'update') {
-        this.#handlePositionsUpdate(msg.result);
-        return;
-      }
-      if (msg.channel === 'futures.balances' && msg.event === 'update') {
-        this.#handleFuturesBalancesUpdate(msg.result);
-        return;
-      }
+      if (this.#handlePrivateChannelMessage(msg)) return;
+      if (!this.enablePublicStream) return;
       if (msg.channel !== 'futures.book_ticker' || msg.event !== 'update') return;
 
       const r = msg.result || {};
@@ -506,6 +620,28 @@ export class GateAdapter extends BaseAdapter {
     } catch {
       // ignore
     }
+  }
+
+  #handleAccountWsMessage(raw) {
+    try {
+      const msg = JSON.parse(raw.toString());
+      this.#handlePrivateChannelMessage(msg);
+    } catch {
+      // ignore
+    }
+  }
+
+  /** @returns {boolean} handled */
+  #handlePrivateChannelMessage(msg) {
+    if (msg.channel === 'futures.positions' && msg.event === 'update') {
+      this.#handlePositionsUpdate(msg.result);
+      return true;
+    }
+    if (msg.channel === 'futures.balances' && msg.event === 'update') {
+      this.#handleFuturesBalancesUpdate(msg.result);
+      return true;
+    }
+    return false;
   }
 
   async getFundingRate(symbol) {
@@ -941,10 +1077,14 @@ export class GateAdapter extends BaseAdapter {
   }
 
   async #reconnectPrivateAccount() {
-    const symbols = this.subscribed;
-    await this.stopPrivateAccountStream();
-    this.privatePositionsSubscribed = false;
-    await this.startPrivateAccountStream(symbols);
+    const symbols = this._privateAccountSymbols.length ? this._privateAccountSymbols : this.subscribed;
+    this._reconnectingAccountWs = true;
+    try {
+      await this.stopPrivateAccountStream();
+      await this.startPrivateAccountStream(symbols);
+    } finally {
+      this._reconnectingAccountWs = false;
+    }
   }
 
   #handleFuturesBalancesUpdate(result) {
@@ -995,12 +1135,13 @@ export class GateAdapter extends BaseAdapter {
   }
 
   async #subscribeBalances() {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    const ws = this.#getPrivateFxWs();
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
     const userId = await this.#fetchUserId();
     const time = Math.floor(Date.now() / 1000);
     const channel = 'futures.balances';
     const event = 'subscribe';
-    this.ws.send(JSON.stringify({
+    ws.send(JSON.stringify({
       time,
       channel,
       event,
@@ -1011,13 +1152,14 @@ export class GateAdapter extends BaseAdapter {
   }
 
   async #subscribePositions(symbols) {
-    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    const ws = this.#getPrivateFxWs();
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
     const userId = await this.#fetchUserId();
     const contracts = (symbols || this.subscribed || []).map((s) => this.toGateContract(s));
     const time = Math.floor(Date.now() / 1000);
     const channel = 'futures.positions';
     const event = 'subscribe';
-    this.ws.send(JSON.stringify({
+    ws.send(JSON.stringify({
       time,
       channel,
       event,
@@ -1070,34 +1212,41 @@ export class GateAdapter extends BaseAdapter {
   async startPrivateAccountStream(symbols = []) {
     if (!process.env.GATE_API_KEY || !process.env.GATE_API_SECRET) return;
 
+    this._privateAccountSymbols = symbols?.length ? [...symbols] : [...this.subscribed];
+
     await this.syncAccountSnapshot({ silent: true });
 
     if (this.#isUnifiedMode()) {
       await this.#connectUnifiedWs();
-    }
-
-    if (this.ws?.readyState !== WebSocket.OPEN) {
+    } else if (!this.enablePublicStream && this.enablePrivateAccountStream) {
+      await this.#connectAccountWebSocket();
+    } else if (this.ws?.readyState !== WebSocket.OPEN) {
       await new Promise((r) => setTimeout(r, 500));
     }
-    if (this.ws?.readyState === WebSocket.OPEN) {
+
+    if (this.#isPrivateFxOpen()) {
       if (!this.#isUnifiedMode()) {
         await this.#subscribeBalances();
       }
-      await this.#subscribePositions(symbols);
-    } else {
-      console.warn('[Gate] public fx-ws not open; private futures subscriptions skipped');
+      await this.#subscribePositions(this._privateAccountSymbols);
+    } else if (!this.#isUnifiedMode()) {
+      if (this.enablePrivateAccountStream && !this.enablePublicStream) {
+        console.warn('[Gate] account fx-ws not open; private futures subscriptions skipped');
+      } else {
+        console.warn('[Gate] public fx-ws not open; private futures subscriptions skipped');
+      }
     }
 
-    this.emit('PRIVATE_WS_CONNECTED', {
-      exchange: 'gate',
-      positionsReady: this.privatePositionsSubscribed
-    });
+    if (this.#privateAccountStreamReady()) {
+      this.#emitPrivateWsConnected();
+    }
     const modeNote = this.#isUnifiedMode() ? 'unified USDT' : 'single USDT futures';
+    const wsNote = !this.enablePublicStream && this.enablePrivateAccountStream ? 'account-fx-ws' : 'public-fx-ws';
     const balNote = this.#isUnifiedMode()
       ? (this.unifiedWsConnected ? 'unified.asset_detail' : 'unified pending')
       : (this.privateBalancesSubscribed ? 'futures.balances' : 'balances pending');
     const posNote = this.privatePositionsSubscribed ? 'futures.positions' : 'positions pending';
-    console.log(`[Gate] private streams (${modeNote}: ${balNote} + ${posNote})`);
+    console.log(`[Gate] private streams (${modeNote} via ${wsNote}: ${balNote} + ${posNote})`);
   }
 
   /** 设置 USDT 永续杠杆（Gate 要求 query 参数，非 JSON body） */
@@ -1197,6 +1346,7 @@ export class GateAdapter extends BaseAdapter {
       this.unifiedWs = null;
     }
     this.unifiedWsConnected = false;
+    this.#teardownAccountWebSocket();
     this.emit('PRIVATE_WS_DISCONNECTED', { exchange: 'gate' });
   }
 }

@@ -35,6 +35,7 @@ export class BinanceAdapter extends BaseAdapter {
     this._lastPublicMessageAt = 0;
     this._subscribedAt = 0;
     this._publicWsOpenedAt = 0;
+    this._publicWsEverOpened = false;
     this._publicWsReconnectAt = 0;
     this._stalenessCheckTimer = null;
     this._reconnectingPublicWs = false;
@@ -193,7 +194,13 @@ export class BinanceAdapter extends BaseAdapter {
         this.#startFeedWatchdog();
         this.#startWsIdleMonitor();
         this.#startPublicWs24hTimer();
-        this.emit('PUBLIC_WS_RECONNECTED', { exchange: 'binance', reason: 'public-ws-open', clearCache: false });
+        const clearCache = this._publicWsEverOpened;
+        this._publicWsEverOpened = true;
+        this.emit('PUBLIC_WS_RECONNECTED', {
+          exchange: 'binance',
+          reason: 'public-ws-open',
+          clearCache
+        });
         resolve();
       });
       ws.on('ping', (data) => {
