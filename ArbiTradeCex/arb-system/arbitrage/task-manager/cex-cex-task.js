@@ -70,7 +70,7 @@ export class CexCexTask {
       ...strategyConfig,
       zOpen: strategyConfig.zOpen ?? strategyConfig.zOpenAb ?? 2.0,
       zClose: strategyConfig.zClose ?? 0.0,
-      signalMaxAgeMs: strategyConfig.signalMaxAgeMs ?? 50
+      signalMaxAgeMs: strategyConfig.signalMaxAgeMs ?? 100
     };
     this.precision = precisionChecker;
     this.risk = new RiskManager(strategyConfig);
@@ -83,6 +83,8 @@ export class CexCexTask {
     this._imbalanceWarnTs = new Map();
     /** 单边孤儿持仓 REST 对账节流（每 symbol 5s 最多 1 次） */
     this._reconcileTs = new Map();
+    /** 上一帧 signal，用于热路径先推 dashboard（对齐 stable：价格先更新，z-score 后算） */
+    this._lastSignalBySymbol = new Map();
     this.enforceLatency = sharedResources.enforceLatency;
     this.latencyLimits = resolveLatencyLimits(this.cfg, this.enforceLatency);
     this.cexCost = resolveCexCostConfig(strategyConfig);
@@ -189,7 +191,17 @@ export class CexCexTask {
 
     const symbolCost = resolveCexCostConfigForSymbol(this.cfg, symbol);
     const spreads = calcSpreads(tick, symbolCost);
-    // 对齐 ArbiTrade-1 dataManager.addData：所有 tick 入滚动窗口，不在入窗阶段过滤
+    const prevSignal = this._lastSignalBySymbol.get(symbol) ?? null;
+
+    // 对齐 stable handlePriceUpdate：先推价格/UI，不 await REST 对账、不挡 WS 热路径
+    this.sr.dashboardBridge?.updateMarketSnapshot({
+      symbol,
+      tick,
+      spreads,
+      signal: prevSignal,
+      lock: this.#syncLockState(symbol, prevSignal)
+    });
+
     const signal = engine.updateAndCalc({
       timestamp: tick.timestamp,
       spreadAb: spreads.spreadAb,
@@ -197,8 +209,9 @@ export class CexCexTask {
       spreadAbAdj: spreads.spreadAbAdj,
       spreadBaAdj: spreads.spreadBaAdj
     });
+    this._lastSignalBySymbol.set(symbol, signal);
 
-    await this.#reconcileStalePositionsIfNeeded(symbol);
+    this.#reconcileStalePositionsIfNeeded(symbol).catch(() => {});
 
     const lock = this.#syncLockState(symbol, signal);
     this.sr.dashboardBridge?.updateMarketSnapshot({

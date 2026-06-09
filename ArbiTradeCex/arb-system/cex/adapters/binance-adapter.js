@@ -24,6 +24,8 @@ export class BinanceAdapter extends BaseAdapter {
     });
 
     this.id = 'binance';
+    /** 公共 bookTicker WS；主进程用 worker 时可关，仅保留 REST/私有流 */
+    this.enablePublicStream = config.enablePublicStream !== false;
     this.accountType = 'PORTFOLIO_MARGIN';
     this.activeSubscriptions = new Set();
     this.subscriptionQueue = [];
@@ -62,6 +64,16 @@ export class BinanceAdapter extends BaseAdapter {
     this._globalStaleEmitted = false;
     /** 按 symbol 记录最后 WS 消息时刻 */
     this._lastSymbolMessageAt = new Map();
+    this._feedWatchdog = null;
+    this._restRefreshPending = false;
+    /** REST 补价阈值：对齐 maxPriceAgeMs(1000)，stable 不在 staleness 里重连 WS */
+    this._symbolStaleMs = Number(config.symbolStaleMs) || 900;
+    this._lastWsRawMessageAt = 0;
+    this._wsIdleCheckTimer = null;
+    /** 连接层：任意 WS 帧超过此间隔则重连（与 bookTicker 是否变化无关） */
+    this._wsIdleReconnectMs = 5 * 60 * 1000;
+    this._reconnectRecoveryTimer = null;
+    this._reconnectRecoveryMs = 5 * 60 * 1000;
     this._balanceCache = null;
     this._positionCache = new Map();
     this.privateWs = null;
@@ -95,9 +107,20 @@ export class BinanceAdapter extends BaseAdapter {
     return super.normalizeSymbol(symbol);
   }
 
+  get publicConnected() {
+    return Boolean(this.enablePublicStream && this.ws?.readyState === WebSocket.OPEN);
+  }
+
+  async reconnectWebSocket() {
+    if (!this.enablePublicStream) return;
+    await this.#forcePublicWsReconnect('manual');
+  }
+
   async connect() {
     if (this._shuttingDown) this._shuttingDown = false;
-    await this.connectWebSocket();
+    if (this.enablePublicStream) {
+      await this.connectWebSocket();
+    }
     if (process.env.BINANCE_API_KEY && process.env.BINANCE_API_SECRET) {
       this.authenticated = true;
     }
@@ -139,7 +162,7 @@ export class BinanceAdapter extends BaseAdapter {
   }
 
   async connectWebSocket() {
-    if (this._shuttingDown) return;
+    if (!this.enablePublicStream || this._shuttingDown) return;
     if (this.ws) {
       this.ws.removeAllListeners();
       this.ws.terminate();
@@ -164,8 +187,11 @@ export class BinanceAdapter extends BaseAdapter {
         if (gen !== this._publicWsGen || this.ws !== ws) return;
         // bookTicker 盘口未变时重连后可能长时间无推送；重置 WS 接收基准，避免立刻再触发 global freeze
         this.#resetPublicStalenessBaseline();
+        this._lastWsRawMessageAt = Date.now();
         this.#startPublicHeartbeat();
         this.#startStalenessMonitor();
+        this.#startFeedWatchdog();
+        this.#startWsIdleMonitor();
         this.#startPublicWs24hTimer();
         this.emit('PUBLIC_WS_RECONNECTED', { exchange: 'binance', reason: 'public-ws-open', clearCache: false });
         resolve();
@@ -183,6 +209,7 @@ export class BinanceAdapter extends BaseAdapter {
       });
       ws.on('message', (raw) => {
         if (gen !== this._publicWsGen || this.ws !== ws) return;
+        this._lastWsRawMessageAt = Date.now();
         this.handleMessage(raw);
       });
       ws.on('close', (code, reason) => {
@@ -214,7 +241,8 @@ export class BinanceAdapter extends BaseAdapter {
     }
 
     if (this._publicReconnectAttempts >= this._maxPublicReconnectAttempts) {
-      console.error(`[Binance] public WS max reconnect attempts reached (${this._maxPublicReconnectAttempts})`);
+      console.error(`[Binance] public WS max reconnect attempts reached (${this._maxPublicReconnectAttempts}), will retry in ${this._reconnectRecoveryMs / 1000}s`);
+      this.#scheduleReconnectRecovery();
       return;
     }
 
@@ -248,6 +276,7 @@ export class BinanceAdapter extends BaseAdapter {
   async subscribe(symbolsOrSymbol, channels = ['bookTicker']) {
     const symbols = Array.isArray(symbolsOrSymbol) ? symbolsOrSymbol : [symbolsOrSymbol];
     this.subscribedSymbols = symbols.map((symbol) => this.normalizeSymbol(symbol));
+    if (!this.enablePublicStream) return;
     this.subscribedChannels = [...channels];
     this._subscribedAt = Date.now();
     for (const symbol of symbols) {
@@ -340,11 +369,13 @@ export class BinanceAdapter extends BaseAdapter {
         }
       }
 
+      // bookTicker 盘口未变时不推送；单 symbol 静默不能代表连接死了（REST watchdog 补价）
       const totalCount = this.subscribedSymbols.length;
       if (!this._globalStaleEmitted && this._staleSymbols.size >= Math.ceil(totalCount * 0.2)) {
         this._globalStaleEmitted = true;
-        console.error(`[Binance] global price freeze: ${this._staleSymbols.size}/${totalCount}, worst=${worstSymbol} ${(worstAge / 1000).toFixed(1)}s`);
-        this.#schedulePublicWsReconnect('staleness-global');
+        console.warn(
+          `[Binance] ${this._staleSymbols.size}/${totalCount} symbols quiet (worst=${worstSymbol} ${(worstAge / 1000).toFixed(1)}s), REST fallback handles quotes`
+        );
       }
     }, cfg.checkIntervalMs);
     if (typeof this._stalenessCheckTimer.unref === 'function') {
@@ -391,10 +422,85 @@ export class BinanceAdapter extends BaseAdapter {
     }
   }
 
+  #startFeedWatchdog() {
+    this.#stopFeedWatchdog();
+    this._feedWatchdog = setInterval(() => {
+      if (this._shuttingDown || this.subscribedSymbols.length === 0) return;
+      const staleSymbols = this.subscribedSymbols.filter((sym) => {
+        const key = this.normalizeSymbol(sym);
+        const last = this._lastSymbolMessageAt.get(key);
+        if (last == null) return false;
+        return Date.now() - last > this._symbolStaleMs;
+      });
+      if (staleSymbols.length > 0 && !this._restRefreshPending) {
+        this._restRefreshPending = true;
+        this.#refreshBookTickerViaRest('watchdog-per-symbol', staleSymbols).finally(() => {
+          this._restRefreshPending = false;
+        });
+      }
+    }, 3000);
+    if (typeof this._feedWatchdog.unref === 'function') {
+      this._feedWatchdog.unref();
+    }
+  }
+
+  #stopFeedWatchdog() {
+    if (this._feedWatchdog) {
+      clearInterval(this._feedWatchdog);
+      this._feedWatchdog = null;
+    }
+  }
+
+  #startWsIdleMonitor() {
+    this.#stopWsIdleMonitor();
+    this._wsIdleCheckTimer = setInterval(() => {
+      if (this._shuttingDown || this._reconnectingPublicWs || !this.ws) return;
+      const last = Math.max(this._lastWsRawMessageAt || 0, this._lastPongTime || 0);
+      if (last > 0 && Date.now() - last > this._wsIdleReconnectMs) {
+        console.warn(`[Binance] public WS idle ${((Date.now() - last) / 1000).toFixed(0)}s, reconnecting...`);
+        this.#schedulePublicWsReconnect('ws-idle');
+      }
+    }, 30_000);
+    if (typeof this._wsIdleCheckTimer.unref === 'function') {
+      this._wsIdleCheckTimer.unref();
+    }
+  }
+
+  #stopWsIdleMonitor() {
+    if (this._wsIdleCheckTimer) {
+      clearInterval(this._wsIdleCheckTimer);
+      this._wsIdleCheckTimer = null;
+    }
+  }
+
+  #scheduleReconnectRecovery() {
+    if (this._shuttingDown || this._reconnectRecoveryTimer) return;
+    this._reconnectRecoveryTimer = setTimeout(() => {
+      this._reconnectRecoveryTimer = null;
+      if (this._shuttingDown) return;
+      console.log('[Binance] public WS max-attempts recovery retry...');
+      this._publicReconnectAttempts = 0;
+      this.#schedulePublicWsReconnect('max-attempts-recovery');
+    }, this._reconnectRecoveryMs);
+    if (typeof this._reconnectRecoveryTimer.unref === 'function') {
+      this._reconnectRecoveryTimer.unref();
+    }
+  }
+
+  #stopReconnectRecovery() {
+    if (this._reconnectRecoveryTimer) {
+      clearTimeout(this._reconnectRecoveryTimer);
+      this._reconnectRecoveryTimer = null;
+    }
+  }
+
   #stopPublicWsTimers() {
     this.#stopPublicHeartbeat();
     this.#stopStalenessMonitor();
+    this.#stopFeedWatchdog();
+    this.#stopWsIdleMonitor();
     this.#stopPublicWs24hTimer();
+    this.#stopReconnectRecovery();
   }
 
   async #forcePublicWsReconnect(reason = 'unknown') {
@@ -464,14 +570,14 @@ export class BinanceAdapter extends BaseAdapter {
   async #refreshBookTickerViaRest(reason = 'rest', symbols = null) {
     const list = symbols?.length ? symbols : this.subscribedSymbols;
     if (!list.length) return;
-    for (const symbol of list) {
+    await Promise.all(list.map(async (symbol) => {
       try {
         const row = await this.getBookTicker(symbol, { reason });
         this.#emitBookTicker(row, { viaRest: true, restReason: reason });
       } catch (err) {
         console.warn(`[Binance] REST bookTicker refresh ${symbol} (${reason}):`, err.message);
       }
-    }
+    }));
   }
 
   async processQueue() {
@@ -509,7 +615,14 @@ export class BinanceAdapter extends BaseAdapter {
     try {
       const msg = JSON.parse(raw.toString());
       if (msg?.error) {
-        console.warn('[Binance] public WS error:', msg.error.msg || msg.error);
+        const errMsg = msg.error.msg || msg.error;
+        console.warn('[Binance] public WS error:', errMsg);
+        if (String(errMsg).toLowerCase().includes('too many requests')) {
+          this._nextReconnectAllowedAt = Math.max(this._nextReconnectAllowedAt, Date.now() + this._reconnectCooldownMs);
+        }
+        setTimeout(() => {
+          this.#flushSubscriptions({ forceResubscribe: true }).catch(() => {});
+        }, 2000);
         return;
       }
       if (msg?.result !== undefined && msg?.id != null) return;

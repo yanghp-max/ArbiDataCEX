@@ -14,7 +14,7 @@
     "maxCrossLegMidBps": 15,
     "priceUpdateMode": "any",
     "restRefreshBeforeOrder": true,
-    "signalMaxAgeMs": 50,
+    "signalMaxAgeMs": 100,
     "fundingMin": -0.1,
     "binanceFeeBps": 5,
     "gateFeeBps": 5,

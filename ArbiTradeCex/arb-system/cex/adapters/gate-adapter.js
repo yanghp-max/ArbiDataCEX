@@ -26,6 +26,8 @@ export class GateAdapter extends BaseAdapter {
     });
 
     this.id = 'gate';
+    /** 公共 book_ticker WS；主进程用 market worker 时可关 */
+    this.enablePublicStream = config.enablePublicStream !== false;
     this.accountMode = String(
       config.accountMode || process.env.GATE_ACCOUNT_MODE || 'single'
     ).toLowerCase();
@@ -40,7 +42,12 @@ export class GateAdapter extends BaseAdapter {
     this._nextReconnectAllowedAt = 0;
     this._restRefreshPending = false;
     this._shuttingDown = false;
-    this._symbolStaleMs = 60_000;
+    this._symbolStaleMs = Number(config.symbolStaleMs) || 900;
+    this._lastWsRawMessageAt = 0;
+    this._wsIdleCheckTimer = null;
+    this._wsIdleReconnectMs = 5 * 60 * 1000;
+    this._reconnectRecoveryTimer = null;
+    this._reconnectRecoveryMs = 5 * 60 * 1000;
     this._balanceCache = null;
     this._positionCache = new Map();
     this.unifiedWsUrl = process.env.GATE_UNIFIED_WS_URL || 'wss://ws.gate.com/v4/ws/unified';
@@ -111,9 +118,33 @@ export class GateAdapter extends BaseAdapter {
     return super.normalizeSymbol(symbol);
   }
 
+  get publicConnected() {
+    return Boolean(this.enablePublicStream && this.ws?.readyState === WebSocket.OPEN);
+  }
+
+  async reconnectWebSocket() {
+    if (!this.enablePublicStream || this._reconnectingPublicWs || this._shuttingDown) return;
+    this._reconnectingPublicWs = true;
+    try {
+      this.#stopFeedWatchdog();
+      this.#stopWsIdleMonitor();
+      if (this.ws) {
+        this.ws.removeAllListeners();
+        this.ws.terminate();
+        this.ws = null;
+      }
+      await this.connectWebSocket();
+      console.log('[Gate] public WS reconnected (manual)');
+    } finally {
+      this._reconnectingPublicWs = false;
+    }
+  }
+
   async connect() {
     if (this._shuttingDown) this._shuttingDown = false;
-    await this.connectWebSocket();
+    if (this.enablePublicStream) {
+      await this.connectWebSocket();
+    }
     if (process.env.GATE_API_KEY && process.env.GATE_API_SECRET) {
       this.authenticated = true;
     }
@@ -128,6 +159,8 @@ export class GateAdapter extends BaseAdapter {
   async disconnect() {
     this._shuttingDown = true;
     this.#stopFeedWatchdog();
+    this.#stopWsIdleMonitor();
+    this.#stopReconnectRecovery();
     await this.stopPrivateAccountStream();
     if (this.ws) {
       this.ws.removeAllListeners();
@@ -222,7 +255,7 @@ export class GateAdapter extends BaseAdapter {
   }
 
   async connectWebSocket() {
-    if (this._shuttingDown) return;
+    if (!this.enablePublicStream || this._shuttingDown) return;
     if (this.ws) {
       this.ws.removeAllListeners();
       this.ws.terminate();
@@ -254,16 +287,24 @@ export class GateAdapter extends BaseAdapter {
           }
         }
         this.#startFeedWatchdog();
+        this.#startWsIdleMonitor();
+        this._lastWsRawMessageAt = Date.now();
+        this.emit('PUBLIC_WS_RECONNECTED', { exchange: 'gate', reason: 'public-ws-open', clearCache: false });
         resolve();
       });
-      ws.on('message', (raw) => this.handleMessage(raw));
+      ws.on('message', (raw) => {
+        this._lastWsRawMessageAt = Date.now();
+        this.handleMessage(raw);
+      });
       ws.on('close', (code) => {
         this.connected = false;
         this.#stopFeedWatchdog();
+        this.#stopWsIdleMonitor();
         if (this._shuttingDown || this._reconnectingPublicWs) return;
 
         if (this._publicReconnectAttempts >= this._maxPublicReconnectAttempts) {
-          console.error(`[Gate] public WS max reconnect attempts reached (${this._maxPublicReconnectAttempts})`);
+          console.error(`[Gate] public WS max reconnect attempts reached (${this._maxPublicReconnectAttempts}), will retry in ${this._reconnectRecoveryMs / 1000}s`);
+          this.#scheduleReconnectRecovery();
           return;
         }
         this._publicReconnectAttempts += 1;
@@ -303,14 +344,14 @@ export class GateAdapter extends BaseAdapter {
   async #refreshBookTickerViaRest(reason = 'rest', symbols = null) {
     const list = symbols?.length ? symbols : this.subscribed;
     if (!list.length) return;
-    for (const symbol of list) {
+    await Promise.all(list.map(async (symbol) => {
       try {
         const row = await this.getBookTicker(symbol, { reason });
         this.#emitBookTicker(row, { viaRest: true, restReason: reason });
       } catch (err) {
         console.warn(`[Gate] REST bookTicker refresh ${symbol} (${reason}):`, err.message);
       }
-    }
+    }));
   }
 
   #startFeedWatchdog() {
@@ -329,7 +370,7 @@ export class GateAdapter extends BaseAdapter {
           this._restRefreshPending = false;
         });
       }
-    }, 15_000);
+    }, 3000);
     if (typeof this._feedWatchdog.unref === 'function') {
       this._feedWatchdog.unref();
     }
@@ -339,6 +380,53 @@ export class GateAdapter extends BaseAdapter {
     if (this._feedWatchdog) {
       clearInterval(this._feedWatchdog);
       this._feedWatchdog = null;
+    }
+  }
+
+  #startWsIdleMonitor() {
+    this.#stopWsIdleMonitor();
+    this._wsIdleCheckTimer = setInterval(() => {
+      if (this._shuttingDown || this._reconnectingPublicWs || !this.ws) return;
+      const last = this._lastWsRawMessageAt || 0;
+      if (last > 0 && Date.now() - last > this._wsIdleReconnectMs) {
+        console.warn(`[Gate] public WS idle ${((Date.now() - last) / 1000).toFixed(0)}s, reconnecting...`);
+        this.connectWebSocket().catch((err) => {
+          console.warn('[Gate] public WS idle reconnect failed:', err.message);
+        });
+      }
+    }, 30_000);
+    if (typeof this._wsIdleCheckTimer.unref === 'function') {
+      this._wsIdleCheckTimer.unref();
+    }
+  }
+
+  #stopWsIdleMonitor() {
+    if (this._wsIdleCheckTimer) {
+      clearInterval(this._wsIdleCheckTimer);
+      this._wsIdleCheckTimer = null;
+    }
+  }
+
+  #scheduleReconnectRecovery() {
+    if (this._shuttingDown || this._reconnectRecoveryTimer) return;
+    this._reconnectRecoveryTimer = setTimeout(() => {
+      this._reconnectRecoveryTimer = null;
+      if (this._shuttingDown) return;
+      console.log('[Gate] public WS max-attempts recovery retry...');
+      this._publicReconnectAttempts = 0;
+      this.connectWebSocket().catch((err) => {
+        console.warn('[Gate] public WS recovery reconnect failed:', err.message);
+      });
+    }, this._reconnectRecoveryMs);
+    if (typeof this._reconnectRecoveryTimer.unref === 'function') {
+      this._reconnectRecoveryTimer.unref();
+    }
+  }
+
+  #stopReconnectRecovery() {
+    if (this._reconnectRecoveryTimer) {
+      clearTimeout(this._reconnectRecoveryTimer);
+      this._reconnectRecoveryTimer = null;
     }
   }
 
@@ -353,6 +441,7 @@ export class GateAdapter extends BaseAdapter {
     for (const symbol of symbols) {
       await super.subscribe(this.normalizeSymbol(symbol), channels);
     }
+    if (!this.enablePublicStream) return;
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
 
     const gateSymbols = symbols.map((s) => this.toGateContract(s));

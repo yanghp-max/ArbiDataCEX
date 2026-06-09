@@ -238,7 +238,7 @@ export function resolveLatencyLimits(strategyConfig, enforceLatency) {
     maxLegSkewMs: strategyConfig.maxLegSkewMs ?? 2000,
     maxWsLatencyMs: strategyConfig.maxWsLatencyMs ?? 100,
     maxCrossLegMidBps: strategyConfig.maxCrossLegMidBps ?? 50,
-    signalMaxAgeMs: strategyConfig.signalMaxAgeMs ?? 50
+    signalMaxAgeMs: strategyConfig.signalMaxAgeMs ?? 100
   };
 }
 

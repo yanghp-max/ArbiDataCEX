@@ -3,7 +3,6 @@
  */
 import path from 'node:path';
 import { loadConfig, getRootDir } from '../../config/global-config.js';
-import { EventTypes } from '../../cex/types.js';
 import { SharedResources } from './shared-resources.js';
 import { CexCexTask } from './cex-cex-task.js';
 import { PrecisionChecker } from '../risk/risk-manager.js';
@@ -49,10 +48,6 @@ export class TaskManager {
     const cexManager = this.sharedResources.cexManager;
     const adapterSymbols = strat.symbols.map((s) => cexManager.normalizeSymbol('binance', s));
 
-    const binance = cexManager.getAdapter('binance');
-    const gate = cexManager.getAdapter('gate');
-
-    // 对齐 ArbiTrade-1 priceUpdateMode=any：任意腿 WS 来价 → 写缓存 → 触发（buildTick 用两腿各最后一条）
     const priceUpdateMode = strat.priceUpdateMode ?? 'any';
     const onPriceTicker = (source, ticker) => {
       this.sharedResources.quoteAggregator.onTicker(source, ticker);
@@ -63,25 +58,24 @@ export class TaskManager {
       }
       this.#schedulePriceTick(sym);
     };
-    binance.on(EventTypes.TICKER, (t) => onPriceTicker('binance', t));
-    gate.on(EventTypes.TICKER, (t) => onPriceTicker('gate', t));
-    const onBinanceMarketRefresh = (payload = {}) => {
+    const onMarketRefresh = (payload = {}) => {
+      const source = payload.exchange === 'gate' ? 'gate' : 'binance';
       if (payload.clearCache) {
-        this.sharedResources.quoteAggregator.clearSource('binance');
+        this.sharedResources.quoteAggregator.clearSource(source);
       }
       for (const sym of strat.symbols) {
         this.#schedulePriceTick(sym);
       }
       if (payload.reason) {
-        console.log(`[TaskManager] Binance public WS event (${payload.reason})`);
+        console.log(`[TaskManager] ${source} public WS event (${payload.reason})`);
       }
     };
-    binance.on('PUBLIC_WS_RECONNECTED', onBinanceMarketRefresh);
 
-    await Promise.all([
-      cexManager.subscribe('binance', adapterSymbols, ['bookTicker']),
-      cexManager.subscribe('gate', adapterSymbols, ['book_ticker'])
-    ]);
+    await this.sharedResources.cexPriceHub.start({
+      adapterSymbols,
+      onTicker: onPriceTicker,
+      onMarketRefresh
+    });
 
     if (!this.sharedResources.useMockAccount && this.sharedResources.accountStreamBridge) {
       await this.sharedResources.accountStreamBridge.start();
@@ -123,7 +117,8 @@ export class TaskManager {
 
     console.log(
       `[TaskManager] started symbols=${strat.symbols.join(',')} trading=${this.tradingEnabled}`
-      + ` priceMode=ws-driven(${priceUpdateMode}) windowSeconds=${strat.windowSeconds}`
+      + ` priceMode=ws-driven(${priceUpdateMode}) market=${this.sharedResources.cexMarketWorkerClient ? 'worker(binance+gate)' : 'adapter'}`
+      + ` windowSeconds=${strat.windowSeconds}`
       + ` minDataPoints=${strat.minDataPoints} enforceLatency=${this.sharedResources.enforceLatency}`
       + ` restBeforeOrder=${strat.restRefreshBeforeOrder !== false}`
     );

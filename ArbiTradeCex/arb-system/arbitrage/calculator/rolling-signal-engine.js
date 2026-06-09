@@ -13,6 +13,8 @@ export class RollingSignalEngine {
     this.buckets = new Map();
     /** 就绪后锁存，与 ArbiTrade-1 DataManager / demo 文档一致 */
     this.windowReady = false;
+    /** 避免同一秒内多次 full sort（stable 侧 worker 合并后 tick 频率更低） */
+    this._entries = null;
   }
 
   #bucketKey(ts) {
@@ -41,17 +43,29 @@ export class RollingSignalEngine {
 
   updateAndCalc({ timestamp, spreadAb, spreadBa, spreadAbAdj, spreadBaAdj }) {
     const currentSecond = this.#bucketKey(timestamp);
-    this.buckets.set(currentSecond, {
+    const row = {
       spreadAb,
       spreadBa,
       spreadAbAdj,
       spreadBaAdj,
       ts: timestamp
-    });
+    };
+    const hadBucket = this.buckets.has(currentSecond);
+    this.buckets.set(currentSecond, row);
 
     const cutoffTime = currentSecond - this.windowSeconds;
+    let pruned = false;
     for (const k of this.buckets.keys()) {
-      if (k < cutoffTime) this.buckets.delete(k);
+      if (k < cutoffTime) {
+        this.buckets.delete(k);
+        pruned = true;
+      }
+    }
+
+    if (pruned || !hadBucket || !this._entries?.length) {
+      this._entries = [...this.buckets.values()].sort((a, b) => a.ts - b.ts);
+    } else {
+      this._entries[this._entries.length - 1] = row;
     }
 
     const metrics = this.#computeWindowMetrics();
@@ -78,7 +92,7 @@ export class RollingSignalEngine {
       };
     };
 
-    const entries = [...this.buckets.values()].sort((a, b) => a.ts - b.ts);
+    const entries = this._entries ?? [];
 
     if (!windowReady || samples < 2) {
       const progress = baseProgress();

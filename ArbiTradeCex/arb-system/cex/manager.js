@@ -161,13 +161,16 @@ export class CexManager {
     return applyDefaultLeverage(this, symbols, leverage);
   }
 
-  static async createDefault(strategyConfig = {}) {
+  static async createDefault(strategyConfig = {}, options = {}) {
     const mgr = new CexManager();
+    const enablePublicStream = options.enablePublicStream !== false;
     const binance = new BinanceAdapter({
-      listenKeyKeepaliveMin: strategyConfig.listenKeyKeepaliveMin ?? 30
+      listenKeyKeepaliveMin: strategyConfig.listenKeyKeepaliveMin ?? 30,
+      enablePublicStream
     });
     const gate = new GateAdapter({
-      accountMode: strategyConfig.gateAccountMode
+      accountMode: strategyConfig.gateAccountMode,
+      enablePublicStream
     });
     await Promise.all([binance.connect(), gate.connect()]);
     mgr.register('binance', binance);

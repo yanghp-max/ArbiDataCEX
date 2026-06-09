@@ -42,6 +42,15 @@ function legWsDelayMs(leg) {
   return null;
 }
 
+/** 保留上游 receiveMs/localTimestamp（worker/adapter），仅缺失时用 now */
+function resolveReceiveMs(ticker, now = Date.now()) {
+  const receiveMs = Number(ticker?.receiveMs);
+  if (Number.isFinite(receiveMs)) return receiveMs;
+  const localMs = Number(ticker?.localTimestamp);
+  if (Number.isFinite(localMs)) return localMs;
+  return now;
+}
+
 export class QuoteAggregator {
   constructor() {
     /** symbol(compact) -> { binance, gate, funding } */
@@ -52,7 +61,7 @@ export class QuoteAggregator {
     const sym = compactSymbol(ticker.symbol);
     if (!sym) return;
 
-    const receiveMs = Date.now();
+    const receiveMs = resolveReceiveMs(ticker);
     const cached = {
       ...ticker,
       symbol: sym,
