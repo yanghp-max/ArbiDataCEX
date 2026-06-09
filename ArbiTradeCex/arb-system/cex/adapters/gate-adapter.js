@@ -1221,16 +1221,27 @@ export class GateAdapter extends BaseAdapter {
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
     const userId = await this.#fetchUserId();
     const contracts = (symbols || this.subscribed || []).map((s) => this.toGateContract(s));
-    const time = Math.floor(Date.now() / 1000);
     const channel = 'futures.positions';
     const event = 'subscribe';
-    ws.send(JSON.stringify({
-      time,
-      channel,
-      event,
-      auth: this.#wsAuth(channel, event, time),
-      payload: [userId, ...contracts]
-    }));
+    // Gate 要求 payload 仅 1～2 个参数：[userId] 或 [userId, contract]；每个策略币种单独订
+    if (contracts.length === 0) {
+      console.warn('[Gate] account fx-ws subscribe futures.positions skipped: no strategy symbols');
+      return;
+    }
+    console.log(`[Gate] account fx-ws subscribing futures.positions (${contracts.length}): ${contracts.join(', ')}`);
+    for (let i = 0; i < contracts.length; i += 1) {
+      const time = Math.floor(Date.now() / 1000);
+      ws.send(JSON.stringify({
+        time,
+        channel,
+        event,
+        auth: this.#wsAuth(channel, event, time),
+        payload: [userId, contracts[i]]
+      }));
+      if (i < contracts.length - 1) {
+        await new Promise((r) => setTimeout(r, 100));
+      }
+    }
     this.privatePositionsSubscribed = true;
   }
 
