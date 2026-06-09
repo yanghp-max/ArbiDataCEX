@@ -5,6 +5,7 @@
 import { startCexCexArbitrage } from '../arbitrage/task-manager/task-sdk.js';
 import { loadConfig, getRootDir } from '../config/global-config.js';
 import { startProcessLifecycleLogging } from '../common/monitoring/process-lifecycle.js';
+import { configureTextLog, appendTextLog, getTextLogPath } from '../common/monitoring/append-text-log.js';
 
 function parseArgs(argv) {
   let mode = 'dry';
@@ -22,8 +23,15 @@ async function main() {
   const tradingEnabled = args.mode === 'live';
   const symbols = strat.symbols || [];
 
+  const rootDir = getRootDir();
+  configureTextLog({
+    rootDir,
+    filePath: strat.strategyTextLog || 'logs/strategy.log',
+    mirrorConsole: strat.strategyTextLogToConsole === true
+  });
+
   const lifecycle = startProcessLifecycleLogging({
-    rootDir: getRootDir(),
+    rootDir,
     logPath: strat.processHealthLog || 'logs/process-health.jsonl',
     lastExitPath: strat.processLastExitJson || 'logs/last-exit.json',
     intervalMs: strat.processHealthIntervalMs ?? 30000,
@@ -52,6 +60,15 @@ async function main() {
   }
 
   console.log(`[strategy] symbols (${symbols.length}): ${symbols.join(', ')}`);
+
+  const textLogPath = getTextLogPath();
+  if (textLogPath) {
+    console.log(`[strategy] text log -> ${textLogPath} (拦单/延迟等；strategyTextLogToConsole=true 时同步控制台)`);
+    appendTextLog(
+      `[strategy] START mode=${args.mode} trading=${tradingEnabled} symbols=${symbols.length} enforceLatency=${strat.enforceLatency}`,
+      { mirrorConsole: false }
+    );
+  }
 
   const mgr = await startCexCexArbitrage({
     config,

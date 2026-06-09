@@ -45,6 +45,8 @@
     "tradeLogCsv": "logs/live-trades.csv",
     "processHealthLog": "logs/process-health.jsonl",
     "processLastExitJson": "logs/last-exit.json",
+    "strategyTextLog": "logs/strategy.log",
+    "strategyTextLogToConsole": true,
     "processHealthIntervalMs": 30000,
     "minQtyJson": "config/min-order-qty.json",
     "windowSeconds": 600,

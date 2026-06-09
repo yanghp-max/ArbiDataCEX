@@ -28,6 +28,7 @@ import {
   describePriceSlippageFail
 } from '../risk/risk-manager.js';
 import { logTradeSkip } from '../monitoring/trade-skip-log.js';
+import { appendTextLog } from '../../common/monitoring/append-text-log.js';
 import { calcTradePnl, calcTradeGross, calcTradeFeeCost } from '../execution/result-reporter.js';
 import {
   attachFillPricesToTrace,
@@ -91,6 +92,7 @@ export class CexCexTask {
     this.cexCost = resolveCexCostConfig(strategyConfig);
     this.logTradeSkips = strategyConfig.logTradeSkips !== false;
     this.logTradeSkipThrottleMs = strategyConfig.logTradeSkipThrottleMs ?? 10_000;
+    this.strategyTextLogToConsole = strategyConfig.strategyTextLogToConsole === true;
 
     for (const sym of strategyConfig.symbols) {
       this.engines.set(sym, new RollingSignalEngine({
@@ -148,7 +150,8 @@ export class CexCexTask {
     logTradeSkip(symbol, stage, reason, {
       enabled: this.logTradeSkips,
       throttleMs: this.logTradeSkipThrottleMs,
-      tradingEnabled: this.sr.tradingEnabled
+      tradingEnabled: this.sr.tradingEnabled,
+      mirrorConsole: this.strategyTextLogToConsole
     });
   }
 
@@ -530,17 +533,18 @@ export class CexCexTask {
 
   #logLatency(trace, { reason = null, partial = false } = {}) {
     if (!trace) return;
+    const mirror = this.strategyTextLogToConsole;
     if (reason) {
-      console.warn(`[延迟·中止] ${reason}`);
+      appendTextLog(`[延迟·中止] ${reason}`, { level: 'warn', mirrorConsole: mirror });
       if (partial) {
         for (const line of formatLatencyLogLines(trace)) {
-          console.warn(line);
+          appendTextLog(line, { level: 'warn', mirrorConsole: mirror });
         }
       }
       return;
     }
     for (const line of formatLatencyLogLines(trace)) {
-      console.log(line);
+      appendTextLog(line, { level: 'log', mirrorConsole: mirror });
     }
   }
 
