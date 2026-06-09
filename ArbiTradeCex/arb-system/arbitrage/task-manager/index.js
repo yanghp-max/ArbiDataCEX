@@ -9,7 +9,7 @@ import { CexCexTask } from './cex-cex-task.js';
 import { PrecisionChecker } from '../risk/risk-manager.js';
 
 function compactSymbol(symbol) {
-  return String(symbol).replace(/-/g, '').toUpperCase();
+  return String(symbol).replace(/[-_]/g, '').toUpperCase();
 }
 
 export class TaskManager {

@@ -162,6 +162,8 @@ export class BinanceAdapter extends BaseAdapter {
         if (gen !== this._publicWsGen || this.ws !== ws) return;
         await this.#flushSubscriptions({ forceResubscribe: true });
         if (gen !== this._publicWsGen || this.ws !== ws) return;
+        // bookTicker 盘口未变时重连后可能长时间无推送；重置 WS 接收基准，避免立刻再触发 global freeze
+        this.#resetPublicStalenessBaseline();
         this.#startPublicHeartbeat();
         this.#startStalenessMonitor();
         this.#startPublicWs24hTimer();
@@ -359,6 +361,17 @@ export class BinanceAdapter extends BaseAdapter {
     this._globalStaleEmitted = false;
   }
 
+  /** 重连/重订阅后重置 per-symbol WS 接收时刻（bookTicker 仅在盘口变化时推送） */
+  #resetPublicStalenessBaseline() {
+    const now = Date.now();
+    this._subscribedAt = now;
+    for (const sym of this.subscribedSymbols) {
+      this._lastSymbolMessageAt.set(this.normalizeSymbol(sym), now);
+    }
+    this._staleSymbols.clear();
+    this._globalStaleEmitted = false;
+  }
+
   #startPublicWs24hTimer() {
     this.#stopPublicWs24hTimer();
     this._publicWs24hTimer = setTimeout(() => {
@@ -502,6 +515,7 @@ export class BinanceAdapter extends BaseAdapter {
       if (msg?.result !== undefined && msg?.id != null) return;
 
       const payload = msg?.data && (msg.stream || msg.data?.s) ? msg.data : msg;
+      if (payload?.e && payload.e !== 'bookTicker') return;
       if (!(payload?.s && payload.b != null && payload.a != null)) return;
 
       const bid = Number(payload.b);
