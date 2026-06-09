@@ -31,6 +31,16 @@ export class GateAdapter extends BaseAdapter {
     ).toLowerCase();
     this.subscribed = [];
     this.subscribedChannels = ['book_ticker'];
+    this._lastSymbolMessageAt = new Map();
+    this._feedWatchdog = null;
+    this._reconnectingPublicWs = false;
+    this._publicReconnectAttempts = 0;
+    this._maxPublicReconnectAttempts = 20;
+    this._publicWsReconnectAt = 0;
+    this._nextReconnectAllowedAt = 0;
+    this._restRefreshPending = false;
+    this._shuttingDown = false;
+    this._symbolStaleMs = 60_000;
     this._balanceCache = null;
     this._positionCache = new Map();
     this.unifiedWsUrl = process.env.GATE_UNIFIED_WS_URL || 'wss://ws.gate.com/v4/ws/unified';
@@ -116,6 +126,8 @@ export class GateAdapter extends BaseAdapter {
   }
 
   async disconnect() {
+    this._shuttingDown = true;
+    this.#stopFeedWatchdog();
     await this.stopPrivateAccountStream();
     if (this.ws) {
       this.ws.removeAllListeners();
@@ -213,12 +225,15 @@ export class GateAdapter extends BaseAdapter {
     if (this._shuttingDown) return;
     if (this.ws) {
       this.ws.removeAllListeners();
-      this.ws.close();
+      this.ws.terminate();
       this.ws = null;
     }
     await new Promise((resolve, reject) => {
-      this.ws = new WebSocket(this.config.wsUrl);
-      this.ws.on('open', async () => {
+      const ws = new WebSocket(this.config.wsUrl);
+      this.ws = ws;
+      ws.on('open', async () => {
+        this.connected = true;
+        this._publicReconnectAttempts = 0;
         if (this.subscribed.length > 0) {
           await this.subscribe(this.subscribed, this.subscribedChannels);
         }
@@ -238,18 +253,93 @@ export class GateAdapter extends BaseAdapter {
             });
           }
         }
+        this.#startFeedWatchdog();
         resolve();
       });
-      this.ws.on('message', (raw) => this.handleMessage(raw));
-      this.ws.on('close', () => {
-        if (this._shuttingDown) return;
+      ws.on('message', (raw) => this.handleMessage(raw));
+      ws.on('close', (code) => {
         this.connected = false;
+        this.#stopFeedWatchdog();
+        if (this._shuttingDown || this._reconnectingPublicWs) return;
+
+        if (this._publicReconnectAttempts >= this._maxPublicReconnectAttempts) {
+          console.error(`[Gate] public WS max reconnect attempts reached (${this._maxPublicReconnectAttempts})`);
+          return;
+        }
+        this._publicReconnectAttempts += 1;
+        const baseDelay = Math.min(1000 * (2 ** (this._publicReconnectAttempts - 1)), 30_000);
+        const cooldownDelay = Math.max(0, this._nextReconnectAllowedAt - Date.now());
+        const delay = Math.max(baseDelay, cooldownDelay);
+        console.warn(`[Gate] public WS closed (code=${code}), reconnect in ${delay}ms (${this._publicReconnectAttempts}/${this._maxPublicReconnectAttempts})`);
         setTimeout(() => {
-          this.connectWebSocket().catch(() => {});
-        }, 1000);
+          this.connectWebSocket().catch((err) => {
+            console.warn('[Gate] public WS reconnect failed:', err.message);
+          });
+        }, delay);
       });
-      this.ws.on('error', reject);
+      ws.on('error', (err) => {
+        if (ws.readyState === WebSocket.CONNECTING) {
+          reject(err);
+        }
+      });
     });
+  }
+
+  #emitBookTicker(ticker, { viaRest = false, restReason = null } = {}) {
+    const localTs = Date.now();
+    const sym = this.normalizeSymbol(ticker.symbol);
+    this._lastSymbolMessageAt.set(sym, localTs);
+    this.emit(EventTypes.TICKER, {
+      ...ticker,
+      symbol: sym,
+      localTimestamp: localTs,
+      wsDelayMs: viaRest ? null : ticker.wsDelayMs,
+      source: 'gate',
+      viaRest,
+      restReason
+    });
+  }
+
+  async #refreshBookTickerViaRest(reason = 'rest', symbols = null) {
+    const list = symbols?.length ? symbols : this.subscribed;
+    if (!list.length) return;
+    for (const symbol of list) {
+      try {
+        const row = await this.getBookTicker(symbol, { reason });
+        this.#emitBookTicker(row, { viaRest: true, restReason: reason });
+      } catch (err) {
+        console.warn(`[Gate] REST bookTicker refresh ${symbol} (${reason}):`, err.message);
+      }
+    }
+  }
+
+  #startFeedWatchdog() {
+    this.#stopFeedWatchdog();
+    this._feedWatchdog = setInterval(() => {
+      if (this._shuttingDown || this.subscribed.length === 0) return;
+      const staleSymbols = this.subscribed.filter((sym) => {
+        const key = this.normalizeSymbol(sym);
+        const last = this._lastSymbolMessageAt.get(key);
+        if (last == null) return false;
+        return Date.now() - last > this._symbolStaleMs;
+      });
+      if (staleSymbols.length > 0 && !this._restRefreshPending) {
+        this._restRefreshPending = true;
+        this.#refreshBookTickerViaRest('watchdog-per-symbol', staleSymbols).finally(() => {
+          this._restRefreshPending = false;
+        });
+      }
+    }, 15_000);
+    if (typeof this._feedWatchdog.unref === 'function') {
+      this._feedWatchdog.unref();
+    }
+  }
+
+  #stopFeedWatchdog() {
+    if (this._feedWatchdog) {
+      clearInterval(this._feedWatchdog);
+      this._feedWatchdog = null;
+    }
   }
 
   handleWebSocketMessage(raw) {
@@ -316,15 +406,13 @@ export class GateAdapter extends BaseAdapter {
       const wsDelayMs = exchangeMsRaw != null ? Math.max(0, localTs - exchangeMsRaw) : null;
 
       const symbol = this.normalizeSymbol(this.toCompactSymbol(contract));
-      this.emit(EventTypes.TICKER, {
+      this.#emitBookTicker({
         symbol,
         bid,
         ask,
         timestamp,
         serverTimestamp,
-        localTimestamp: localTs,
-        wsDelayMs,
-        source: 'gate'
+        wsDelayMs
       });
     } catch {
       // ignore

@@ -16,7 +16,7 @@ export class BinanceAdapter extends BaseAdapter {
   constructor(config = {}) {
     super({
       name: 'Binance',
-      wsUrl: process.env.BINANCE_WS_URL || 'wss://fstream.binance.com/ws',
+      wsUrl: process.env.BINANCE_WS_URL || 'wss://fstream.binance.com/public/ws',
       restUrl: process.env.BINANCE_REST_URL || 'https://fapi.binance.com',
       papiRestUrl: process.env.BINANCE_PAPI_REST_URL || 'https://papi.binance.com',
       apiUrl: process.env.BINANCE_PAPI_REST_URL || 'https://papi.binance.com',
@@ -34,11 +34,33 @@ export class BinanceAdapter extends BaseAdapter {
     this._subscribedAt = 0;
     this._publicWsOpenedAt = 0;
     this._publicWsReconnectAt = 0;
-    this._feedWatchdog = null;
+    this._stalenessCheckTimer = null;
     this._reconnectingPublicWs = false;
     this._publicWsGen = 0;
-    this._restRefreshPending = false;
-    /** 按 symbol 记录最后 WS 消息时刻（HOME 可死、BTC 仍活时单独补价） */
+    this._publicWs24hTimer = null;
+    this._publicReconnectAttempts = 0;
+    this._maxPublicReconnectAttempts = 20;
+    this._nextReconnectAllowedAt = 0;
+    this._reconnectCooldownMs = 60_000;
+    this._lastPongTime = 0;
+    this._pongCheckTimer = null;
+    this._heartbeatCounterResetTimer = null;
+    this._pongSentCount = 0;
+    this.pongTimeout = 10 * 60 * 1000;
+    this._shuttingDown = false;
+    this.subscriptionBatchSize = Number(config.subscriptionBatchSize) || 5;
+    this.subscriptionDelay = Number(config.subscriptionDelay) || 1200;
+    this.subscriptionDelayJitter = Number(config.subscriptionDelayJitter) || 600;
+    this.useCombinedStream = config.useCombinedStream !== false;
+    this.combinedStreamThreshold = Number(config.combinedStreamThreshold) || 10;
+    this.stalenessConfig = config.stalenessConfig || {
+      checkIntervalMs: 3000,
+      warningMs: 5000,
+      criticalMs: 60_000
+    };
+    this._staleSymbols = new Set();
+    this._globalStaleEmitted = false;
+    /** 按 symbol 记录最后 WS 消息时刻 */
     this._lastSymbolMessageAt = new Map();
     this._balanceCache = null;
     this._positionCache = new Map();
@@ -53,10 +75,9 @@ export class BinanceAdapter extends BaseAdapter {
     this._privateWsReconnectAt = 0;
     this._privateWsOpenedAt = 0;
     this.pmWsUrl = process.env.BINANCE_PM_WS_URL || 'wss://fstream.binance.com/pm/ws';
-    this._PUBLIC_WS_RECONNECT_GRACE_MS = 120_000;
     this._PRIVATE_WS_KEEPALIVE_GRACE_MS = 90_000;
-    /** Binance 单连接约 24h 上限；23h50m 主动重建 private WS（对齐 ArbiTrade-1） */
-    this._PRIVATE_WS_PROACTIVE_RECONNECT_MS = (23 * 60 + 50) * 60 * 1000;
+    /** Binance 单连接约 24h 上限；23h50m 主动重建（对齐 ArbiTrade-1） */
+    this._WS_PROACTIVE_RECONNECT_MS = (23 * 60 + 50) * 60 * 1000;
     this._dualSidePosition = null;
   }
 
@@ -84,7 +105,8 @@ export class BinanceAdapter extends BaseAdapter {
   }
 
   async disconnect() {
-    this.#stopFeedWatchdog();
+    this._shuttingDown = true;
+    this.#stopPublicWsTimers();
     await this.stopPrivateAccountStream();
     if (this.ws) {
       this.ws.removeAllListeners();
@@ -120,7 +142,7 @@ export class BinanceAdapter extends BaseAdapter {
     if (this._shuttingDown) return;
     if (this.ws) {
       this.ws.removeAllListeners();
-      this.ws.close();
+      this.ws.terminate();
       this.ws = null;
     }
     const gen = ++this._publicWsGen;
@@ -132,34 +154,84 @@ export class BinanceAdapter extends BaseAdapter {
         this.connected = true;
         this._publicWsOpenedAt = Date.now();
         this._lastPublicMessageAt = this._publicWsOpenedAt;
+        this._lastPongTime = Date.now();
+        this._publicReconnectAttempts = 0;
+        this._globalStaleEmitted = false;
+        this._staleSymbols.clear();
+        await new Promise((r) => setTimeout(r, this.#subscriptionDelayMs()));
+        if (gen !== this._publicWsGen || this.ws !== ws) return;
         await this.#flushSubscriptions({ forceResubscribe: true });
-        this.emit('PUBLIC_WS_RECONNECTED', { exchange: 'binance', reason: 'public-ws-open' });
-        await this.#refreshBookTickerViaRest('public-ws-open');
+        if (gen !== this._publicWsGen || this.ws !== ws) return;
+        this.#startPublicHeartbeat();
+        this.#startStalenessMonitor();
+        this.#startPublicWs24hTimer();
+        this.emit('PUBLIC_WS_RECONNECTED', { exchange: 'binance', reason: 'public-ws-open', clearCache: false });
         resolve();
+      });
+      ws.on('ping', (data) => {
+        if (gen !== this._publicWsGen || this.ws !== ws) return;
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.pong(data);
+          this._lastPongTime = Date.now();
+        }
+      });
+      ws.on('pong', () => {
+        if (gen !== this._publicWsGen || this.ws !== ws) return;
+        this._lastPongTime = Date.now();
       });
       ws.on('message', (raw) => {
         if (gen !== this._publicWsGen || this.ws !== ws) return;
         this.handleMessage(raw);
       });
-      ws.on('close', () => {
+      ws.on('close', (code, reason) => {
         if (gen !== this._publicWsGen || this.ws !== ws) return;
-        this.connected = false;
-        if (this._shuttingDown || this._reconnectingPublicWs) return;
-        this.#schedulePublicWsReconnect('close');
+        this.#handlePublicWsClose(code, reason);
       });
       ws.on('error', (err) => {
         if (gen !== this._publicWsGen || this.ws !== ws) return;
-        reject(err);
+        if (ws.readyState === WebSocket.CONNECTING) {
+          reject(err);
+        }
       });
     });
-    this.#startFeedWatchdog();
+  }
+
+  #subscriptionDelayMs() {
+    return this.subscriptionDelay + Math.floor(Math.random() * this.subscriptionDelayJitter);
+  }
+
+  #handlePublicWsClose(code, reason) {
+    this.connected = false;
+    this.#stopPublicWsTimers();
+    if (this._shuttingDown || this._reconnectingPublicWs) return;
+
+    const reasonText = reason ? reason.toString() : '';
+    if (code === 1008 || reasonText.toLowerCase().includes('too many requests')) {
+      this._nextReconnectAllowedAt = Math.max(this._nextReconnectAllowedAt, Date.now() + this._reconnectCooldownMs);
+      console.warn(`[Binance] public WS rate-limited (code=${code}), cooldown ${this._reconnectCooldownMs}ms`);
+    }
+
+    if (this._publicReconnectAttempts >= this._maxPublicReconnectAttempts) {
+      console.error(`[Binance] public WS max reconnect attempts reached (${this._maxPublicReconnectAttempts})`);
+      return;
+    }
+
+    this._publicReconnectAttempts += 1;
+    const baseDelay = Math.min(1000 * (2 ** (this._publicReconnectAttempts - 1)), 30_000);
+    const cooldownDelay = Math.max(0, this._nextReconnectAllowedAt - Date.now());
+    const delay = Math.max(baseDelay, cooldownDelay);
+    console.warn(`[Binance] public WS closed (code=${code}), reconnect in ${delay}ms (${this._publicReconnectAttempts}/${this._maxPublicReconnectAttempts})`);
+
+    setTimeout(() => {
+      this.#schedulePublicWsReconnect('close').catch(() => {});
+    }, delay);
   }
 
   #schedulePublicWsReconnect(reason = 'unknown') {
     if (this._shuttingDown) return;
-    const now = Date.now();
     if (this._reconnectingPublicWs) return;
-    if (now - this._publicWsReconnectAt < 3000) return;
+    const now = Date.now();
+    if (now - this._publicWsReconnectAt < 1000) return;
     this._publicWsReconnectAt = now;
     this.#forcePublicWsReconnect(reason).catch((err) => {
       console.warn(`[Binance] public WS reconnect (${reason}) failed:`, err.message);
@@ -202,48 +274,121 @@ export class BinanceAdapter extends BaseAdapter {
     await this.processQueue();
   }
 
-  #startFeedWatchdog() {
-    this.#stopFeedWatchdog();
-    this._feedWatchdog = setInterval(() => {
-      if (this._shuttingDown || this.subscribedSymbols.length === 0) return;
-      const anchor = Math.max(this._lastPublicMessageAt, this._subscribedAt);
-      if (!anchor) return;
-      const sinceOpen = Date.now() - (this._publicWsOpenedAt || 0);
-      if (sinceOpen < this._PUBLIC_WS_RECONNECT_GRACE_MS) return;
-      const staleMs = Date.now() - anchor;
-      const staleSymbols = this.subscribedSymbols.filter((sym) => {
-        const key = this.normalizeSymbol(sym);
-        const last = this._lastSymbolMessageAt.get(key) ?? anchor;
-        return Date.now() - last > 2_000;
-      });
-      if (staleSymbols.length > 0 && staleMs <= 60_000 && !this._restRefreshPending) {
-        this._restRefreshPending = true;
-        this.#refreshBookTickerViaRest('watchdog-per-symbol', staleSymbols).finally(() => {
-          this._restRefreshPending = false;
-        });
+  #startPublicHeartbeat() {
+    this.#stopPublicHeartbeat();
+    this._lastPongTime = Date.now();
+    this._pongSentCount = 0;
+    this._heartbeatCounterResetTimer = setInterval(() => {
+      this._pongSentCount = 0;
+    }, 1000);
+    this._pongCheckTimer = setInterval(() => {
+      if (this._shuttingDown || this._reconnectingPublicWs) return;
+      if (Date.now() - this._lastPongTime > this.pongTimeout) {
+        console.warn('[Binance] public WS pong timeout, reconnecting...');
+        this.#schedulePublicWsReconnect('pong-timeout');
         return;
       }
-      if (staleMs > 60_000) {
-        console.warn(`[Binance] public WS stale ${staleMs}ms, forcing reconnect...`);
-        this.#schedulePublicWsReconnect('watchdog');
+      if (this._pongSentCount < 5 && this.ws?.readyState === WebSocket.OPEN) {
+        this.ws.pong();
+        this._pongSentCount += 1;
       }
-    }, 15_000);
-    if (typeof this._feedWatchdog.unref === 'function') {
-      this._feedWatchdog.unref();
+    }, 30_000);
+    for (const timer of [this._heartbeatCounterResetTimer, this._pongCheckTimer]) {
+      if (typeof timer?.unref === 'function') timer.unref();
     }
   }
 
-  #stopFeedWatchdog() {
-    if (this._feedWatchdog) {
-      clearInterval(this._feedWatchdog);
-      this._feedWatchdog = null;
+  #stopPublicHeartbeat() {
+    if (this._pongCheckTimer) {
+      clearInterval(this._pongCheckTimer);
+      this._pongCheckTimer = null;
     }
+    if (this._heartbeatCounterResetTimer) {
+      clearInterval(this._heartbeatCounterResetTimer);
+      this._heartbeatCounterResetTimer = null;
+    }
+  }
+
+  #startStalenessMonitor() {
+    this.#stopStalenessMonitor();
+    const cfg = this.stalenessConfig;
+    this._stalenessCheckTimer = setInterval(() => {
+      if (this._shuttingDown || this.subscribedSymbols.length === 0) return;
+      if (this._lastSymbolMessageAt.size === 0 && !this._subscribedAt) return;
+
+      const now = Date.now();
+      let worstAge = 0;
+      let worstSymbol = '';
+
+      for (const sym of this.subscribedSymbols) {
+        const key = this.normalizeSymbol(sym);
+        const last = this._lastSymbolMessageAt.get(key) ?? this._subscribedAt;
+        if (!last) continue;
+        const age = now - last;
+        if (age > cfg.warningMs && age <= cfg.criticalMs && !this._staleSymbols.has(key)) {
+          console.warn(`[Binance] price stale: ${key} ${(age / 1000).toFixed(1)}s`);
+        }
+        if (age > cfg.criticalMs && !this._staleSymbols.has(key)) {
+          this._staleSymbols.add(key);
+          console.error(`[Binance] price frozen: ${key} ${(age / 1000).toFixed(1)}s`);
+        }
+        if (age > worstAge) {
+          worstAge = age;
+          worstSymbol = key;
+        }
+      }
+
+      const totalCount = this.subscribedSymbols.length;
+      if (!this._globalStaleEmitted && this._staleSymbols.size >= Math.ceil(totalCount * 0.2)) {
+        this._globalStaleEmitted = true;
+        console.error(`[Binance] global price freeze: ${this._staleSymbols.size}/${totalCount}, worst=${worstSymbol} ${(worstAge / 1000).toFixed(1)}s`);
+        this.#schedulePublicWsReconnect('staleness-global');
+      }
+    }, cfg.checkIntervalMs);
+    if (typeof this._stalenessCheckTimer.unref === 'function') {
+      this._stalenessCheckTimer.unref();
+    }
+  }
+
+  #stopStalenessMonitor() {
+    if (this._stalenessCheckTimer) {
+      clearInterval(this._stalenessCheckTimer);
+      this._stalenessCheckTimer = null;
+    }
+    this._staleSymbols.clear();
+    this._globalStaleEmitted = false;
+  }
+
+  #startPublicWs24hTimer() {
+    this.#stopPublicWs24hTimer();
+    this._publicWs24hTimer = setTimeout(() => {
+      if (this._shuttingDown || this._reconnectingPublicWs) return;
+      console.log('[Binance] public WS approaching 24h limit, proactive reconnect...');
+      this.#schedulePublicWsReconnect('24h-limit');
+    }, this._WS_PROACTIVE_RECONNECT_MS);
+    if (typeof this._publicWs24hTimer.unref === 'function') {
+      this._publicWs24hTimer.unref();
+    }
+  }
+
+  #stopPublicWs24hTimer() {
+    if (this._publicWs24hTimer) {
+      clearTimeout(this._publicWs24hTimer);
+      this._publicWs24hTimer = null;
+    }
+  }
+
+  #stopPublicWsTimers() {
+    this.#stopPublicHeartbeat();
+    this.#stopStalenessMonitor();
+    this.#stopPublicWs24hTimer();
   }
 
   async #forcePublicWsReconnect(reason = 'unknown') {
     if (this._reconnectingPublicWs || this._shuttingDown) return;
     this._reconnectingPublicWs = true;
     try {
+      this.#stopPublicWsTimers();
       if (this.ws) {
         this.ws.removeAllListeners();
         this.ws.terminate();
@@ -285,6 +430,12 @@ export class BinanceAdapter extends BaseAdapter {
     this._lastPublicMessageAt = localTs;
     const sym = this.normalizeSymbol(ticker.symbol);
     this._lastSymbolMessageAt.set(sym, localTs);
+    if (this._staleSymbols.has(sym)) {
+      this._staleSymbols.delete(sym);
+      if (this._staleSymbols.size === 0) {
+        this._globalStaleEmitted = false;
+      }
+    }
     this.emit(EventTypes.TICKER, {
       ...ticker,
       symbol: sym,
@@ -314,11 +465,24 @@ export class BinanceAdapter extends BaseAdapter {
     if (this.processing || !this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     this.processing = true;
     try {
-      while (this.subscriptionQueue.length > 0) {
-        const batch = this.subscriptionQueue.splice(0, 10);
+      const pending = [...this.subscriptionQueue];
+      this.subscriptionQueue = [];
+      if (pending.length === 0) return;
+
+      const useCombined = this.useCombinedStream && pending.length >= this.combinedStreamThreshold;
+      const batchSize = useCombined ? 200 : this.subscriptionBatchSize;
+      const betweenBatchMs = useCombined ? 500 : this.#subscriptionDelayMs();
+
+      for (let i = 0; i < pending.length; i += batchSize) {
+        const batch = pending.slice(i, i + batchSize);
         this.ws.send(JSON.stringify({ method: 'SUBSCRIBE', params: batch, id: Date.now() }));
         for (const stream of batch) this.activeSubscriptions.add(stream);
-        await new Promise((r) => setTimeout(r, 300));
+        if (i + batchSize < pending.length) {
+          await new Promise((r) => setTimeout(r, betweenBatchMs));
+        }
+      }
+      if (useCombined) {
+        console.log(`[Binance] combined SUBSCRIBE ${pending.length} streams`);
       }
     } finally {
       this.processing = false;
@@ -772,7 +936,7 @@ export class BinanceAdapter extends BaseAdapter {
       if (this._shuttingDown || this._privateWsReconnecting) return;
       console.log('[Binance] private WS approaching 24h limit, proactive reconnect...');
       this.#schedulePrivateWsReconnect('24h-limit');
-    }, this._PRIVATE_WS_PROACTIVE_RECONNECT_MS);
+    }, this._WS_PROACTIVE_RECONNECT_MS);
     if (typeof this._privateWs24hTimer.unref === 'function') {
       this._privateWs24hTimer.unref();
     }
@@ -922,15 +1086,26 @@ export class BinanceAdapter extends BaseAdapter {
         this._privateWsOpenedAt = Date.now();
         try {
           await this.syncAccountSnapshot({ silent: true });
+          if (gen !== this._privateWsGen || this.privateWs !== ws) return;
           this.emit('PRIVATE_WS_CONNECTED', { exchange: 'binance' });
           console.log('[Binance] private WS connected, account snapshot synced');
+          this.#startListenKeyTimer();
+          this.#startPrivateWs24hTimer();
+          resolve();
         } catch (err) {
           console.error('[Binance] private WS onOpen sync failed:', err.message);
+          this.privateWsConnected = false;
+          this.#stopPrivateWsTimers();
           this.emit('PRIVATE_WS_DISCONNECTED', { exchange: 'binance' });
+          this._privateWsGen += 1;
+          ws.removeAllListeners();
+          ws.terminate();
+          if (this.privateWs === ws) this.privateWs = null;
+          setTimeout(() => {
+            this.#schedulePrivateWsReconnect('sync-failed');
+          }, 2000);
+          reject(err);
         }
-        this.#startListenKeyTimer();
-        this.#startPrivateWs24hTimer();
-        resolve();
       });
       ws.on('ping', (data) => {
         if (gen !== this._privateWsGen || this.privateWs !== ws) return;
@@ -942,6 +1117,7 @@ export class BinanceAdapter extends BaseAdapter {
       ws.on('close', () => {
         if (gen !== this._privateWsGen || this.privateWs !== ws) return;
         this.privateWsConnected = false;
+        this.#stopPrivateWsTimers();
         this.emit('PRIVATE_WS_DISCONNECTED', { exchange: 'binance' });
         if (this._shuttingDown || this._privateWsReconnecting) return;
         setTimeout(() => {
@@ -951,7 +1127,9 @@ export class BinanceAdapter extends BaseAdapter {
       ws.on('error', (err) => {
         if (gen !== this._privateWsGen || this.privateWs !== ws) return;
         console.error('[Binance] private WS error:', err.message);
-        reject(err);
+        if (ws.readyState === WebSocket.CONNECTING) {
+          reject(err);
+        }
       });
     });
   }

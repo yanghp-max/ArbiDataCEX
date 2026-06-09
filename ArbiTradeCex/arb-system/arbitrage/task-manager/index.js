@@ -66,12 +66,14 @@ export class TaskManager {
     binance.on(EventTypes.TICKER, (t) => onPriceTicker('binance', t));
     gate.on(EventTypes.TICKER, (t) => onPriceTicker('gate', t));
     const onBinanceMarketRefresh = (payload = {}) => {
-      this.sharedResources.quoteAggregator.clearSource('binance');
+      if (payload.clearCache) {
+        this.sharedResources.quoteAggregator.clearSource('binance');
+      }
       for (const sym of strat.symbols) {
         this.#schedulePriceTick(sym);
       }
       if (payload.reason) {
-        console.log(`[TaskManager] Binance market cache cleared (${payload.reason})`);
+        console.log(`[TaskManager] Binance public WS event (${payload.reason})`);
       }
     };
     binance.on('PUBLIC_WS_RECONNECTED', onBinanceMarketRefresh);
