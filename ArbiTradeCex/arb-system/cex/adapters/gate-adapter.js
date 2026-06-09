@@ -68,6 +68,8 @@ export class GateAdapter extends BaseAdapter {
     this._userId = null;
     /** contract -> quanto_multiplier（WS 持仓推送不含 multiplier） */
     this._contractMultipliers = new Map();
+    this._accountWsPingTimer = null;
+    this._accountWsPingMs = Number(process.env.GATE_ACCOUNT_WS_PING_MS) || 30_000;
   }
 
   #getContractMultiplier(contract) {
@@ -209,10 +211,68 @@ export class GateAdapter extends BaseAdapter {
   }
 
   #teardownAccountWebSocket() {
+    this.#stopAccountWsPing();
     if (this.accountWs) {
       this.accountWs.removeAllListeners();
       this.accountWs.close();
       this.accountWs = null;
+    }
+  }
+
+  #stopAccountWsPing() {
+    if (this._accountWsPingTimer) {
+      clearInterval(this._accountWsPingTimer);
+      this._accountWsPingTimer = null;
+    }
+  }
+
+  #startAccountWsPing() {
+    this.#stopAccountWsPing();
+    this._accountWsPingTimer = setInterval(() => {
+      const ws = this.accountWs;
+      if (!ws || ws.readyState !== WebSocket.OPEN) return;
+      try {
+        ws.send(JSON.stringify({
+          time: Math.floor(Date.now() / 1000),
+          channel: 'futures.ping'
+        }));
+      } catch (err) {
+        console.warn('[Gate] account fx-ws ping send failed:', err.message);
+      }
+    }, this._accountWsPingMs);
+    if (typeof this._accountWsPingTimer.unref === 'function') {
+      this._accountWsPingTimer.unref();
+    }
+  }
+
+  #formatGateWsError(error) {
+    if (error == null) return 'unknown';
+    if (typeof error === 'string') return error;
+    const code = error.code ?? error.label ?? '';
+    const message = error.message ?? error.msg ?? JSON.stringify(error);
+    return code ? `${code}: ${message}` : message;
+  }
+
+  #logAccountWsDiagnostic(msg) {
+    if (!msg || typeof msg !== 'object') return;
+    if (msg.channel === 'futures.pong') return;
+
+    if (msg.error != null) {
+      console.warn(
+        `[Gate] account fx-ws error channel=${msg.channel || '?'} event=${msg.event || '?'}: `
+        + this.#formatGateWsError(msg.error)
+      );
+      return;
+    }
+
+    const channel = msg.channel || '';
+    const event = msg.event || '';
+    if (
+      (channel === 'futures.balances' || channel === 'futures.positions')
+      && (event === 'subscribe' || event === 'unsubscribe')
+    ) {
+      const status = msg.result?.status ?? (msg.result != null ? 'ok' : 'ack');
+      console.log(`[Gate] account fx-ws ${event} ${channel} -> ${status}`);
     }
   }
 
@@ -398,6 +458,7 @@ export class GateAdapter extends BaseAdapter {
             await this.#subscribePositions(this._privateAccountSymbols);
           }
           console.log('[Gate] account fx-ws connected (worker mode: balances/positions only)');
+          this.#startAccountWsPing();
           if (resubscribe && this.#privateAccountStreamReady()) {
             this.#emitPrivateWsConnected();
           }
@@ -410,6 +471,7 @@ export class GateAdapter extends BaseAdapter {
       ws.on('message', (raw) => this.#handleAccountWsMessage(raw));
 
       ws.on('close', (code) => {
+        this.#stopAccountWsPing();
         if (this._shuttingDown || this._reconnectingAccountWs) return;
 
         if (this._accountWsReconnectAttempts >= this._maxAccountWsReconnectAttempts) {
@@ -441,7 +503,9 @@ export class GateAdapter extends BaseAdapter {
       ws.on('error', (err) => {
         if (ws.readyState === WebSocket.CONNECTING) {
           reject(err);
+          return;
         }
+        console.warn('[Gate] account fx-ws error:', err.message);
       });
     });
   }
@@ -625,9 +689,10 @@ export class GateAdapter extends BaseAdapter {
   #handleAccountWsMessage(raw) {
     try {
       const msg = JSON.parse(raw.toString());
+      this.#logAccountWsDiagnostic(msg);
       this.#handlePrivateChannelMessage(msg);
-    } catch {
-      // ignore
+    } catch (err) {
+      console.warn('[Gate] account fx-ws message parse failed:', err.message);
     }
   }
 
