@@ -10,7 +10,7 @@
     "cooldownMs": 1000,
     "maxPriceAgeMs": 1000,
     "maxLegSkewMs": 2000,
-    "maxWsLatencyMs": 100,
+    "maxWsLatencyMs": 200,
     "maxCrossLegMidBps": 15,
     "priceUpdateMode": "any",
     "restRefreshBeforeOrder": false,

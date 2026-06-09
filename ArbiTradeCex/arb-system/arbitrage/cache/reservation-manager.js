@@ -46,6 +46,40 @@ export class ReservationManager {
     return Math.max(0, maxPositionQty - pos - reserved);
   }
 
+  /** 预占失败原因（含超出量，供拦单日志） */
+  describeReserveFail({ symbol, qty, aNeed, bNeed, maxPositionQty, increasesAbs }) {
+    const sym = this.#compactSymbol(symbol);
+    if (this.busySymbols.has(sym)) {
+      return 'symbol 在途预占中（busySymbols）';
+    }
+
+    const minUsdt = this.accountCache.minAvailableUsdt ?? 50;
+    const availA = this.getAvailableUsdt('binance');
+    const needA = Math.max(minUsdt, aNeed);
+    if (availA < needA) {
+      return `Binance USDT 不足 可用${availA.toFixed(2)} < 需要${needA.toFixed(2)} (差${(needA - availA).toFixed(2)})`;
+    }
+
+    const availB = this.getAvailableUsdt('gate');
+    const needB = Math.max(minUsdt, bNeed);
+    if (availB < needB) {
+      return `Gate USDT 不足 可用${availB.toFixed(2)} < 需要${needB.toFixed(2)} (差${(needB - availB).toFixed(2)})`;
+    }
+
+    if (increasesAbs) {
+      const capA = this.getAvailablePositionCapacity('binance', sym, maxPositionQty);
+      const capB = this.getAvailablePositionCapacity('gate', sym, maxPositionQty);
+      if (qty > capA) {
+        return `Binance 仓位上限 qty=${qty} > 可用容量${capA.toFixed(6)} (超出${(qty - capA).toFixed(6)}) maxPos=${maxPositionQty}`;
+      }
+      if (qty > capB) {
+        return `Gate 仓位上限 qty=${qty} > 可用容量${capB.toFixed(6)} (超出${(qty - capB).toFixed(6)}) maxPos=${maxPositionQty}`;
+      }
+    }
+
+    return '预占失败（未知原因）';
+  }
+
   async tryReserve({ tradeId, symbol, direction, qty, aNeed, bNeed, maxPositionQty, increasesAbs }) {
     const sym = this.#compactSymbol(symbol);
     return this.mutex.runExclusive(() => {

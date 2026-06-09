@@ -19,14 +19,15 @@ import {
 import {
   PrecisionChecker,
   RiskManager,
-  finalCheckPass,
   resolveLatencyLimits,
-  tickLatencyPass,
-  tickSignalAgePass,
+  analyzeLatencyFail,
+  analyzeSignalAgeFail,
+  analyzeFinalCheckFail,
   tickPriceSnapshot,
   tickPriceSlippagePass,
   describePriceSlippageFail
 } from '../risk/risk-manager.js';
+import { logTradeSkip } from '../monitoring/trade-skip-log.js';
 import { calcTradePnl, calcTradeGross, calcTradeFeeCost } from '../execution/result-reporter.js';
 import {
   attachFillPricesToTrace,
@@ -88,6 +89,8 @@ export class CexCexTask {
     this.enforceLatency = sharedResources.enforceLatency;
     this.latencyLimits = resolveLatencyLimits(this.cfg, this.enforceLatency);
     this.cexCost = resolveCexCostConfig(strategyConfig);
+    this.logTradeSkips = strategyConfig.logTradeSkips !== false;
+    this.logTradeSkipThrottleMs = strategyConfig.logTradeSkipThrottleMs ?? 10_000;
 
     for (const sym of strategyConfig.symbols) {
       this.engines.set(sym, new RollingSignalEngine({
@@ -139,6 +142,14 @@ export class CexCexTask {
     }
 
     return { flat: false, direction, branch };
+  }
+
+  #logSkip(symbol, stage, reason) {
+    logTradeSkip(symbol, stage, reason, {
+      enabled: this.logTradeSkips,
+      throttleMs: this.logTradeSkipThrottleMs,
+      tradingEnabled: this.sr.tradingEnabled
+    });
   }
 
   #clearLocksIfFlat(symbol) {
@@ -229,16 +240,42 @@ export class CexCexTask {
     if (!signal.windowReady || signal.openZAb == null || signal.openZBa == null) return;
 
     // 延迟/跨腿检查只拦下单，不拦入窗（同 ArbiTrade-1 活跃 zscore 路径）
-    if (this.enforceLatency && !tickLatencyPass(tick, this.latencyLimits)) return;
+    const latencyAtSignal = analyzeLatencyFail(tick, this.latencyLimits);
+    if (this.enforceLatency && !latencyAtSignal.pass) {
+      this.#logSkip(symbol, '延迟·信号前', latencyAtSignal.reason);
+      return;
+    }
 
-    if (tick.fundingA != null && tick.fundingA < this.cfg.fundingMin) return;
-    if (tick.fundingB != null && tick.fundingB < this.cfg.fundingMin) return;
+    if (tick.fundingA != null && tick.fundingA < this.cfg.fundingMin) {
+      this.#logSkip(
+        symbol,
+        '资金费率',
+        `Binance funding=${tick.fundingA} < 下限${this.cfg.fundingMin}`
+          + ` (低${(this.cfg.fundingMin - tick.fundingA).toFixed(4)})`
+      );
+      return;
+    }
+    if (tick.fundingB != null && tick.fundingB < this.cfg.fundingMin) {
+      this.#logSkip(
+        symbol,
+        '资金费率',
+        `Gate funding=${tick.fundingB} < 下限${this.cfg.fundingMin}`
+          + ` (低${(this.cfg.fundingMin - tick.fundingB).toFixed(4)})`
+      );
+      return;
+    }
 
     const sinceOrder = Date.now() - this.lastOrderTs.get(symbol);
     if (sinceOrder < this.cfg.cooldownMs) return;
     if (this.executingSymbols.has(symbol)) return;
     const maxInFlight = Number(this.cfg.maxInFlightTrades);
     if (Number.isFinite(maxInFlight) && maxInFlight > 0 && this.sr.inFlightCount >= maxInFlight) {
+      this.#logSkip(
+        symbol,
+        '在途笔数',
+        `inFlight=${this.sr.inFlightCount} >= 上限${maxInFlight}`
+          + ` (超出${this.sr.inFlightCount - maxInFlight})`
+      );
       return;
     }
 
@@ -246,10 +283,26 @@ export class CexCexTask {
 
     if (lock.flat) {
       tradePlan = pickOpenFromFlat(signal, this.cfg.zOpen);
+      if (!tradePlan) {
+        this.#logSkip(
+          symbol,
+          'z-score·开仓',
+          `openZAb=${signal.openZAb?.toFixed(3) ?? '?'} openZBa=${signal.openZBa?.toFixed(3) ?? '?'}`
+            + ` < zOpen=${this.cfg.zOpen}`
+        );
+      }
     } else if (lock.direction && lock.branch) {
       const { openZ, closeZ } = lockedZValues(signal, lock.direction, lock.branch);
       const decision = decideAddOrClose(openZ, closeZ, this.cfg.zOpen, this.cfg.zClose);
-      if (!decision) return;
+      if (!decision) {
+        this.#logSkip(
+          symbol,
+          'z-score·加仓平仓',
+          `openZ=${openZ?.toFixed(3) ?? '?'} closeZ=${closeZ?.toFixed(3) ?? '?'}`
+            + ` 未达 zOpen=${this.cfg.zOpen} / zClose=${this.cfg.zClose}`
+        );
+        return;
+      }
 
       const execDirection = lock.direction;
       const adjSpread = execDirection === '-a+b' ? spreads.spreadAbAdj : spreads.spreadBaAdj;
@@ -297,6 +350,7 @@ export class CexCexTask {
         };
       }
     } else {
+      this.#logSkip(symbol, '持仓锁', '有持仓但 direction/branch 未就绪，跳过');
       return;
     }
 
@@ -307,21 +361,31 @@ export class CexCexTask {
     const spreadFilterDir = tradePlan.spreadFilterDirection ?? tradePlan.direction;
     const filterSpread = spreadFilterDir === '-a+b' ? spreads.spreadAbAdj : spreads.spreadBaAdj;
 
-    if (!finalCheckPass(tick, spreadFilterDir, filterSpread, this.latencyLimits)) return;
+    const finalAtSignal = analyzeFinalCheckFail(tick, filterSpread, this.latencyLimits);
+    if (!finalAtSignal.pass) {
+      this.#logSkip(symbol, `终检·${tradePlan.action}`, finalAtSignal.reason);
+      return;
+    }
 
     const orderBuild = this.precision.buildOrder({
       direction: execDirection,
       tick,
       orderUsd: this.cfg.orderUsd
     });
-    if (orderBuild.qty <= 0) return;
+    if (orderBuild.qty <= 0) {
+      this.#logSkip(symbol, '下单量', `buildOrder qty=${orderBuild.qty} <= 0`);
+      return;
+    }
 
     let orderForExec = orderBuild;
     let qty = orderBuild.qty;
     if (isClose) {
       const clipped = this.risk.clipCloseQty(qty, tick, this.sr.accountCache);
       const aligned = this.precision.alignHedgeFromBaseQty(tick, clipped);
-      if (aligned.qty <= 0) return;
+      if (aligned.qty <= 0) {
+        this.#logSkip(symbol, '平仓量', `clip/align 后 qty=${aligned.qty} <= 0`);
+        return;
+      }
       orderForExec = { ...orderBuild, qty: aligned.qty, gateSize: aligned.gateSize };
       qty = aligned.qty;
     } else {
@@ -332,7 +396,10 @@ export class CexCexTask {
         clippedQty: clipped,
         orderUsd: this.cfg.orderUsd
       });
-      if (!finalized) return;
+      if (!finalized) {
+        this.#logSkip(symbol, '开仓量', 'finalizeOpenOrder 未达两腿最小可成交量');
+        return;
+      }
       orderForExec = finalized;
       qty = finalized.qty;
     }
@@ -361,14 +428,19 @@ export class CexCexTask {
       if (needFresh) {
         try {
           await cache.ensureFresh(this.sr.cexManager);
-        } catch {
+        } catch (err) {
+          this.#logSkip(symbol, '刷账户', `ensureFresh 失败: ${err?.message || err}`);
           return;
         }
       }
     }
     markLatency(latencyTrace, 'account_fresh_done');
 
-    if (this.enforceLatency && !tickSignalAgePass(tick, this.latencyLimits.signalMaxAgeMs)) return;
+    const signalAgeCheck = analyzeSignalAgeFail(tick, this.latencyLimits.signalMaxAgeMs);
+    if (this.enforceLatency && !signalAgeCheck.pass) {
+      this.#logSkip(symbol, '信号时效', signalAgeCheck.reason);
+      return;
+    }
 
     // 在 await 之前占位（对齐 ArbiTrade-1 预占前互斥 + 单路径 tick）
     if (this.executingSymbols.has(symbol)) return;
@@ -398,6 +470,15 @@ export class CexCexTask {
     }
 
     if (!reservations) {
+      const reserveReason = this.sr.reservationManager.describeReserveFail({
+        symbol,
+        qty,
+        aNeed,
+        bNeed,
+        maxPositionQty: maxPosQty,
+        increasesAbs
+      });
+      this.#logSkip(symbol, `预占·${tradePlan.action}`, reserveReason);
       this.#releaseSymbolClaim(symbol, { restoreCooldown: true });
       return;
     }
@@ -497,7 +578,8 @@ export class CexCexTask {
       const freshTick = restBeforeOrder
         ? await refreshTickFromRest(this.sr.cexManager, this.sr.quoteAggregator, symbol)
         : this.sr.quoteAggregator.buildTick(symbol);
-      const latencyOk = !this.enforceLatency || tickLatencyPass(freshTick, this.latencyLimits);
+      const latencyAtExec = analyzeLatencyFail(freshTick, this.latencyLimits);
+      const latencyOk = !this.enforceLatency || latencyAtExec.pass;
       const symbolCost = resolveCexCostConfigForSymbol(this.cfg, symbol);
       const slipCheck = freshTick
         ? tickPriceSlippagePass(priceSnapshot, freshTick, execDirection, {
@@ -511,20 +593,26 @@ export class CexCexTask {
           setFreshTickOnLatencyTrace(latencyTrace, freshTick);
           markLatency(latencyTrace, 'fresh_tick_done');
         }
-        this.#logLatency(latencyTrace, {
-          reason: !freshTick
-            ? '无行情'
-            : !latencyOk
-              ? '延迟检查未过'
-              : describePriceSlippageFail(slipCheck) || 'WS 价格超过滑点',
-          partial: true
-        });
+        const skipReason = !freshTick
+          ? '无行情（发单前 buildTick 失败）'
+          : !latencyOk
+            ? latencyAtExec.reason
+            : describePriceSlippageFail(slipCheck) || 'WS 价格超过滑点';
+        const skipStage = !freshTick
+          ? '发单前·无行情'
+          : !latencyOk
+            ? '发单前·延迟'
+            : '发单前·滑点';
+        this.#logSkip(symbol, skipStage, skipReason);
+        this.#logLatency(latencyTrace, { reason: skipReason, partial: true });
         this.#releaseSymbolClaim(symbol, { restoreCooldown: true });
         return;
       }
 
-      if (!finalCheckPass(freshTick, execDirection, adjSpread, this.latencyLimits)) {
-        this.#logLatency(latencyTrace, { reason: '最终价差校验未过' });
+      const finalAtExec = analyzeFinalCheckFail(freshTick, adjSpread, this.latencyLimits);
+      if (!finalAtExec.pass) {
+        this.#logSkip(symbol, '发单前·终检', finalAtExec.reason);
+        this.#logLatency(latencyTrace, { reason: finalAtExec.reason });
         this.#releaseSymbolClaim(symbol, { restoreCooldown: true });
         return;
       }

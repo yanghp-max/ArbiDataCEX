@@ -295,19 +295,93 @@ export function tickWsLatencyPass(tick, maxWsLatencyMs) {
 }
 
 export function tickLatencyPass(tick, limits) {
-  if (!latencyChecksEnabled(limits)) return true;
-  return tickExchangeAgePass(tick, limits.maxPriceAgeMs)
-    && tickEachLegAgePass(tick, limits.maxPriceAgeMs)
-    && tickLegSkewPass(tick, limits.maxLegSkewMs)
-    && tickWsLatencyPass(tick, limits.maxWsLatencyMs)
-    && tickCrossLegMidPass(tick, limits.maxCrossLegMidBps);
+  return analyzeLatencyFail(tick, limits).pass;
+}
+
+function crossLegMidBps(tick) {
+  const aMid = (Number(tick.aBid) + Number(tick.aAsk)) / 2;
+  const bMid = (Number(tick.bBid) + Number(tick.bAsk)) / 2;
+  if (!(aMid > 0 && bMid > 0)) return null;
+  const ref = Math.min(aMid, bMid);
+  return (Math.abs(aMid - bMid) / ref) * 10000;
+}
+
+/** @returns {{ pass: boolean, code?: string, reason?: string }} */
+export function analyzeLatencyFail(tick, limits) {
+  if (!latencyChecksEnabled(limits)) return { pass: true };
+  if (!tick) return { pass: false, code: 'no_tick', reason: '没有可用行情' };
+
+  const { maxPriceAgeMs, maxLegSkewMs, maxWsLatencyMs, maxCrossLegMidBps } = limits;
+
+  if (!tickExchangeAgePass(tick, maxPriceAgeMs)) {
+    const exceed = tick.priceAgeMs - maxPriceAgeMs;
+    return {
+      pass: false,
+      code: 'price_age',
+      reason: `行情太旧 priceAgeMs=${tick.priceAgeMs}ms > 上限${maxPriceAgeMs}ms (超出${exceed.toFixed(0)}ms)`
+    };
+  }
+  if (!tickEachLegAgePass(tick, maxPriceAgeMs)) {
+    const aEx = Math.max(0, (tick.aAgeMs ?? 0) - maxPriceAgeMs);
+    const bEx = Math.max(0, (tick.bAgeMs ?? 0) - maxPriceAgeMs);
+    return {
+      pass: false,
+      code: 'leg_age',
+      reason: `单腿行情过旧 A=${tick.aAgeMs}ms B=${tick.bAgeMs}ms > 上限${maxPriceAgeMs}ms`
+        + ` (A超出${aEx.toFixed(0)}ms B超出${bEx.toFixed(0)}ms)`
+    };
+  }
+  const midBps = crossLegMidBps(tick);
+  if (!tickCrossLegMidPass(tick, maxCrossLegMidBps)) {
+    const exceed = midBps != null ? midBps - maxCrossLegMidBps : null;
+    const aMid = ((tick.aBid + tick.aAsk) / 2).toFixed(6);
+    const bMid = ((tick.bBid + tick.bAsk) / 2).toFixed(6);
+    return {
+      pass: false,
+      code: 'cross_mid',
+      reason: `两腿 mid 偏离 ${midBps?.toFixed(2) ?? '?'}bps > 上限${maxCrossLegMidBps}bps`
+        + (exceed != null ? ` (超出${exceed.toFixed(2)}bps)` : '')
+        + ` (A mid=${aMid} B mid=${bMid})`
+    };
+  }
+  if (!tickLegSkewPass(tick, maxLegSkewMs)) {
+    const exceed = (tick.legSkewMs ?? 0) - maxLegSkewMs;
+    return {
+      pass: false,
+      code: 'leg_skew',
+      reason: `两腿收到时间差 legSkewMs=${tick.legSkewMs}ms > 上限${maxLegSkewMs}ms (超出${exceed.toFixed(0)}ms)`
+    };
+  }
+  const ws = tick.maxWsLatencyMs ?? Math.max(tick.aLatencyMs ?? 0, tick.bLatencyMs ?? 0);
+  if (!tickWsLatencyPass(tick, maxWsLatencyMs)) {
+    const exceed = ws - maxWsLatencyMs;
+    return {
+      pass: false,
+      code: 'ws_latency',
+      reason: `WS 传输延迟 ${ws}ms > 上限${maxWsLatencyMs}ms (超出${exceed.toFixed(0)}ms)`
+    };
+  }
+  return { pass: true };
 }
 
 /** 本机收到价格后的处理延迟（对齐 stable priceReceiveTime → 执行） */
 export function tickSignalAgePass(tick, signalMaxAgeMs) {
-  if (!Number.isFinite(signalMaxAgeMs)) return true;
+  return analyzeSignalAgeFail(tick, signalMaxAgeMs).pass;
+}
+
+/** @returns {{ pass: boolean, code?: string, reason?: string }} */
+export function analyzeSignalAgeFail(tick, signalMaxAgeMs) {
+  if (!Number.isFinite(signalMaxAgeMs)) return { pass: true };
+  if (!tick) return { pass: false, code: 'no_tick', reason: '没有可用行情' };
   const base = tick.priceReceiveMs ?? tick.timestamp;
-  return Date.now() - base <= signalMaxAgeMs;
+  const age = Date.now() - base;
+  if (age <= signalMaxAgeMs) return { pass: true };
+  const exceed = age - signalMaxAgeMs;
+  return {
+    pass: false,
+    code: 'signal_age',
+    reason: `收价后处理过久 signalAge=${age}ms > 上限${signalMaxAgeMs}ms (超出${exceed.toFixed(0)}ms)`
+  };
 }
 
 /** 执行前：bid/ask 与决策时快照一致（对齐 stable price_stale / dedup_price_stale） */
@@ -434,47 +508,39 @@ export function tickPriceSnapshot(symbol, tick) {
 }
 
 export function finalCheckPass(tick, direction, adjSpread, limits) {
-  if (latencyChecksEnabled(limits) && !tickLatencyPass(tick, limits)) return false;
-  if (adjSpread < 0 || adjSpread > 10) return false;
-  return true;
+  return analyzeFinalCheckFail(tick, adjSpread, limits).pass;
+}
+
+/** @returns {{ pass: boolean, code?: string, reason?: string }} */
+export function analyzeFinalCheckFail(tick, adjSpread, limits) {
+  const latency = analyzeLatencyFail(tick, limits);
+  if (!latency.pass) return latency;
+  const spread = Number(adjSpread);
+  if (spread < 0) {
+    return {
+      pass: false,
+      code: 'spread_negative',
+      reason: `扣费后价差为负 ${spread.toFixed(4)}% < 0 (超出${Math.abs(spread).toFixed(4)}%)`
+    };
+  }
+  if (spread > 10) {
+    return {
+      pass: false,
+      code: 'spread_too_high',
+      reason: `扣费后价差异常偏大 ${spread.toFixed(4)}% > 10% (超出${(spread - 10).toFixed(4)}%)`
+    };
+  }
+  return { pass: true };
 }
 
 /** 延迟检查未通过时的通俗说明（供实盘日志） */
 export function describeLatencyFail(tick, limits) {
-  if (!tick) return '没有可用行情';
-  if (!latencyChecksEnabled(limits)) return null;
-  if (!tickExchangeAgePass(tick, limits.maxPriceAgeMs)) {
-    return `行情太旧（${tick.priceAgeMs}ms，上限${limits.maxPriceAgeMs}ms）`;
-  }
-  if (!tickEachLegAgePass(tick, limits.maxPriceAgeMs)) {
-    return `单腿行情过旧（A=${tick.aAgeMs}ms B=${tick.bAgeMs}ms，上限${limits.maxPriceAgeMs}ms）`;
-  }
-  if (!tickCrossLegMidPass(tick, limits.maxCrossLegMidBps)) {
-    const aMid = ((tick.aBid + tick.aAsk) / 2).toFixed(6);
-    const bMid = ((tick.bBid + tick.bAsk) / 2).toFixed(6);
-    return `两腿 mid 偏离过大（A=${aMid} B=${bMid}，上限${limits.maxCrossLegMidBps}bps）`;
-  }
-  if (!tickLegSkewPass(tick, limits.maxLegSkewMs)) {
-    return `两腿不同步（时间差${tick.legSkewMs}ms，上限${limits.maxLegSkewMs}ms）`;
-  }
-  const ws = tick.maxWsLatencyMs ?? Math.max(tick.aLatencyMs ?? 0, tick.bLatencyMs ?? 0);
-  if (!tickWsLatencyPass(tick, limits.maxWsLatencyMs)) {
-    return `网络延迟过高（${ws}ms，上限${limits.maxWsLatencyMs}ms）`;
-  }
-  return '延迟检查未通过';
+  const r = analyzeLatencyFail(tick, limits);
+  return r.pass ? null : (r.reason ?? '延迟检查未通过');
 }
 
 /** 最终校验未通过时的通俗说明 */
 export function describeFinalCheckFail(tick, adjSpread, limits) {
-  const latency = describeLatencyFail(tick, limits);
-  if (latency && latencyChecksEnabled(limits) && !tickLatencyPass(tick, limits)) {
-    return latency;
-  }
-  if (adjSpread < 0) {
-    return `扣费后价差为负（${adjSpread.toFixed(4)}%），做了也亏`;
-  }
-  if (adjSpread > 10) {
-    return `扣费后价差异常偏大（${adjSpread.toFixed(4)}%）`;
-  }
-  return '最终校验未通过';
+  const r = analyzeFinalCheckFail(tick, adjSpread, limits);
+  return r.pass ? null : (r.reason ?? '最终校验未通过');
 }
