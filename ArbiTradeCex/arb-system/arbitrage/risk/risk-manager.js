@@ -242,8 +242,8 @@ export function resolveLatencyLimits(strategyConfig, enforceLatency) {
 
 /** 是否启用延迟类检查（enforceLatency=false 或字段缺失时不检查） */
 export function latencyChecksEnabled(limits) {
-  return Number.isFinite(limits?.maxPriceAgeMs)
-    && limits.maxPriceAgeMs !== Infinity;
+  return Number.isFinite(limits?.maxWsLatencyMs)
+    && limits.maxWsLatencyMs !== Infinity;
 }
 
 /** 组合行情：最旧腿接收年龄 max(aAgeMs, bAgeMs) */
@@ -252,7 +252,7 @@ export function tickExchangeAgePass(tick, maxPriceAgeMs) {
   return tick.priceAgeMs <= maxPriceAgeMs;
 }
 
-/** CEX-CEX：两腿各自接收年龄均须达标（对齐 ArbiTrade-1 lastPriceUpdate 按源检查） */
+/** 两腿各自接收年龄（仅监控/Dashboard；下单不据此拦截，对齐 ArbiTrade-1） */
 export function tickEachLegAgePass(tick, maxPriceAgeMs) {
   if (!Number.isFinite(maxPriceAgeMs)) return true;
   const a = tick.aAgeMs;
@@ -285,39 +285,16 @@ export function tickLatencyPass(tick, limits) {
   return analyzeLatencyFail(tick, limits).pass;
 }
 
-/** @returns {{ pass: boolean, code?: string, reason?: string }} */
+/**
+ * 延迟拦截：仅 WS 传输异常（local − 交易所事件时间）。
+ * 不因「某腿久未收到推送」拦截——价未变时由发单前滑点/终检兜底（对齐 ArbiTrade-1）。
+ * @returns {{ pass: boolean, code?: string, reason?: string }}
+ */
 export function analyzeLatencyFail(tick, limits) {
   if (!latencyChecksEnabled(limits)) return { pass: true };
   if (!tick) return { pass: false, code: 'no_tick', reason: '没有可用行情' };
 
-  const { maxPriceAgeMs, maxLegSkewMs, maxWsLatencyMs } = limits;
-
-  if (!tickExchangeAgePass(tick, maxPriceAgeMs)) {
-    const exceed = tick.priceAgeMs - maxPriceAgeMs;
-    return {
-      pass: false,
-      code: 'price_age',
-      reason: `行情太旧 priceAgeMs=${tick.priceAgeMs}ms > 上限${maxPriceAgeMs}ms (超出${exceed.toFixed(0)}ms)`
-    };
-  }
-  if (!tickEachLegAgePass(tick, maxPriceAgeMs)) {
-    const aEx = Math.max(0, (tick.aAgeMs ?? 0) - maxPriceAgeMs);
-    const bEx = Math.max(0, (tick.bAgeMs ?? 0) - maxPriceAgeMs);
-    return {
-      pass: false,
-      code: 'leg_age',
-      reason: `单腿行情过旧 A=${tick.aAgeMs}ms B=${tick.bAgeMs}ms > 上限${maxPriceAgeMs}ms`
-        + ` (A超出${aEx.toFixed(0)}ms B超出${bEx.toFixed(0)}ms)`
-    };
-  }
-  if (!tickLegSkewPass(tick, maxLegSkewMs)) {
-    const exceed = (tick.legSkewMs ?? 0) - maxLegSkewMs;
-    return {
-      pass: false,
-      code: 'leg_skew',
-      reason: `两腿收到时间差 legSkewMs=${tick.legSkewMs}ms > 上限${maxLegSkewMs}ms (超出${exceed.toFixed(0)}ms)`
-    };
-  }
+  const { maxWsLatencyMs } = limits;
   const ws = tick.maxWsLatencyMs ?? Math.max(tick.aLatencyMs ?? 0, tick.bLatencyMs ?? 0);
   if (!tickWsLatencyPass(tick, maxWsLatencyMs)) {
     const exceed = ws - maxWsLatencyMs;

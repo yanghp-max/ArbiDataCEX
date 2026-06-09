@@ -1,7 +1,7 @@
 /**
  * 合并 A/B ticker → tick（对齐 ArbiTrade-1 priceData：各 source 缓存最后一条）
  * - aAgeMs / bAgeMs：各腿距上次本机接收的时间（now - receiveMs）
- * - priceAgeMs：max(aAgeMs, bAgeMs) — 最旧腿年龄
+ * - priceAgeMs：max(aAgeMs, bAgeMs) — 最旧腿收包年龄（监控用，下单不据此拦截）
  * - priceReceiveMs：max(A/B receiveMs) — 最近一条腿到达时刻（对齐 ArbiTrade-1 _receiveTime 取 max）
  * - aLatencyMs / bLatencyMs：WS 入站时固定的 wsDelayMs
  * - timestamp：两腿交易所时间取 max

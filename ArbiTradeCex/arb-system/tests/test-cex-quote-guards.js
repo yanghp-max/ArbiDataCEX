@@ -28,8 +28,17 @@ assert.equal(tickLatencyPass(alignedTick, limits), true, '对齐行情应通过�
 const staleLegTick = {
   ...alignedTick,
   bAgeMs: 1200,
-  priceAgeMs: 1200
+  priceAgeMs: 1200,
+  legSkewMs: 1170
 };
-assert.equal(tickLatencyPass(staleLegTick, limits), false, '单腿过旧应不通过');
+assert.equal(tickLatencyPass(staleLegTick, limits), true, '单腿久未推送但 WS 正常时不拦截');
+
+const badWsTick = {
+  ...alignedTick,
+  aLatencyMs: 250,
+  bLatencyMs: 8,
+  maxWsLatencyMs: 250
+};
+assert.equal(tickLatencyPass(badWsTick, limits), false, 'WS 传输延迟过大应拦截');
 
 console.log('test-cex-quote-guards: OK');

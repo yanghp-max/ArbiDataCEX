@@ -17,21 +17,21 @@
     "fundingMin": -0.1,
     "binanceFeeBps": 5,
     "gateFeeBps": 5,
-    "binanceSlippageBps": 2,
-    "gateSlippageBps": 2,
-    "cexFeeBpsPerLeg": 2,
+    "binanceSlippageBps": 5,
+    "gateSlippageBps": 5,
+    "cexFeeBpsPerLeg": 5,
     "symbolOverrides": {
       "HOMEUSDT": {
-        "binanceSlippageBps": 2,
-        "gateSlippageBps":2
+        "binanceSlippageBps": 5,
+        "gateSlippageBps":5
       },
       "SIRENUSDT": {
-        "binanceSlippageBps": 2,
-        "gateSlippageBps": 2
+        "binanceSlippageBps": 5,
+        "gateSlippageBps": 5
       },
       "EDENUSDT": {
-        "binanceSlippageBps": 2,
-        "gateSlippageBps": 2
+        "binanceSlippageBps": 5,
+        "gateSlippageBps": 5
       }
     },
     "mockBalanceUsdt": 10000,
@@ -50,8 +50,8 @@
     "processHealthIntervalMs": 30000,
     "minQtyJson": "config/min-order-qty.json",
     "windowSeconds": 600,
-    "enforceLatency": false,
-    "useMockAccount": true
+    "enforceLatency": true,
+    "useMockAccount": false
   },
   "dashboard": {
     "enabled": true,
