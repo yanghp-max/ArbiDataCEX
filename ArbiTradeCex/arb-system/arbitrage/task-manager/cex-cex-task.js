@@ -493,7 +493,7 @@ export class CexCexTask {
     const tradeId = reservations?.tradeId;
     try {
       markLatency(latencyTrace, 'exec_async_start');
-      const restBeforeOrder = this.cfg.restRefreshBeforeOrder !== false;
+      const restBeforeOrder = this.cfg.restRefreshBeforeOrder === true;
       const freshTick = restBeforeOrder
         ? await refreshTickFromRest(this.sr.cexManager, this.sr.quoteAggregator, symbol)
         : this.sr.quoteAggregator.buildTick(symbol);

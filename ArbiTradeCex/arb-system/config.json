@@ -13,7 +13,7 @@
     "maxWsLatencyMs": 100,
     "maxCrossLegMidBps": 15,
     "priceUpdateMode": "any",
-    "restRefreshBeforeOrder": true,
+    "restRefreshBeforeOrder": false,
     "signalMaxAgeMs": 100,
     "fundingMin": -0.1,
     "binanceFeeBps": 5,
@@ -49,8 +49,8 @@
     "processHealthIntervalMs": 30000,
     "minQtyJson": "config/min-order-qty.json",
     "windowSeconds": 600,
-    "enforceLatency": true,
-    "useMockAccount": false
+    "enforceLatency": false,
+    "useMockAccount": true
   },
   "dashboard": {
     "enabled": true,

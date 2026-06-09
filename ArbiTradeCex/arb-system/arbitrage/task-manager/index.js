@@ -120,7 +120,7 @@ export class TaskManager {
       + ` priceMode=ws-driven(${priceUpdateMode}) market=${this.sharedResources.cexMarketWorkerClient ? 'worker(binance+gate)' : 'adapter'}`
       + ` windowSeconds=${strat.windowSeconds}`
       + ` minDataPoints=${strat.minDataPoints} enforceLatency=${this.sharedResources.enforceLatency}`
-      + ` restBeforeOrder=${strat.restRefreshBeforeOrder !== false}`
+      + ` restBeforeOrder=${strat.restRefreshBeforeOrder === true}`
     );
   }
 

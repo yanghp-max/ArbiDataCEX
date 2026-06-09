@@ -1,6 +1,6 @@
 /**
- * 发单前 REST 补价（对齐 ArbiTrade-1 getTicker：WS 缓存 + REST 回退）
- * CEX-CEX 全链路不依赖 DEX 轮询，发单前必须拉 REST 校正两腿 book。
+ * 发单前可选 REST 补价（strategy.restRefreshBeforeOrder=true 时启用）。
+ * 默认用 QuoteAggregator 内 WS 缓存 buildTick，避免多 symbol 并发 REST 超时。
  */
 
 import { compactSymbol } from './quote-aggregator.js';
