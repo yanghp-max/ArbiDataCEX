@@ -229,7 +229,6 @@ export function resolveLatencyLimits(strategyConfig, enforceLatency) {
       maxPriceAgeMs: Infinity,
       maxLegSkewMs: Infinity,
       maxWsLatencyMs: Infinity,
-      maxCrossLegMidBps: Infinity,
       signalMaxAgeMs: Infinity
     };
   }
@@ -237,7 +236,6 @@ export function resolveLatencyLimits(strategyConfig, enforceLatency) {
     maxPriceAgeMs: strategyConfig.maxPriceAgeMs ?? 1000,
     maxLegSkewMs: strategyConfig.maxLegSkewMs ?? 2000,
     maxWsLatencyMs: strategyConfig.maxWsLatencyMs ?? 100,
-    maxCrossLegMidBps: strategyConfig.maxCrossLegMidBps ?? 50,
     signalMaxAgeMs: strategyConfig.signalMaxAgeMs ?? 100
   };
 }
@@ -261,17 +259,6 @@ export function tickEachLegAgePass(tick, maxPriceAgeMs) {
   const b = tick.bAgeMs;
   if (!Number.isFinite(a) || !Number.isFinite(b)) return false;
   return a <= maxPriceAgeMs && b <= maxPriceAgeMs;
-}
-
-/** 两腿 mid 偏离过大 → 一侧 WS 疑似过期（全 CEX 无 DEX 轮询兜底） */
-export function tickCrossLegMidPass(tick, maxCrossLegMidBps) {
-  if (!Number.isFinite(maxCrossLegMidBps) || maxCrossLegMidBps <= 0) return true;
-  const aMid = (Number(tick.aBid) + Number(tick.aAsk)) / 2;
-  const bMid = (Number(tick.bBid) + Number(tick.bAsk)) / 2;
-  if (!(aMid > 0 && bMid > 0)) return false;
-  const ref = Math.min(aMid, bMid);
-  const diffBps = (Math.abs(aMid - bMid) / ref) * 10000;
-  return diffBps <= maxCrossLegMidBps;
 }
 
 /** 两腿本机接收时间差过大：一侧刚收到、另一侧长期无推送 */
@@ -298,20 +285,12 @@ export function tickLatencyPass(tick, limits) {
   return analyzeLatencyFail(tick, limits).pass;
 }
 
-function crossLegMidBps(tick) {
-  const aMid = (Number(tick.aBid) + Number(tick.aAsk)) / 2;
-  const bMid = (Number(tick.bBid) + Number(tick.bAsk)) / 2;
-  if (!(aMid > 0 && bMid > 0)) return null;
-  const ref = Math.min(aMid, bMid);
-  return (Math.abs(aMid - bMid) / ref) * 10000;
-}
-
 /** @returns {{ pass: boolean, code?: string, reason?: string }} */
 export function analyzeLatencyFail(tick, limits) {
   if (!latencyChecksEnabled(limits)) return { pass: true };
   if (!tick) return { pass: false, code: 'no_tick', reason: '没有可用行情' };
 
-  const { maxPriceAgeMs, maxLegSkewMs, maxWsLatencyMs, maxCrossLegMidBps } = limits;
+  const { maxPriceAgeMs, maxLegSkewMs, maxWsLatencyMs } = limits;
 
   if (!tickExchangeAgePass(tick, maxPriceAgeMs)) {
     const exceed = tick.priceAgeMs - maxPriceAgeMs;
@@ -329,19 +308,6 @@ export function analyzeLatencyFail(tick, limits) {
       code: 'leg_age',
       reason: `单腿行情过旧 A=${tick.aAgeMs}ms B=${tick.bAgeMs}ms > 上限${maxPriceAgeMs}ms`
         + ` (A超出${aEx.toFixed(0)}ms B超出${bEx.toFixed(0)}ms)`
-    };
-  }
-  const midBps = crossLegMidBps(tick);
-  if (!tickCrossLegMidPass(tick, maxCrossLegMidBps)) {
-    const exceed = midBps != null ? midBps - maxCrossLegMidBps : null;
-    const aMid = ((tick.aBid + tick.aAsk) / 2).toFixed(6);
-    const bMid = ((tick.bBid + tick.bAsk) / 2).toFixed(6);
-    return {
-      pass: false,
-      code: 'cross_mid',
-      reason: `两腿 mid 偏离 ${midBps?.toFixed(2) ?? '?'}bps > 上限${maxCrossLegMidBps}bps`
-        + (exceed != null ? ` (超出${exceed.toFixed(2)}bps)` : '')
-        + ` (A mid=${aMid} B mid=${bMid})`
     };
   }
   if (!tickLegSkewPass(tick, maxLegSkewMs)) {
