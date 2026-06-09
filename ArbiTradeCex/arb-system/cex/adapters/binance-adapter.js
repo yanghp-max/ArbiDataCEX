@@ -260,7 +260,7 @@ export class BinanceAdapter extends BaseAdapter {
     console.warn(`[Binance] public WS closed (code=${code}), reconnect in ${delay}ms (${this._publicReconnectAttempts}/${this._maxPublicReconnectAttempts})`);
 
     setTimeout(() => {
-      this.#schedulePublicWsReconnect('close').catch(() => {});
+      this.#schedulePublicWsReconnect('close');
     }, delay);
   }
 
