@@ -45,8 +45,9 @@ export class BinanceAdapter extends BaseAdapter {
     this.privateWs = null;
     this.listenKey = null;
     this.privateWsConnected = false;
-    this.listenKeyKeepaliveMin = Number(config.listenKeyKeepaliveMin) || 60;
+    this.listenKeyKeepaliveMin = Number(config.listenKeyKeepaliveMin) || 30;
     this._listenKeyTimer = null;
+    this._privateWs24hTimer = null;
     this._privateWsGen = 0;
     this._privateWsReconnecting = false;
     this._privateWsReconnectAt = 0;
@@ -54,6 +55,8 @@ export class BinanceAdapter extends BaseAdapter {
     this.pmWsUrl = process.env.BINANCE_PM_WS_URL || 'wss://fstream.binance.com/pm/ws';
     this._PUBLIC_WS_RECONNECT_GRACE_MS = 120_000;
     this._PRIVATE_WS_KEEPALIVE_GRACE_MS = 90_000;
+    /** Binance 单连接约 24h 上限；23h50m 主动重建 private WS（对齐 ArbiTrade-1） */
+    this._PRIVATE_WS_PROACTIVE_RECONNECT_MS = (23 * 60 + 50) * 60 * 1000;
     this._dualSidePosition = null;
   }
 
@@ -722,6 +725,28 @@ export class BinanceAdapter extends BaseAdapter {
     }, 300);
   }
 
+  async #deleteListenKeySafely({ expectMissing = false } = {}) {
+    if (!this.listenKey) return;
+    const key = this.listenKey;
+    this.listenKey = null;
+    try {
+      await this.#signedRequest('DELETE', '/papi/v1/listenKey', { listenKey: key });
+    } catch (err) {
+      if (expectMissing && this.#isListenKeyMissingError(err)) return;
+      console.warn('[Binance] delete listenKey failed:', err.message);
+    }
+  }
+
+  #handleListenKeyKeepaliveError(err, context = 'interval') {
+    if (!this.privateWsConnected || this._privateWsReconnecting) return;
+    const sinceOpen = Date.now() - (this._privateWsOpenedAt || 0);
+    if (sinceOpen < this._PRIVATE_WS_KEEPALIVE_GRACE_MS) return;
+    console.warn(`[Binance] listenKey keepalive failed (${context}):`, err.message);
+    if (this.#isListenKeyMissingError(err)) {
+      this.#schedulePrivateWsReconnect('keepalive');
+    }
+  }
+
   #stopListenKeyTimer() {
     if (this._listenKeyTimer) {
       clearInterval(this._listenKeyTimer);
@@ -729,23 +754,46 @@ export class BinanceAdapter extends BaseAdapter {
     }
   }
 
+  #stopPrivateWs24hTimer() {
+    if (this._privateWs24hTimer) {
+      clearTimeout(this._privateWs24hTimer);
+      this._privateWs24hTimer = null;
+    }
+  }
+
+  #stopPrivateWsTimers() {
+    this.#stopListenKeyTimer();
+    this.#stopPrivateWs24hTimer();
+  }
+
+  #startPrivateWs24hTimer() {
+    this.#stopPrivateWs24hTimer();
+    this._privateWs24hTimer = setTimeout(() => {
+      if (this._shuttingDown || this._privateWsReconnecting) return;
+      console.log('[Binance] private WS approaching 24h limit, proactive reconnect...');
+      this.#schedulePrivateWsReconnect('24h-limit');
+    }, this._PRIVATE_WS_PROACTIVE_RECONNECT_MS);
+    if (typeof this._privateWs24hTimer.unref === 'function') {
+      this._privateWs24hTimer.unref();
+    }
+  }
+
   #startListenKeyTimer() {
     this.#stopListenKeyTimer();
     const ms = Math.max(1, this.listenKeyKeepaliveMin) * 60 * 1000;
+    // 连接后立即续期一次，避免 setInterval 首次在 T+30min 才执行而踩 60min TTL
+    this.#keepaliveListenKey().catch((err) => {
+      this.#handleListenKeyKeepaliveError(err, 'initial');
+    });
     this._listenKeyTimer = setInterval(() => {
       this.#keepaliveListenKey().catch((err) => {
-        if (!this.privateWsConnected || this._privateWsReconnecting) return;
-        const sinceOpen = Date.now() - (this._privateWsOpenedAt || 0);
-        if (sinceOpen < this._PRIVATE_WS_KEEPALIVE_GRACE_MS) return;
-        console.warn('[Binance] listenKey keepalive failed:', err.message);
-        if (this.#isListenKeyMissingError(err)) {
-          this.#schedulePrivateWsReconnect('keepalive');
-        }
+        this.#handleListenKeyKeepaliveError(err, 'interval');
       });
     }, ms);
     if (typeof this._listenKeyTimer.unref === 'function') {
       this._listenKeyTimer.unref();
     }
+    console.log(`[Binance] listenKey keepalive every ${this.listenKeyKeepaliveMin} min (immediate + interval)`);
   }
 
   #emitBalanceMerge(rows) {
@@ -786,9 +834,7 @@ export class BinanceAdapter extends BaseAdapter {
       const msg = JSON.parse(raw.toString());
       if (msg.e === 'listenKeyExpired') {
         console.warn('[Binance] listenKey expired, reconnecting private WS...');
-        if (this.privateWs) {
-          this.privateWs.removeAllListeners();
-        }
+        this.listenKey = null;
         this.#schedulePrivateWsReconnect('listenKeyExpired');
         return;
       }
@@ -826,7 +872,7 @@ export class BinanceAdapter extends BaseAdapter {
     this._privateWsReconnecting = true;
     try {
       console.log(`[Binance] Reconnecting private WS (${reason})...`);
-      this.#stopListenKeyTimer();
+      this.#stopPrivateWsTimers();
       if (this.privateWs) {
         this.privateWs.removeAllListeners();
         this.privateWs.terminate();
@@ -834,14 +880,8 @@ export class BinanceAdapter extends BaseAdapter {
       }
       this.privateWsConnected = false;
       this._privateWsGen += 1;
-      if (this.listenKey) {
-        try {
-          await this.#signedRequest('DELETE', '/papi/v1/listenKey', { listenKey: this.listenKey });
-        } catch (err) {
-          console.warn('[Binance] delete listenKey failed:', err.message);
-        }
-        this.listenKey = null;
-      }
+      const expectMissing = reason === 'listenKeyExpired' || reason === 'keepalive';
+      await this.#deleteListenKeySafely({ expectMissing });
       await new Promise((r) => setTimeout(r, 500));
       await this.#connectPrivateWs();
       console.log(`[Binance] private WS reconnected (${reason})`);
@@ -851,7 +891,7 @@ export class BinanceAdapter extends BaseAdapter {
   }
 
   async #teardownPrivateWs({ deleteListenKey = true } = {}) {
-    this.#stopListenKeyTimer();
+    this.#stopPrivateWsTimers();
     if (this.privateWs) {
       this.privateWs.removeAllListeners();
       this.privateWs.close();
@@ -859,14 +899,11 @@ export class BinanceAdapter extends BaseAdapter {
     }
     this.privateWsConnected = false;
     this._privateWsGen += 1;
-    if (this.listenKey && deleteListenKey) {
-      try {
-        await this.#signedRequest('DELETE', '/papi/v1/listenKey', { listenKey: this.listenKey });
-      } catch {
-        // ignore
-      }
+    if (deleteListenKey) {
+      await this.#deleteListenKeySafely();
+    } else {
+      this.listenKey = null;
     }
-    this.listenKey = null;
     this.emit('PRIVATE_WS_DISCONNECTED', { exchange: 'binance' });
   }
 
@@ -892,7 +929,14 @@ export class BinanceAdapter extends BaseAdapter {
           this.emit('PRIVATE_WS_DISCONNECTED', { exchange: 'binance' });
         }
         this.#startListenKeyTimer();
+        this.#startPrivateWs24hTimer();
         resolve();
+      });
+      ws.on('ping', (data) => {
+        if (gen !== this._privateWsGen || this.privateWs !== ws) return;
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.pong(data);
+        }
       });
       ws.on('message', (raw) => this.#handlePrivateMessage(raw));
       ws.on('close', () => {

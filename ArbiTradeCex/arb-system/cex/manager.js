@@ -164,7 +164,7 @@ export class CexManager {
   static async createDefault(strategyConfig = {}) {
     const mgr = new CexManager();
     const binance = new BinanceAdapter({
-      listenKeyKeepaliveMin: strategyConfig.listenKeyKeepaliveMin ?? 60
+      listenKeyKeepaliveMin: strategyConfig.listenKeyKeepaliveMin ?? 30
     });
     const gate = new GateAdapter({
       accountMode: strategyConfig.gateAccountMode

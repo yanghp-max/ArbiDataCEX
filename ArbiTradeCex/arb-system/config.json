@@ -40,7 +40,7 @@
     "balanceCheckRate": 0.1,
     "accountCacheMaxAgeMs": 5000,
     "gateAccountMode": "single",
-    "listenKeyKeepaliveMin": 60,
+    "listenKeyKeepaliveMin": 30,
     "reservationTtlMs": 30000,
     "maxInFlightTrades": 0,
     "tradeLogCsv": "logs/live-trades.csv",
