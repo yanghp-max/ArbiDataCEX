@@ -148,12 +148,13 @@ export class CexCexTask {
 
   #logSkip(symbol, stage, reason) {
     const noisyThresholdStage = typeof stage === 'string' && stage.startsWith('z-score·');
+    if (noisyThresholdStage) return;
     logTradeSkip(symbol, stage, reason, {
       enabled: this.logTradeSkips,
       throttleMs: this.logTradeSkipThrottleMs,
       tradingEnabled: this.sr.tradingEnabled,
-      // z-score 阈值未达会非常高频：保留文本日志，但默认不镜像到控制台。
-      mirrorConsole: noisyThresholdStage ? false : this.strategyTextLogToConsole
+      // 拦截类日志仅写文本文件，不镜像到控制台，避免刷屏。
+      mirrorConsole: false
     });
   }
 
@@ -535,7 +536,7 @@ export class CexCexTask {
 
   #logLatency(trace, { reason = null, partial = false } = {}) {
     if (!trace) return;
-    const mirror = this.strategyTextLogToConsole;
+    const mirror = false;
     if (reason) {
       appendTextLog(`[延迟·中止] ${reason}`, { level: 'warn', mirrorConsole: mirror });
       if (partial) {
