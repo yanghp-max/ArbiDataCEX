@@ -129,6 +129,7 @@ export class TaskManager {
     const agg = this.sharedResources?.quoteAggregator;
     const bridge = this.sharedResources?.dashboardBridge;
     if (!agg || !bridge) return;
+    if (typeof bridge.server?.hasClients === 'function' && !bridge.server.hasClients()) return;
     for (const sym of this.config.strategy.symbols || []) {
       const key = compactSymbol(sym);
       const tick = agg.buildTick(key);

@@ -15,6 +15,7 @@ export class RollingSignalEngine {
     this.windowReady = false;
     /** 避免同一秒内多次 full sort（stable 侧 worker 合并后 tick 频率更低） */
     this._entries = null;
+    this._statsCache = null;
   }
 
   #bucketKey(ts) {
@@ -41,6 +42,26 @@ export class RollingSignalEngine {
     }
   }
 
+  #rebuildStats(entries) {
+    const abRaw = entries.map((e) => e.spreadAbAdj).filter(Number.isFinite);
+    const baRaw = entries.map((e) => e.spreadBaAdj).filter(Number.isFinite);
+    const medianAb = percentile50(abRaw);
+    const medianBa = percentile50(baRaw);
+    const madAb = computeMad(abRaw, medianAb);
+    const madBa = computeMad(baRaw, medianBa);
+    const branchAb = branchForAb(medianAb, medianBa);
+    const branchBa = branchForBa(medianAb, medianBa);
+    this._statsCache = {
+      medianAb,
+      medianBa,
+      madAb,
+      madBa,
+      branchAb,
+      branchBa
+    };
+    return this._statsCache;
+  }
+
   updateAndCalc({ timestamp, spreadAb, spreadBa, spreadAbAdj, spreadBaAdj }) {
     const currentSecond = this.#bucketKey(timestamp);
     const row = {
@@ -62,7 +83,8 @@ export class RollingSignalEngine {
       }
     }
 
-    if (pruned || !hadBucket || !this._entries?.length) {
+    const structureChanged = pruned || !hadBucket || !this._entries?.length;
+    if (structureChanged) {
       this._entries = [...this.buckets.values()].sort((a, b) => a.ts - b.ts);
     } else {
       this._entries[this._entries.length - 1] = row;
@@ -106,16 +128,19 @@ export class RollingSignalEngine {
       };
     }
 
-    const abRaw = entries.map((e) => e.spreadAbAdj).filter(Number.isFinite);
-    const baRaw = entries.map((e) => e.spreadBaAdj).filter(Number.isFinite);
-    const medianAb = percentile50(abRaw);
-    const medianBa = percentile50(baRaw);
-    const madAb = computeMad(abRaw, medianAb);
-    const madBa = computeMad(baRaw, medianBa);
+    const stats = (structureChanged || !this._statsCache)
+      ? this.#rebuildStats(entries)
+      : this._statsCache;
+    const {
+      medianAb,
+      medianBa,
+      madAb,
+      madBa,
+      branchAb,
+      branchBa
+    } = stats;
 
     const last = entries[entries.length - 1];
-    const branchAb = branchForAb(medianAb, medianBa);
-    const branchBa = branchForBa(medianAb, medianBa);
 
     let openZAb = null;
     let closeZAb = null;

@@ -147,11 +147,13 @@ export class CexCexTask {
   }
 
   #logSkip(symbol, stage, reason) {
+    const noisyThresholdStage = typeof stage === 'string' && stage.startsWith('z-score·');
     logTradeSkip(symbol, stage, reason, {
       enabled: this.logTradeSkips,
       throttleMs: this.logTradeSkipThrottleMs,
       tradingEnabled: this.sr.tradingEnabled,
-      mirrorConsole: this.strategyTextLogToConsole
+      // z-score 阈值未达会非常高频：保留文本日志，但默认不镜像到控制台。
+      mirrorConsole: noisyThresholdStage ? false : this.strategyTextLogToConsole
     });
   }
 
@@ -206,6 +208,7 @@ export class CexCexTask {
     const symbolCost = resolveCexCostConfigForSymbol(this.cfg, symbol);
     const spreads = calcSpreads(tick, symbolCost);
     const prevSignal = this._lastSignalBySymbol.get(symbol) ?? null;
+    const latencyAtSignal = analyzeLatencyFail(tick, this.latencyLimits);
 
     // 对齐 stable handlePriceUpdate：先推价格/UI，不 await REST 对账、不挡 WS 热路径
     this.sr.dashboardBridge?.updateMarketSnapshot({
@@ -215,6 +218,12 @@ export class CexCexTask {
       signal: prevSignal,
       lock: this.#syncLockState(symbol, prevSignal)
     });
+
+    // 对齐 stable：陈旧帧不参与信号计算，避免窗口被 stale tick 污染并拖慢长窗口运行。
+    if (this.enforceLatency && !latencyAtSignal.pass) {
+      this.#logSkip(symbol, '延迟·信号前', latencyAtSignal.reason);
+      return;
+    }
 
     const signal = engine.updateAndCalc({
       timestamp: tick.timestamp,
@@ -241,13 +250,6 @@ export class CexCexTask {
     });
 
     if (!signal.windowReady || signal.openZAb == null || signal.openZBa == null) return;
-
-    // 延迟/跨腿检查只拦下单，不拦入窗（同 ArbiTrade-1 活跃 zscore 路径）
-    const latencyAtSignal = analyzeLatencyFail(tick, this.latencyLimits);
-    if (this.enforceLatency && !latencyAtSignal.pass) {
-      this.#logSkip(symbol, '延迟·信号前', latencyAtSignal.reason);
-      return;
-    }
 
     if (tick.fundingA != null && tick.fundingA < this.cfg.fundingMin) {
       this.#logSkip(
