@@ -10,7 +10,7 @@
     "cooldownMs": 1000,
     "maxPriceAgeMs": 1000,
     "maxLegSkewMs": 2000,
-    "maxWsLatencyMs": 200,
+    "maxWsLatencyMs": 400,
     "priceUpdateMode": "any",
     "restRefreshBeforeOrder": false,
     "signalMaxAgeMs": 100,
@@ -21,10 +21,6 @@
     "gateSlippageBps": 4,
     "cexFeeBpsPerLeg": 4,
     "symbolOverrides": {
-      "BEATUSDT": {
-        "binanceSlippageBps": 4,
-        "gateSlippageBps": 4
-      },
       "SKYAIUSDT": {
         "binanceSlippageBps": 4,
         "gateSlippageBps": 4

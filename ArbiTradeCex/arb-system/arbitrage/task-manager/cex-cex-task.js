@@ -147,11 +147,14 @@ export class CexCexTask {
   }
 
   #logSkip(symbol, stage, reason) {
+    const noisyThresholdStage = typeof stage === 'string' && stage.startsWith('z-score·');
+    if (noisyThresholdStage) return;
     logTradeSkip(symbol, stage, reason, {
       enabled: this.logTradeSkips,
       throttleMs: this.logTradeSkipThrottleMs,
       tradingEnabled: this.sr.tradingEnabled,
-      mirrorConsole: this.strategyTextLogToConsole
+      // 拦截类日志仅写文本文件，不镜像到控制台，避免刷屏。
+      mirrorConsole: false
     });
   }
 
@@ -206,6 +209,7 @@ export class CexCexTask {
     const symbolCost = resolveCexCostConfigForSymbol(this.cfg, symbol);
     const spreads = calcSpreads(tick, symbolCost);
     const prevSignal = this._lastSignalBySymbol.get(symbol) ?? null;
+    const latencyAtSignal = analyzeLatencyFail(tick, this.latencyLimits);
 
     // 对齐 stable handlePriceUpdate：先推价格/UI，不 await REST 对账、不挡 WS 热路径
     this.sr.dashboardBridge?.updateMarketSnapshot({
@@ -215,6 +219,12 @@ export class CexCexTask {
       signal: prevSignal,
       lock: this.#syncLockState(symbol, prevSignal)
     });
+
+    // 对齐 stable：陈旧帧不参与信号计算，避免窗口被 stale tick 污染并拖慢长窗口运行。
+    if (this.enforceLatency && !latencyAtSignal.pass) {
+      this.#logSkip(symbol, '延迟·信号前', latencyAtSignal.reason);
+      return;
+    }
 
     const signal = engine.updateAndCalc({
       timestamp: tick.timestamp,
@@ -241,13 +251,6 @@ export class CexCexTask {
     });
 
     if (!signal.windowReady || signal.openZAb == null || signal.openZBa == null) return;
-
-    // 延迟/跨腿检查只拦下单，不拦入窗（同 ArbiTrade-1 活跃 zscore 路径）
-    const latencyAtSignal = analyzeLatencyFail(tick, this.latencyLimits);
-    if (this.enforceLatency && !latencyAtSignal.pass) {
-      this.#logSkip(symbol, '延迟·信号前', latencyAtSignal.reason);
-      return;
-    }
 
     if (tick.fundingA != null && tick.fundingA < this.cfg.fundingMin) {
       this.#logSkip(
@@ -533,7 +536,7 @@ export class CexCexTask {
 
   #logLatency(trace, { reason = null, partial = false } = {}) {
     if (!trace) return;
-    const mirror = this.strategyTextLogToConsole;
+    const mirror = false;
     if (reason) {
       appendTextLog(`[延迟·中止] ${reason}`, { level: 'warn', mirrorConsole: mirror });
       if (partial) {

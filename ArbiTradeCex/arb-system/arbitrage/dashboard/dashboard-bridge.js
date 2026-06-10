@@ -92,17 +92,10 @@ export class DashboardBridge {
     return {
       symbol,
       status: 'waiting_quotes',
-      priceAgeMs: null,
-      aAgeMs: null,
-      bAgeMs: null,
       aLatencyMs: null,
       bLatencyMs: null,
-      aLocalTimestamp: null,
-      bLocalTimestamp: null,
       aExchangeTimestampMs: null,
       bExchangeTimestampMs: null,
-      marketTickAt: null,
-      legSkewMs: null,
       maxWsLatencyMs: null,
       staleReason: null,
       aBid: null,
@@ -295,17 +288,10 @@ export class DashboardBridge {
   }
 
   #applyTickTiming(sym, tick) {
-    sym.aLocalTimestamp = tick.aLocalTimestamp ?? null;
-    sym.bLocalTimestamp = tick.bLocalTimestamp ?? null;
     sym.aExchangeTimestampMs = tick.aExchangeTimestampMs ?? null;
     sym.bExchangeTimestampMs = tick.bExchangeTimestampMs ?? null;
-    sym.marketTickAt = Date.now();
-    sym.priceAgeMs = tick.priceAgeMs;
-    sym.aAgeMs = tick.aAgeMs ?? null;
-    sym.bAgeMs = tick.bAgeMs ?? null;
     sym.aLatencyMs = tick.aLatencyMs ?? null;
     sym.bLatencyMs = tick.bLatencyMs ?? null;
-    sym.legSkewMs = tick.legSkewMs ?? null;
     sym.maxWsLatencyMs = tick.maxWsLatencyMs ?? null;
   }
 
@@ -331,17 +317,10 @@ export class DashboardBridge {
     const sym = this.state.symbols[symbol] || this.#emptySymbol(symbol);
     if (!tick) {
       sym.status = 'waiting_quotes';
-      sym.priceAgeMs = null;
-      sym.aAgeMs = null;
-      sym.bAgeMs = null;
       sym.aLatencyMs = null;
       sym.bLatencyMs = null;
-      sym.aLocalTimestamp = null;
-      sym.bLocalTimestamp = null;
       sym.aExchangeTimestampMs = null;
       sym.bExchangeTimestampMs = null;
-      sym.marketTickAt = null;
-      sym.legSkewMs = null;
       sym.maxWsLatencyMs = null;
       sym.staleReason = null;
       sym.updatedAt = Date.now();
@@ -394,19 +373,6 @@ export class DashboardBridge {
       return;
     }
 
-    this.#markMarketDirty(symbol);
-    this.#scheduleMarketFlush();
-  }
-
-  /** 定频刷新 leg/lat（两腿 age 在两次来价之间继续涨） */
-  refreshMarketTiming({ symbol, tick }) {
-    if (!this.enabled || !tick) return;
-    const sym = this.state.symbols[symbol];
-    if (!sym || sym.aBid == null) return;
-
-    this.#applyTickTiming(sym, tick);
-    this.#syncSymbolLatencyStatus(sym, tick);
-    sym.updatedAt = Date.now();
     this.#markMarketDirty(symbol);
     this.#scheduleMarketFlush();
   }
