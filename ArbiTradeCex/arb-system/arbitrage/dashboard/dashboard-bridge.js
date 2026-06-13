@@ -37,6 +37,7 @@ export class DashboardBridge {
     this.symbols = options.symbols ?? [];
     this.server = null;
     this.accountServices = null;
+    this.configReloader = null;
     this._flushInterval = null;
     this._marketFlushTimer = null;
     this._marketPushThrottleMs = 200;
@@ -126,6 +127,10 @@ export class DashboardBridge {
     this.accountServices = { accountCache, cexManager, quoteAggregator, symbols };
   }
 
+  setConfigReloader(fn) {
+    this.configReloader = typeof fn === 'function' ? fn : null;
+  }
+
   async refreshAccountSnapshot() {
     if (!this.accountServices) {
       throw new Error('account services not ready');
@@ -173,6 +178,21 @@ export class DashboardBridge {
     return this.state.accountBaseline;
   }
 
+  reloadConfigNow() {
+    if (!this.configReloader) {
+      throw new Error('config reloader not ready');
+    }
+    const result = this.configReloader();
+    const bn = result?.strategy?.binanceSlippageBps;
+    const gt = result?.strategy?.gateSlippageBps;
+    this.#pushLog({
+      level: 'info',
+      message: `[CONFIG] 已重载 slippage bn=${bn ?? '-'} gt=${gt ?? '-'}`
+    });
+    this.#flushLogsUpdate();
+    return result;
+  }
+
   async start() {
     if (!this.enabled) return;
     const publicDir = `${getRootDir()}/dashboard/public`;
@@ -183,7 +203,8 @@ export class DashboardBridge {
     };
     this.server.accountApi = {
       refreshSnapshot: () => this.refreshAccountSnapshot(),
-      setBaseline: () => this.setAccountBaseline()
+      setBaseline: () => this.setAccountBaseline(),
+      reloadConfig: () => this.reloadConfigNow()
     };
     await this.server.start();
     this._flushInterval = setInterval(() => {

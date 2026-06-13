@@ -105,6 +105,11 @@ export class DashboardServer {
         send(200, { ok: true, data });
         return;
       }
+      if (action === 'reload-config') {
+        const data = await this.accountApi.reloadConfig();
+        send(200, { ok: true, data });
+        return;
+      }
       send(404, { ok: false, error: 'not_found' });
     } catch (err) {
       send(500, { ok: false, error: err.message || String(err) });
@@ -120,6 +125,10 @@ export class DashboardServer {
     }
     if (url.pathname === '/api/account/baseline' && req.method === 'POST') {
       await this.#handleAccountApi(req, res, 'baseline');
+      return;
+    }
+    if (url.pathname === '/api/config/reload' && req.method === 'POST') {
+      await this.#handleAccountApi(req, res, 'reload-config');
       return;
     }
 

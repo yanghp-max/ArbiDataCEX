@@ -2,7 +2,7 @@
  * TaskManager（对标 arbitrage/task-manager/index.js）
  */
 import path from 'node:path';
-import { loadConfig, getRootDir } from '../../config/global-config.js';
+import { loadConfig, reloadConfig, getRootDir } from '../../config/global-config.js';
 import { SharedResources } from './shared-resources.js';
 import { CexCexTask } from './cex-cex-task.js';
 import { PrecisionChecker } from '../risk/risk-manager.js';
@@ -42,6 +42,7 @@ export class TaskManager {
       minOrderLotQtySymbols: strat.minOrderLotQtySymbols
     });
     this.task = new CexCexTask(this.sharedResources, strat, precision);
+    this.sharedResources.dashboardBridge?.setConfigReloader(() => this.forceReloadConfigNow());
     this._symbolSet = new Set(strat.symbols.map(compactSymbol));
 
     const cexManager = this.sharedResources.cexManager;
@@ -133,6 +134,34 @@ export class TaskManager {
     if (this.maintenanceTimer) clearInterval(this.maintenanceTimer);
     if (this.positionReconcileTimer) clearInterval(this.positionReconcileTimer);
     await this.sharedResources?.shutdown();
+  }
+
+  forceReloadConfigNow() {
+    const nextCfg = reloadConfig();
+    const prevStrategy = this.task?.getStrategyConfig?.() ?? this.config.strategy;
+    const nextStrategy = nextCfg?.strategy ?? {};
+    const nextSymbols = Array.isArray(nextStrategy.symbols) ? nextStrategy.symbols : [];
+    const prevSymbols = Array.isArray(prevStrategy.symbols) ? prevStrategy.symbols : [];
+    const sameSymbols = nextSymbols.length === prevSymbols.length
+      && nextSymbols.every((s, i) => compactSymbol(s) === compactSymbol(prevSymbols[i]));
+    if (!sameSymbols) {
+      throw new Error('symbols changed; restart strategy process required');
+    }
+    this.config = nextCfg;
+    this.task.updateStrategyConfig(nextStrategy);
+    this.sharedResources.enforceLatency = this.task.enforceLatency;
+    console.log(
+      `[TaskManager] config reloaded by API: slippage bn=${nextStrategy.binanceSlippageBps ?? '-'} `
+      + `gt=${nextStrategy.gateSlippageBps ?? '-'}`
+    );
+    return {
+      ok: true,
+      at: Date.now(),
+      strategy: {
+        binanceSlippageBps: nextStrategy.binanceSlippageBps ?? null,
+        gateSlippageBps: nextStrategy.gateSlippageBps ?? null
+      }
+    };
   }
 }
 

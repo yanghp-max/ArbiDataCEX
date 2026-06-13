@@ -103,6 +103,25 @@ export class CexCexTask {
     }
   }
 
+  getStrategyConfig() {
+    return this.cfg;
+  }
+
+  updateStrategyConfig(nextStrategyConfig = {}) {
+    this.cfg = {
+      ...nextStrategyConfig,
+      zOpen: nextStrategyConfig.zOpen ?? nextStrategyConfig.zOpenAb ?? 2.0,
+      zClose: nextStrategyConfig.zClose ?? 0.0,
+      signalMaxAgeMs: nextStrategyConfig.signalMaxAgeMs ?? 100
+    };
+    this.risk = new RiskManager(this.cfg);
+    this.latencyLimits = resolveLatencyLimits(this.cfg, this.enforceLatency);
+    this.cexCost = resolveCexCostConfig(this.cfg);
+    this.logTradeSkips = this.cfg.logTradeSkips !== false;
+    this.logTradeSkipThrottleMs = this.cfg.logTradeSkipThrottleMs ?? 10_000;
+    this.strategyTextLogToConsole = this.cfg.strategyTextLogToConsole === true;
+  }
+
   #syncLockState(symbol, signal) {
     const aQty = this.sr.accountCache.getPosition('binance', symbol);
     const bQty = this.sr.accountCache.getPosition('gate', symbol);

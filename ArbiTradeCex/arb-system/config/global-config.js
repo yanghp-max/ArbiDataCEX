@@ -8,6 +8,7 @@ import { config as dotenvConfig } from 'dotenv';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
+const configPath = path.join(rootDir, 'config.json');
 
 dotenvConfig({ path: path.join(rootDir, '.env') });
 
@@ -73,7 +74,14 @@ export function resolveEnforceLatency(strategyConfig, tradingEnabled) {
 
 export function loadConfig() {
   if (cached) return cached;
-  const configPath = path.join(rootDir, 'config.json');
+  const raw = fs.readFileSync(configPath, 'utf8');
+  cached = JSON.parse(raw);
+  cached.strategy.symbols = resolveStrategySymbols(cached);
+  return cached;
+}
+
+/** 强制从磁盘重载配置（用于运行中热更新） */
+export function reloadConfig() {
   const raw = fs.readFileSync(configPath, 'utf8');
   cached = JSON.parse(raw);
   cached.strategy.symbols = resolveStrategySymbols(cached);
@@ -84,4 +92,11 @@ export function getRootDir() {
   return rootDir;
 }
 
-export default { loadConfig, getRootDir, loadMinOrderQtyJson, resolveStrategySymbols, resolveEnforceLatency };
+export default {
+  loadConfig,
+  reloadConfig,
+  getRootDir,
+  loadMinOrderQtyJson,
+  resolveStrategySymbols,
+  resolveEnforceLatency
+};

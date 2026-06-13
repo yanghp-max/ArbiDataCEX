@@ -247,6 +247,10 @@ export function useDashboardWs() {
     if (state.account) state.account.vsBaselineUsdt = 0;
   }
 
+  async function reloadConfigNow() {
+    return postAccountApi('/api/config/reload');
+  }
+
   onMounted(connect);
   onUnmounted(() => {
     if (reconnectTimer) clearTimeout(reconnectTimer);
@@ -260,6 +264,7 @@ export function useDashboardWs() {
     pnlBySymbolRows,
     symbolCards,
     refreshAccount,
+    reloadConfigNow,
     setAccountBaseline,
     DASHBOARD_MARKER
   };

@@ -8,10 +8,12 @@ const props = defineProps({
   formatPnl: { type: Function, required: true },
   pnlClass: { type: Function, required: true },
   formatTime: { type: Function, required: true },
-  onRefresh: { type: Function, required: true }
+  onRefresh: { type: Function, required: true },
+  onReloadConfig: { type: Function, required: true }
 });
 
 const loading = ref(false);
+const reloading = ref(false);
 const error = ref('');
 
 async function refresh() {
@@ -23,6 +25,18 @@ async function refresh() {
     error.value = e.message || String(e);
   } finally {
     loading.value = false;
+  }
+}
+
+async function reloadConfig() {
+  reloading.value = true;
+  error.value = '';
+  try {
+    await props.onReloadConfig();
+  } catch (e) {
+    error.value = e.message || String(e);
+  } finally {
+    reloading.value = false;
   }
 }
 
@@ -44,6 +58,9 @@ function fmtU(v) {
       <div class="account-actions">
         <button type="button" class="btn" :disabled="loading" @click="refresh">
           {{ loading ? '查询中…' : '刷新账户 U' }}
+        </button>
+        <button type="button" class="btn" :disabled="reloading" @click="reloadConfig">
+          {{ reloading ? '重载中…' : '重载配置' }}
         </button>
       </div>
     </div>

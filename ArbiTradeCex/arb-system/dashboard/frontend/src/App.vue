@@ -14,7 +14,8 @@ const {
   pnlSummary,
   pnlBySymbolRows,
   symbolCards,
-  refreshAccount
+  refreshAccount,
+  reloadConfigNow
 } = useDashboardWs();
 const {
   fmt,
@@ -60,6 +61,7 @@ const {
     :pnl-class="pnlClass"
     :format-time="formatTime"
     :on-refresh="refreshAccount"
+    :on-reload-config="reloadConfigNow"
   />
 
   <ProgressPanel
