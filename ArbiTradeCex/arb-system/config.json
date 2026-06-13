@@ -21,30 +21,7 @@
     "gateSlippageBps": 45,
     "cexFeeBpsPerLeg": 4,
     "symbolOverrides": {
-      "SKYAIUSDT": {
-        "binanceSlippageBps": 4,
-        "gateSlippageBps": 45
-      },
-      "EPICUSDT": {
-        "binanceSlippageBps": 4,
-        "gateSlippageBps": 45
-      },
-      "BLESSUSDT": {
-        "binanceSlippageBps": 4,
-        "gateSlippageBps": 45
-      },
-      "WLDUSDT": {
-        "binanceSlippageBps": 4,
-        "gateSlippageBps": 45
-      },
-      "BTWUSDT": {
-        "binanceSlippageBps": 4,
-        "gateSlippageBps": 45
-      },
-      "HOMEUSDT": {
-        "binanceSlippageBps": 4,
-        "gateSlippageBps": 45
-      }
+      
     },
     "mockBalanceUsdt": 10000,
     "minAvailableUsdt": 6,
