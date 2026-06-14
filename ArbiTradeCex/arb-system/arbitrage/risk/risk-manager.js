@@ -15,6 +15,7 @@ export class PrecisionChecker {
   constructor(minQtyBySymbol = {}, options = {}) {
     this.minQtyBySymbol = minQtyBySymbol;
     this.orderUsd = Number(options.orderUsd) || 0;
+    this.qtyFromConfigOnly = Boolean(options.qtyFromConfigOnly);
     this.minOrderLotQtySymbols = new Set(
       (options.minOrderLotQtySymbols || []).map((s) => String(s).toUpperCase())
     );
@@ -66,7 +67,8 @@ export class PrecisionChecker {
 
     const { aPrice } = legPricesForDirection(direction, tick);
     const minU = Number(orderUsd ?? this.orderUsd);
-    const useLotMinQty = this.minOrderLotQtySymbols.has(String(tick.symbol).toUpperCase());
+    const useLotMinQty = this.qtyFromConfigOnly
+      || this.minOrderLotQtySymbols.has(String(tick.symbol).toUpperCase());
 
     const resolved = resolveMinHedgeQty({
       orderUsd: minU,
@@ -115,7 +117,8 @@ export class PrecisionChecker {
     if (!cfg) return null;
 
     const { aPrice } = legPricesForDirection(direction, tick);
-    const useLotMinQty = this.minOrderLotQtySymbols.has(String(tick.symbol).toUpperCase());
+    const useLotMinQty = this.qtyFromConfigOnly
+      || this.minOrderLotQtySymbols.has(String(tick.symbol).toUpperCase());
     const minU = Number(orderUsd ?? this.orderUsd);
 
     const min = resolveMinHedgeQty({

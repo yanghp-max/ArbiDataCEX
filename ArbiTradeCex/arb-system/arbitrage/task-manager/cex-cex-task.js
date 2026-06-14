@@ -411,14 +411,19 @@ export class CexCexTask {
     let orderForExec = orderBuild;
     let qty = orderBuild.qty;
     if (isClose) {
-      const clipped = this.risk.clipCloseQty(qty, tick, this.sr.accountCache);
-      const aligned = this.precision.alignHedgeFromBaseQty(tick, clipped);
-      if (aligned.qty <= 0) {
-        this.#logSkip(symbol, '平仓量', `clip/align 后 qty=${aligned.qty} <= 0`);
+      // 平仓按“配置档位”一一对冲，不再自动裁剪到更小数量（如 70 -> 60）。
+      // 若任一腿持仓不足该档位，则本次跳过，避免产生非预期平仓量。
+      const holdA = Math.abs(this.sr.accountCache.getPosition('binance', symbol));
+      const holdB = Math.abs(this.sr.accountCache.getPosition('gate', symbol));
+      if (holdA + 1e-12 < qty || holdB + 1e-12 < qty) {
+        this.#logSkip(
+          symbol,
+          '平仓量',
+          `配置档位 qty=${qty}，持仓不足 A=${holdA} B=${holdB}，本次不降档平仓`
+        );
         return;
       }
-      orderForExec = { ...orderBuild, qty: aligned.qty, gateSize: aligned.gateSize };
-      qty = aligned.qty;
+      orderForExec = orderBuild;
     } else {
       const clipped = this.risk.clipQty(qty, tick, execDirection, this.sr.accountCache);
       const finalized = this.precision.finalizeOpenOrder({

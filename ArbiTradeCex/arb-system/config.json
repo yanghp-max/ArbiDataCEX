@@ -4,6 +4,7 @@
     "zOpen": 2.0,
     "zClose": 2.0,
     "orderUsd": 5,
+    "qtyFromConfigOnly": true,
     "defaultLeverage": 1,
     "minOrderLotQtySymbols": [],
     "maxPositionUsd": 50,

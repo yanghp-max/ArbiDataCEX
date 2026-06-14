@@ -39,6 +39,7 @@ export class TaskManager {
 
     const precision = await PrecisionChecker.loadFromJson(minQtyPath, strat.symbols, {
       orderUsd: strat.orderUsd,
+      qtyFromConfigOnly: strat.qtyFromConfigOnly === true,
       minOrderLotQtySymbols: strat.minOrderLotQtySymbols
     });
     this.task = new CexCexTask(this.sharedResources, strat, precision);
