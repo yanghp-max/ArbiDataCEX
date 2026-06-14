@@ -10,7 +10,8 @@ const props = defineProps({
   fmtMs: { type: Function, required: true },
   fmtPct: { type: Function, required: true },
   spreadClass: { type: Function, required: true },
-  statusLabel: { type: Function, required: true }
+  statusLabel: { type: Function, required: true },
+  onFlatten: { type: Function, required: true }
 });
 
 /** 进入/退出滞回，避免在阈值附近闪烁 */
@@ -22,6 +23,8 @@ const displayStale = ref(false);
 const displayStaleReason = ref('');
 let staleShownAt = 0;
 let recoverStartedAt = 0;
+const flattening = ref(false);
+const flattenError = ref('');
 
 onMounted(() => {
   syncStaleDisplay();
@@ -105,14 +108,32 @@ const effectiveStatus = computed(() => {
   }
   return displayStale.value ? 'stale' : (props.card.windowReady ? 'ready' : 'collecting');
 });
+
+async function flattenNow() {
+  flattening.value = true;
+  flattenError.value = '';
+  try {
+    await props.onFlatten(props.card.symbol);
+  } catch (err) {
+    flattenError.value = err?.message || String(err);
+  } finally {
+    flattening.value = false;
+  }
+}
 </script>
 
 <template>
   <article class="symbol-card" :class="effectiveStatus">
     <div class="card-head">
       <h3>{{ card.symbol }}</h3>
-      <span class="status-tag">{{ statusLabel(effectiveStatus) }}</span>
+      <div class="card-head-actions">
+        <span class="status-tag">{{ statusLabel(effectiveStatus) }}</span>
+        <button type="button" class="btn btn-danger btn-mini" :disabled="flattening" @click="flattenNow">
+          {{ flattening ? '清仓中…' : '清仓' }}
+        </button>
+      </div>
     </div>
+    <div v-if="flattenError" class="card-error">{{ flattenError }}</div>
 
     <div class="exchange-row">
       <div class="exchange">

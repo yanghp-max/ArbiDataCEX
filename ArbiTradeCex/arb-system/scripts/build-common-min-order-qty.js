@@ -234,6 +234,8 @@ async function buildMinQtyEntry({
       minBaseQty: gateLimits.minBaseQty,
       gateOrderSizeMin: gateLimits.gateOrderSizeMin,
       gateOrderSizeRound: gateLimits.gateOrderSizeRound,
+      hedgeMinBaseQty: gateLimits.hedgeMinBaseQty ?? null,
+      hedgeMinQtyByBinanceStep: gateLimits.hedgeMinQtyByBinanceStep ?? null,
       priceRef: {
         collectedAt: priceCollectedAt,
         bid: gTicker?.bid ?? null,

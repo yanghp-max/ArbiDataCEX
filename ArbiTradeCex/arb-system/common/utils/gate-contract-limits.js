@@ -73,19 +73,27 @@ export function resolveGateOrderLimits(gateInfo, { binanceMinQty, binanceStepSiz
       gateMinBase = gateContractMinToBaseQty(gateDecimalMinContracts, mult);
       gateMinBase = ceilByStep(gateMinBase, baseStep);
     }
-
-    const minBaseQty = Math.max(binanceMinQty, gateMinBase || 0);
-    const minQty = ceilByStep(minBaseQty, binanceStepSize);
+    // 注意：gate.* 字段应仅表示 Gate 交易所自身限制，不能混入 Binance 最小量。
+    const exchangeMinBaseQty = gateMinBase || baseStep;
+    // 两腿联合最小量仅用于调试/展示，不参与 Gate 自身约束字段定义。
+    const hedgeMinBaseQty = Math.max(binanceMinQty, exchangeMinBaseQty);
+    const hedgeMinQtyByBinanceStep = ceilByStep(hedgeMinBaseQty, binanceStepSize);
 
     return {
-      minQty,
-      stepSize: baseStep,
+      // Gate 原生最小下单张数（decimal 合约）
+      minQty: gateDecimalMinContracts ?? contractStep,
+      // Gate 原生张数步进
+      stepSize: contractStep,
       quantityUnit: 'contract',
       enableDecimal: true,
       quantoMultiplier: mult,
-      minBaseQty: minQty,
+      // Gate 原生最小下单（换算到基础币）
+      minBaseQty: exchangeMinBaseQty,
       gateOrderSizeMin: gateDecimalMinContracts,
-      gateOrderSizeRound: gateDecimalRoundContracts
+      gateOrderSizeRound: gateDecimalRoundContracts,
+      // 调试字段：两腿对冲联合最小基础币（非 Gate 自身约束）
+      hedgeMinBaseQty,
+      hedgeMinQtyByBinanceStep
     };
   }
 

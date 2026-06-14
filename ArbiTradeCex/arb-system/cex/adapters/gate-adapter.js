@@ -904,6 +904,39 @@ export class GateAdapter extends BaseAdapter {
     return Math.max(0, size - left);
   }
 
+  #trimDecimalString(value) {
+    const s = String(value);
+    if (!s.includes('.')) return s;
+    return s.replace(/(\.\d*?[1-9])0+$/, '$1').replace(/\.0+$/, '');
+  }
+
+  /**
+   * Gate decimal contract size 需要可解析十进制，避免 JS 浮点尾差导致 INVALID_PROTOCOL。
+   * 例如 0.30000000000000004 -> "0.3"
+   */
+  #normalizeGateOrderSize(value, { decimalSize = false } = {}) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n === 0) {
+      throw new Error(`Gate order size invalid: ${value}`);
+    }
+    if (!decimalSize) {
+      const nearestInt = Math.round(n);
+      if (Math.abs(n - nearestInt) < 1e-9) {
+        return nearestInt;
+      }
+      return n;
+    }
+
+    // 保留最多 12 位小数，避免 0.30000000000000004 这类浮点尾差。
+    const normalized = Number(n.toFixed(12));
+    if (!Number.isFinite(normalized) || normalized === 0) {
+      throw new Error(`Gate decimal size invalid after normalize: ${value}`);
+    }
+    let out = this.#trimDecimalString(normalized.toFixed(12));
+    if (out === '-0') out = '0';
+    return out;
+  }
+
   /** 发单前余额/持仓检查（对齐 ArbiTrade-1） */
   async checkOrderPreconditions(params) {
     return runCheckOrderPreconditions(this, {
@@ -918,17 +951,26 @@ export class GateAdapter extends BaseAdapter {
     const side = String(orderData.side).toLowerCase();
     const type = String(orderData.type).toLowerCase();
     const signedSize = side === 'sell' ? -Math.abs(Number(orderData.amount)) : Math.abs(Number(orderData.amount));
+    const decimalSize = Boolean(orderData.decimalSize);
+    const gateSize = this.#normalizeGateOrderSize(signedSize, { decimalSize });
     const body = {
       contract,
-      size: orderData.decimalSize ? String(signedSize) : signedSize,
+      size: gateSize,
       price: type === 'limit' ? String(orderData.price) : '0',
       tif: type === 'limit' ? (orderData.timeInForce || 'gtc') : 'ioc'
     };
     if (orderData.reduceOnly) {
       body.reduce_only = true;
     }
-    const headers = orderData.decimalSize ? { 'X-Gate-Size-Decimal': '1' } : {};
-    const response = await this.#signedRequest('POST', '/futures/usdt/orders', body, headers);
+    const headers = decimalSize ? { 'X-Gate-Size-Decimal': '1' } : {};
+    let response;
+    try {
+      response = await this.#signedRequest('POST', '/futures/usdt/orders', body, headers);
+    } catch (err) {
+      throw new Error(
+        `${err.message} | order(contract=${contract}, side=${side}, type=${type}, size=${body.size}, tif=${body.tif}, decimal=${decimalSize})`
+      );
+    }
     const filled = this.#parseGateFilled(response);
     return new Order({
       orderId: idToString(response.id),

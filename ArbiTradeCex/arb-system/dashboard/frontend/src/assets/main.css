@@ -74,6 +74,16 @@ body {
   background: transparent;
   color: var(--muted);
 }
+.btn-danger {
+  border-color: rgba(255, 107, 107, 0.55);
+  background: rgba(255, 107, 107, 0.14);
+  color: #ffd9d9;
+}
+.btn-mini {
+  padding: 4px 10px;
+  font-size: 12px;
+  line-height: 1.2;
+}
 .account-error { color: var(--err); font-size: 13px; margin: 12px 0 0; }
 .account-total {
   display: flex;
@@ -417,6 +427,11 @@ body {
   align-items: center;
   margin-bottom: 12px;
 }
+.card-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .card-head h3 { margin: 0; font-size: 18px; }
 .status-tag {
   font-size: 11px;
@@ -424,6 +439,12 @@ body {
   border-radius: 999px;
   background: #101820;
   color: var(--muted);
+}
+.card-error {
+  margin-top: -6px;
+  margin-bottom: 8px;
+  color: var(--err);
+  font-size: 12px;
 }
 
 .exchange-row {
