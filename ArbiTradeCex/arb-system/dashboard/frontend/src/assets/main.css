@@ -417,6 +417,11 @@ body {
   align-items: center;
   margin-bottom: 12px;
 }
+.card-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .card-head h3 { margin: 0; font-size: 18px; }
 .status-tag {
   font-size: 11px;
@@ -424,6 +429,12 @@ body {
   border-radius: 999px;
   background: #101820;
   color: var(--muted);
+}
+.card-error {
+  margin-top: -6px;
+  margin-bottom: 8px;
+  color: var(--err);
+  font-size: 12px;
 }
 .exchange-row {
   display: grid;

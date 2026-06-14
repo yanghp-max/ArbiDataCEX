@@ -65,6 +65,12 @@ function formatFilledLegLine(exchange, side, quoteBid, quoteAsk, fillPrice, qty,
   return `  ${exchange} ${sideCn} 盘口 ${quoteTag} ${quote} → 成交价 ${fill} qty=${qty}${slip}`;
 }
 
+function closeSideFromQty(qty) {
+  if (qty > 0) return 'sell';
+  if (qty < 0) return 'buy';
+  return null;
+}
+
 export class CexCexTask {
   constructor(sharedResources, strategyConfig, precisionChecker) {
     this.sr = sharedResources;
@@ -81,10 +87,13 @@ export class CexCexTask {
     this.lockedDirection = new Map();
     this.lockedBranch = new Map();
     this.executingSymbols = new Set();
+    this.forceClosingSymbols = new Set();
     /** 持仓失衡 warn 节流（每 symbol 30s 最多 1 条） */
     this._imbalanceWarnTs = new Map();
     /** 单边孤儿持仓 REST 对账节流（每 symbol 5s 最多 1 次） */
     this._reconcileTs = new Map();
+    /** 强平触发价缓存（symbol -> { a, b, multiplier, updatedAt }） */
+    this._forceCloseCache = new Map();
     /** 上一帧 signal，用于热路径先推 dashboard（对齐 stable：价格先更新，z-score 后算） */
     this._lastSignalBySymbol = new Map();
     this.enforceLatency = sharedResources.enforceLatency;
@@ -203,6 +212,167 @@ export class CexCexTask {
     this.#clearLocksIfFlat(symbol);
   }
 
+  async #forceCloseSymbolNow(symbol, { aQty, bQty }) {
+    const sym = String(symbol || '').replace(/[-_]/g, '').toUpperCase();
+    if (!sym) return false;
+    if (this.executingSymbols.has(sym)) return false;
+
+    const aSide = closeSideFromQty(aQty);
+    const bSide = closeSideFromQty(bQty);
+    if (!aSide && !bSide) return false;
+
+    this.executingSymbols.add(sym);
+    this.forceClosingSymbols.add(sym);
+    this.lastOrderTs.set(sym, Date.now());
+    try {
+      const cfg = this.precision?.minQtyBySymbol?.[sym] || {};
+      const binanceStepSize = Number(cfg?.binance?.stepSize) || undefined;
+      const gateCfg = cfg?.gate || {};
+      const gateMult = Number(gateCfg?.quantoMultiplier);
+      const gateDecimalSize = Boolean(gateCfg?.enableDecimal || gateCfg?.quantityUnit === 'base');
+      const actions = [];
+
+      if (aSide) {
+        actions.push(this.sr.cexManager.placeOrder('binance', {
+          symbol: sym,
+          side: aSide,
+          type: 'market',
+          amount: Math.abs(aQty),
+          stepSize: binanceStepSize,
+          reduceOnly: true,
+          positionDirection: aQty > 0 ? '+a-b' : '-a+b',
+          positionSide: aQty > 0 ? 'LONG' : 'SHORT'
+        }));
+      }
+      if (bSide) {
+        const gateBaseQty = Math.abs(bQty);
+        const gateContracts = gateMult > 0 ? (gateBaseQty / gateMult) : gateBaseQty;
+        if (!(gateContracts > 0)) {
+          console.error(
+            `[FORCE_CLOSE] ${sym} gate 平仓量非法: base=${gateBaseQty} contracts=${gateContracts}`
+          );
+          return false;
+        }
+        actions.push(this.sr.cexManager.placeOrder('gate', {
+          symbol: sym,
+          side: bSide,
+          type: 'market',
+          amount: gateContracts,
+          decimalSize: gateDecimalSize,
+          reduceOnly: true
+        }));
+      }
+
+      const results = await Promise.allSettled(actions);
+      const failed = results.filter((r) => r.status === 'rejected');
+      if (failed.length > 0) {
+        const msg = failed.map((r) => r.reason?.message || 'unknown').join(' | ');
+        console.error(`[FORCE_CLOSE] ${sym} 强平提交失败: ${msg}`);
+        return false;
+      }
+
+      await this.sr.accountCache.syncSymbolPositionsAfterFill(this.sr.cexManager, sym, {
+        retries: 8,
+        delayMs: 500
+      });
+      await this.#refreshForceCloseCache(sym);
+      const afterA = this.sr.accountCache.getPosition('binance', sym);
+      const afterB = this.sr.accountCache.getPosition('gate', sym);
+      this.#clearLocksIfFlat(sym);
+      console.warn(`[FORCE_CLOSE] ${sym} 强平完成，仓位 A=${afterA} B=${afterB}`);
+      return true;
+    } finally {
+      this.forceClosingSymbols.delete(sym);
+      this.executingSymbols.delete(sym);
+    }
+  }
+
+  async #refreshForceCloseCache(symbol) {
+    const multiplier = Number(this.cfg.forceClosePriceMultiplier);
+    const sym = String(symbol || '').replace(/[-_]/g, '').toUpperCase();
+    if (!sym) return;
+    if (!(multiplier > 1) || this.sr.useMockAccount) {
+      this._forceCloseCache.delete(sym);
+      return;
+    }
+
+    const key = String(sym).replace(/[-_]/g, '');
+    const [binRows, gateRows] = await Promise.all([
+      this.sr.cexManager.getPositions('binance', { silent: true }).catch(() => []),
+      this.sr.cexManager.getPositions('gate', { silent: true }).catch(() => [])
+    ]);
+    const aPos = (binRows || []).find((p) => String(p.symbol).replace(/[-_]/g, '') === key) || null;
+    const bPos = (gateRows || []).find((p) => String(p.symbol).replace(/[-_]/g, '') === key) || null;
+
+    const aEntry = Number(aPos?.entryPrice || 0);
+    const bEntry = Number(bPos?.entryPrice || 0);
+    const aQty = Number(aPos?.qty || 0);
+    const bQty = Number(bPos?.qty || 0);
+    const hasA = Math.abs(aQty) > 1e-12 && aEntry > 0;
+    const hasB = Math.abs(bQty) > 1e-12 && bEntry > 0;
+    if (!hasA && !hasB) {
+      this._forceCloseCache.delete(sym);
+      return;
+    }
+
+    this._forceCloseCache.set(sym, {
+      multiplier,
+      updatedAt: Date.now(),
+      // 亏损保护触发：
+      // - 多仓(qty>0)：价格跌到 entry/multiplier
+      // - 空仓(qty<0)：价格涨到 entry*multiplier
+      a: hasA
+        ? {
+            qty: aQty,
+            entryPrice: aEntry,
+            triggerPrice: aQty > 0 ? (aEntry / multiplier) : (aEntry * multiplier),
+            triggerOp: aQty > 0 ? '<=' : '>='
+          }
+        : null,
+      b: hasB
+        ? {
+            qty: bQty,
+            entryPrice: bEntry,
+            triggerPrice: bQty > 0 ? (bEntry / multiplier) : (bEntry * multiplier),
+            triggerOp: bQty > 0 ? '<=' : '>='
+          }
+        : null
+    });
+  }
+
+  async #forceCloseByEntryMultiplierIfNeeded(symbol, tick) {
+    const multiplier = Number(this.cfg.forceClosePriceMultiplier);
+    if (!(multiplier > 1) || this.sr.useMockAccount || this.executingSymbols.has(symbol)) return false;
+    const aQty = this.sr.accountCache.getPosition('binance', symbol);
+    const bQty = this.sr.accountCache.getPosition('gate', symbol);
+    if (isFlatPosition(aQty, bQty)) {
+      this._forceCloseCache.delete(symbol);
+      return false;
+    }
+
+    const cache = this._forceCloseCache.get(symbol);
+    if (!cache) return false;
+    const midA = Number(tick?.aBid) > 0 && Number(tick?.aAsk) > 0 ? (Number(tick.aBid) + Number(tick.aAsk)) / 2 : 0;
+    const midB = Number(tick?.bBid) > 0 && Number(tick?.bAsk) > 0 ? (Number(tick.bBid) + Number(tick.bAsk)) / 2 : 0;
+    const aTrigger = Number(cache?.a?.triggerPrice || 0);
+    const bTrigger = Number(cache?.b?.triggerPrice || 0);
+    const aOp = cache?.a?.triggerOp || '>=';
+    const bOp = cache?.b?.triggerOp || '>=';
+    const aHit = aTrigger > 0 && midA > 0 && (aOp === '<=' ? midA <= aTrigger : midA >= aTrigger);
+    const bHit = bTrigger > 0 && midB > 0 && (bOp === '<=' ? midB <= bTrigger : midB >= bTrigger);
+    if (!aHit && !bHit) return false;
+
+    console.warn(
+      `[FORCE_CLOSE] ${symbol} 触发价格阈值强平: `
+      + `A ${midA.toFixed(8)} ${aOp} ${aTrigger > 0 ? aTrigger.toFixed(8) : '-'} `
+      + `B ${midB.toFixed(8)} ${bOp} ${bTrigger > 0 ? bTrigger.toFixed(8) : '-'} `
+      + `(multiplier=${multiplier})`
+    );
+    await this.#forceCloseSymbolNow(symbol, { aQty, bQty });
+    // 只要触发了强平阈值，本次 tick 就不再继续正常交易流程。
+    return true;
+  }
+
   /** 定时兜底：不依赖 WS 来价也能纠正陈旧持仓 */
   async reconcileAllStalePositions() {
     if (this.sr.useMockAccount) return;
@@ -239,6 +409,12 @@ export class CexCexTask {
       lock: this.#syncLockState(symbol, prevSignal)
     });
 
+    // 强平执行期间，该币种忽略所有新信号，避免与下一轮交易交叉。
+    if (this.forceClosingSymbols.has(symbol)) {
+      this.#logSkip(symbol, '强平中', '等待当前强平流程完成，忽略本轮信号');
+      return;
+    }
+
     // 对齐 stable：陈旧帧不参与信号计算，避免窗口被 stale tick 污染并拖慢长窗口运行。
     if (this.enforceLatency && !latencyAtSignal.pass) {
       this.#logSkip(symbol, '延迟·信号前', latencyAtSignal.reason);
@@ -255,6 +431,10 @@ export class CexCexTask {
     this._lastSignalBySymbol.set(symbol, signal);
 
     this.#reconcileStalePositionsIfNeeded(symbol).catch(() => {});
+
+    if (await this.#forceCloseByEntryMultiplierIfNeeded(symbol, tick)) {
+      return;
+    }
 
     const lock = this.#syncLockState(symbol, signal);
     this.sr.dashboardBridge?.updateMarketSnapshot({
@@ -586,6 +766,99 @@ export class CexCexTask {
     }
   }
 
+  async #forceRollbackAddExposure(symbol, fill, order) {
+    if (!fill?.legExposure) {
+      return { attempted: false };
+    }
+    const aFilled = Number(fill.aFilledQty) || 0;
+    const bFilled = Number(fill.bFilledQty) || 0;
+    const eps = 1e-9;
+    let rollbackPlan = null;
+
+    const binanceStepSize = Number(order?.cfg?.binance?.stepSize) || undefined;
+    const gateDecimalSize = Boolean(order?.gateDecimalSize);
+    const gateMult = Number(order?.gateQuantoMultiplier);
+    const gateBaseToContracts = (baseQty) => {
+      if (!(baseQty > 0)) return 0;
+      if (Number.isFinite(gateMult) && gateMult > 0) return baseQty / gateMult;
+      return baseQty;
+    };
+
+    const buildBinanceRollback = (baseQty, filledSide) => {
+      if (!(baseQty > eps)) return;
+      const openLong = filledSide === 'buy';
+      const side = openLong ? 'sell' : 'buy';
+      rollbackPlan = {
+        exchange: 'binance',
+        side,
+        amount: baseQty,
+        order: {
+          symbol,
+          side,
+          type: 'market',
+          amount: baseQty,
+          stepSize: binanceStepSize,
+          reduceOnly: true,
+          positionDirection: openLong ? '+a-b' : '-a+b',
+          positionSide: openLong ? 'LONG' : 'SHORT'
+        }
+      };
+    };
+
+    const buildGateRollback = (baseQty, filledSide) => {
+      if (!(baseQty > eps)) return;
+      const contracts = gateBaseToContracts(baseQty);
+      if (!(contracts > eps)) return;
+      const side = filledSide === 'buy' ? 'sell' : 'buy';
+      rollbackPlan = {
+        exchange: 'gate',
+        side,
+        amount: baseQty,
+        order: {
+          symbol,
+          side,
+          type: 'market',
+          amount: contracts,
+          decimalSize: gateDecimalSize,
+          reduceOnly: true
+        }
+      };
+    };
+
+    if (aFilled > eps && bFilled <= eps) {
+      // 严格按“刚刚成交量”回滚，不做差额推导
+      buildBinanceRollback(aFilled, fill.aSide);
+    } else if (bFilled > eps && aFilled <= eps) {
+      // 严格按“刚刚成交量”回滚，不做差额推导
+      buildGateRollback(bFilled, fill.bSide);
+    }
+
+    if (!rollbackPlan) {
+      return { attempted: false };
+    }
+
+    console.warn(
+      `[ADD_ROLLBACK] ${symbol} 加仓出现单腿，按成交量原量平仓`
+      + ` (${rollbackPlan.exchange} ${rollbackPlan.side} qty=${rollbackPlan.amount})`
+    );
+    try {
+      await this.sr.cexManager.placeOrder(rollbackPlan.exchange, rollbackPlan.order);
+    } catch (err) {
+      const msg = err?.message || 'unknown';
+      console.error(`[ADD_ROLLBACK] ${symbol} 自动回滚失败: ${msg}`);
+      return { attempted: true, ok: false, error: msg };
+    }
+
+    await this.sr.accountCache.syncSymbolPositionsAfterFill(this.sr.cexManager, symbol, {
+      retries: 8,
+      delayMs: 500
+    });
+    const aQty = this.sr.accountCache.getPosition('binance', symbol);
+    const bQty = this.sr.accountCache.getPosition('gate', symbol);
+    console.warn(`[ADD_ROLLBACK] ${symbol} 自动回滚完成，当前仓位 A=${aQty} B=${bQty}`);
+    return { attempted: true, ok: true, aQty, bQty };
+  }
+
   #releaseSymbolClaim(symbol, { restoreCooldown = false } = {}) {
     this.executingSymbols.delete(symbol);
     if (restoreCooldown) {
@@ -696,22 +969,11 @@ export class CexCexTask {
         return;
       }
 
+      if (action === 'add' && fill.legExposure) {
+        await this.#forceRollbackAddExposure(symbol, fill, order);
+      }
+
       this.sr.accountCache.applyFillToCache(symbol, execDirection, fill);
-
-      const netPnl = calcTradePnl(fill);
-      attachFillPricesToTrace(latencyTrace, fill);
-
-      this.sr.resultReporter.recordTrade({
-        symbol,
-        direction: execDirection,
-        action,
-        lockedDirection,
-        fill,
-        netPnl,
-        accountCache: this.sr.accountCache,
-        dashboardBridge: this.sr.dashboardBridge,
-        latencyTrace
-      });
 
       if (!fill.simulated) {
         const syncRes = await this.sr.accountCache.syncSymbolPositionsAfterFill(
@@ -727,6 +989,21 @@ export class CexCexTask {
         }
         await this.#auditPostTradeHedge(symbol, fill);
       }
+
+      const netPnl = calcTradePnl(fill);
+      attachFillPricesToTrace(latencyTrace, fill);
+
+      this.sr.resultReporter.recordTrade({
+        symbol,
+        direction: execDirection,
+        action,
+        lockedDirection,
+        fill,
+        netPnl,
+        accountCache: this.sr.accountCache,
+        dashboardBridge: this.sr.dashboardBridge,
+        latencyTrace
+      });
 
       const aQty = this.sr.accountCache.getPosition('binance', symbol);
       const bQty = this.sr.accountCache.getPosition('gate', symbol);
@@ -817,6 +1094,7 @@ export class CexCexTask {
           console.log(line);
         }
       }
+      this.#refreshForceCloseCache(symbol).catch(() => {});
       this.sr.eventBus.emitExecutionStatus({
         stage: 'TRADE_DONE',
         symbol,
@@ -842,6 +1120,56 @@ export class CexCexTask {
     } catch {
       // ignore funding fetch errors
     }
+  }
+
+  async manualSyncSymbolPosition(symbol) {
+    const sym = String(symbol || '').replace(/[-_]/g, '').toUpperCase();
+    if (!sym) return { ok: false, error: 'invalid_symbol' };
+    if (this.sr.useMockAccount) {
+      return { ok: false, symbol: sym, error: 'mock account mode does not support position sync' };
+    }
+    if (this.executingSymbols.has(sym)) {
+      return { ok: false, symbol: sym, error: `${sym} executing, try later` };
+    }
+
+    await this.sr.accountCache.reconcileSymbolPositions(this.sr.cexManager, sym);
+    await this.#refreshForceCloseCache(sym).catch(() => {});
+    const aQty = this.sr.accountCache.getPosition('binance', sym);
+    const bQty = this.sr.accountCache.getPosition('gate', sym);
+    const inferred = inferDirectionFromPosition(aQty, bQty);
+
+    if (isFlatPosition(aQty, bQty)) {
+      this.lockedDirection.delete(sym);
+      this.lockedBranch.delete(sym);
+      return { ok: true, symbol: sym, aQty, bQty, flat: true, direction: null };
+    }
+
+    if (inferred) {
+      this.lockedDirection.set(sym, inferred);
+      this.lockedBranch.delete(sym);
+      return {
+        ok: true,
+        symbol: sym,
+        aQty,
+        bQty,
+        flat: false,
+        hedged: isHedgedPosition(aQty, bQty),
+        direction: inferred
+      };
+    }
+
+    this.lockedDirection.delete(sym);
+    this.lockedBranch.delete(sym);
+    return {
+      ok: true,
+      symbol: sym,
+      aQty,
+      bQty,
+      flat: false,
+      hedged: false,
+      direction: null,
+      warning: 'position_imbalanced'
+    };
   }
 
 }

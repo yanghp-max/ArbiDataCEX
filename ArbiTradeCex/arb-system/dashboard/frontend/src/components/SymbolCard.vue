@@ -10,7 +10,8 @@ const props = defineProps({
   fmtMs: { type: Function, required: true },
   fmtPct: { type: Function, required: true },
   spreadClass: { type: Function, required: true },
-  statusLabel: { type: Function, required: true }
+  statusLabel: { type: Function, required: true },
+  onSyncPosition: { type: Function, required: true }
 });
 
 /** 进入/退出滞回，避免在阈值附近闪烁 */
@@ -22,6 +23,8 @@ const displayStale = ref(false);
 const displayStaleReason = ref('');
 let staleShownAt = 0;
 let recoverStartedAt = 0;
+const syncingPosition = ref(false);
+const syncError = ref('');
 onMounted(() => {
   syncStaleDisplay();
 });
@@ -35,6 +38,8 @@ watch(() => props.card.symbol, () => {
   displayStaleReason.value = '';
   staleShownAt = 0;
   recoverStartedAt = 0;
+  syncingPosition.value = false;
+  syncError.value = '';
 });
 
 /** 服务端推送时的年龄 + 本地流逝，避免 WS 高频推送把显示恒为 0 */
@@ -105,14 +110,32 @@ const effectiveStatus = computed(() => {
   return displayStale.value ? 'stale' : (props.card.windowReady ? 'ready' : 'collecting');
 });
 
+async function syncPositionNow() {
+  syncingPosition.value = true;
+  syncError.value = '';
+  try {
+    await props.onSyncPosition(props.card.symbol);
+  } catch (err) {
+    syncError.value = err?.message || String(err);
+  } finally {
+    syncingPosition.value = false;
+  }
+}
+
 </script>
 
 <template>
   <article class="symbol-card" :class="effectiveStatus">
     <div class="card-head">
       <h3>{{ card.symbol }}</h3>
-      <span class="status-tag">{{ statusLabel(effectiveStatus) }}</span>
+      <div class="card-head-actions">
+        <span class="status-tag">{{ statusLabel(effectiveStatus) }}</span>
+        <button type="button" class="btn btn-mini btn-muted" :disabled="syncingPosition" @click="syncPositionNow">
+          {{ syncingPosition ? '读仓中…' : '读仓' }}
+        </button>
+      </div>
     </div>
+    <div v-if="syncError" class="card-error">{{ syncError }}</div>
 
     <div class="exchange-row">
       <div class="exchange">

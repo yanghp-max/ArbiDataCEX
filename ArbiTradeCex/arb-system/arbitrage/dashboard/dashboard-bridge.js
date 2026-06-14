@@ -131,6 +131,10 @@ export class DashboardBridge {
     this.configReloader = typeof fn === 'function' ? fn : null;
   }
 
+  setManualSyncPositionHandler(fn) {
+    this.manualSyncPositionHandler = typeof fn === 'function' ? fn : null;
+  }
+
   async refreshAccountSnapshot() {
     if (!this.accountServices) {
       throw new Error('account services not ready');
@@ -193,6 +197,32 @@ export class DashboardBridge {
     return result;
   }
 
+  async syncSymbolPositionNow(symbol) {
+    if (!this.manualSyncPositionHandler) {
+      throw new Error('sync position handler not ready');
+    }
+    const normalized = String(symbol || '').replace(/[-_]/g, '').toUpperCase();
+    if (!normalized) {
+      throw new Error('invalid symbol');
+    }
+    this.#pushLog({
+      level: 'info',
+      symbol: normalized,
+      message: `[SYNC_POSITION] ${normalized} 请求已提交`
+    });
+    this.#flushLogsUpdate();
+    const result = await this.manualSyncPositionHandler(normalized);
+    this.#pushLog({
+      level: result?.ok ? 'info' : 'error',
+      symbol: normalized,
+      message: result?.ok
+        ? `[SYNC_POSITION] ${normalized} 完成 A=${result?.aQty ?? '-'} B=${result?.bQty ?? '-'}`
+        : `[SYNC_POSITION] ${normalized} 失败: ${result?.error || 'unknown'}`
+    });
+    this.#flushLogsUpdate();
+    return result;
+  }
+
   async start() {
     if (!this.enabled) return;
     const publicDir = `${getRootDir()}/dashboard/public`;
@@ -204,7 +234,8 @@ export class DashboardBridge {
     this.server.accountApi = {
       refreshSnapshot: () => this.refreshAccountSnapshot(),
       setBaseline: () => this.setAccountBaseline(),
-      reloadConfig: () => this.reloadConfigNow()
+      reloadConfig: () => this.reloadConfigNow(),
+      syncSymbolPosition: (symbol) => this.syncSymbolPositionNow(symbol)
     };
     await this.server.start();
     this._flushInterval = setInterval(() => {

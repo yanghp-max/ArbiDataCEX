@@ -251,6 +251,12 @@ export function useDashboardWs() {
     return postAccountApi('/api/config/reload');
   }
 
+  async function syncSymbolPosition(symbol) {
+    const sym = String(symbol || '').replace(/[-_]/g, '').toUpperCase();
+    if (!sym) throw new Error('invalid symbol');
+    return postAccountApi(`/api/symbols/${encodeURIComponent(sym)}/sync-position`);
+  }
+
   onMounted(connect);
   onUnmounted(() => {
     if (reconnectTimer) clearTimeout(reconnectTimer);
@@ -265,6 +271,7 @@ export function useDashboardWs() {
     symbolCards,
     refreshAccount,
     reloadConfigNow,
+    syncSymbolPosition,
     setAccountBaseline,
     DASHBOARD_MARKER
   };

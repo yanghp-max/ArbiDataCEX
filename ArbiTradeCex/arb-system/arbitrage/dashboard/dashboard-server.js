@@ -131,6 +131,25 @@ export class DashboardServer {
       await this.#handleAccountApi(req, res, 'reload-config');
       return;
     }
+    const syncMatch = url.pathname.match(/^\/api\/symbols\/([^/]+)\/sync-position$/);
+    if (syncMatch && req.method === 'POST') {
+      const send = (code, body) => {
+        res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify(body));
+      };
+      try {
+        if (!this.accountApi?.syncSymbolPosition) {
+          send(503, { ok: false, error: 'sync_position_api_unavailable' });
+          return;
+        }
+        const symbol = decodeURIComponent(syncMatch[1] || '');
+        const data = await this.accountApi.syncSymbolPosition(symbol);
+        send(200, { ok: true, data });
+      } catch (err) {
+        send(500, { ok: false, error: err.message || String(err) });
+      }
+      return;
+    }
     let rel = url.pathname === '/' ? 'index.html' : url.pathname.replace(/^[/\\]+/, '');
     rel = path.normalize(rel).replace(/^(\.\.([/\\]|$))+/, '');
     const publicRoot = path.resolve(this.publicDir);
