@@ -251,12 +251,6 @@ export function useDashboardWs() {
     return postAccountApi('/api/config/reload');
   }
 
-  async function flattenSymbol(symbol) {
-    const sym = String(symbol || '').replace(/[-_]/g, '').toUpperCase();
-    if (!sym) throw new Error('invalid symbol');
-    return postAccountApi(`/api/symbols/${encodeURIComponent(sym)}/flatten`);
-  }
-
   onMounted(connect);
   onUnmounted(() => {
     if (reconnectTimer) clearTimeout(reconnectTimer);
@@ -271,7 +265,6 @@ export function useDashboardWs() {
     symbolCards,
     refreshAccount,
     reloadConfigNow,
-    flattenSymbol,
     setAccountBaseline,
     DASHBOARD_MARKER
   };

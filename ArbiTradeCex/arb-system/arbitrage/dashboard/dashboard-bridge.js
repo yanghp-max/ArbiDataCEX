@@ -131,10 +131,6 @@ export class DashboardBridge {
     this.configReloader = typeof fn === 'function' ? fn : null;
   }
 
-  setManualFlattenHandler(fn) {
-    this.manualFlattenHandler = typeof fn === 'function' ? fn : null;
-  }
-
   async refreshAccountSnapshot() {
     if (!this.accountServices) {
       throw new Error('account services not ready');
@@ -197,32 +193,6 @@ export class DashboardBridge {
     return result;
   }
 
-  async flattenSymbolNow(symbol) {
-    if (!this.manualFlattenHandler) {
-      throw new Error('flatten handler not ready');
-    }
-    const normalized = String(symbol || '').replace(/[-_]/g, '').toUpperCase();
-    if (!normalized) {
-      throw new Error('invalid symbol');
-    }
-    this.#pushLog({
-      level: 'warn',
-      symbol: normalized,
-      message: `[MANUAL_FLATTEN] ${normalized} 请求已提交`
-    });
-    this.#flushLogsUpdate();
-    const result = await this.manualFlattenHandler(normalized);
-    this.#pushLog({
-      level: result?.ok ? 'info' : 'error',
-      symbol: normalized,
-      message: result?.ok
-        ? `[MANUAL_FLATTEN] ${normalized} 完成`
-        : `[MANUAL_FLATTEN] ${normalized} 失败: ${result?.error || 'unknown'}`
-    });
-    this.#flushLogsUpdate();
-    return result;
-  }
-
   async start() {
     if (!this.enabled) return;
     const publicDir = `${getRootDir()}/dashboard/public`;
@@ -234,8 +204,7 @@ export class DashboardBridge {
     this.server.accountApi = {
       refreshSnapshot: () => this.refreshAccountSnapshot(),
       setBaseline: () => this.setAccountBaseline(),
-      reloadConfig: () => this.reloadConfigNow(),
-      flattenSymbol: (symbol) => this.flattenSymbolNow(symbol)
+      reloadConfig: () => this.reloadConfigNow()
     };
     await this.server.start();
     this._flushInterval = setInterval(() => {

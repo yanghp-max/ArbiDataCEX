@@ -65,12 +65,6 @@ function formatFilledLegLine(exchange, side, quoteBid, quoteAsk, fillPrice, qty,
   return `  ${exchange} ${sideCn} 盘口 ${quoteTag} ${quote} → 成交价 ${fill} qty=${qty}${slip}`;
 }
 
-function closeSideFromQty(qty) {
-  if (qty > 0) return 'sell';
-  if (qty < 0) return 'buy';
-  return null;
-}
-
 export class CexCexTask {
   constructor(sharedResources, strategyConfig, precisionChecker) {
     this.sr = sharedResources;
@@ -850,102 +844,6 @@ export class CexCexTask {
     }
   }
 
-  async manualFlattenSymbol(symbol) {
-    const sym = String(symbol || '').replace(/[-_]/g, '').toUpperCase();
-    if (!sym) {
-      return { ok: false, error: 'invalid_symbol' };
-    }
-    if (this.executingSymbols.has(sym)) {
-      return { ok: false, error: `${sym} executing, try later` };
-    }
-    if (this.sr.useMockAccount) {
-      return { ok: false, error: 'mock account mode does not support manual flatten' };
-    }
-
-    try {
-      await this.sr.accountCache.reconcileSymbolPositions(this.sr.cexManager, sym);
-    } catch {
-      // continue with cached positions
-    }
-    let aQty = this.sr.accountCache.getPosition('binance', sym);
-    let bQty = this.sr.accountCache.getPosition('gate', sym);
-    if (Math.abs(aQty) < 1e-12 && Math.abs(bQty) < 1e-12) {
-      return { ok: true, symbol: sym, alreadyFlat: true };
-    }
-
-    this.executingSymbols.add(sym);
-    try {
-      const actions = [];
-      const aSide = closeSideFromQty(aQty);
-      const bSide = closeSideFromQty(bQty);
-      const cfg = this.precision?.minQtyBySymbol?.[sym] || {};
-      const binanceStepSize = Number(cfg?.binance?.stepSize) || undefined;
-      const gateCfg = cfg?.gate || {};
-      const gateMult = Number(gateCfg?.quantoMultiplier);
-      const gateDecimalSize = Boolean(gateCfg?.enableDecimal || gateCfg?.quantityUnit === 'base');
-
-      if (aSide) {
-        actions.push(this.sr.cexManager.placeOrder('binance', {
-          symbol: sym,
-          side: aSide,
-          type: 'market',
-          amount: Math.abs(aQty),
-          stepSize: binanceStepSize,
-          reduceOnly: true,
-          positionDirection: aQty > 0 ? '+a-b' : '-a+b',
-          positionSide: aQty > 0 ? 'LONG' : 'SHORT'
-        }));
-      }
-      if (bSide) {
-        const gateBaseQty = Math.abs(bQty);
-        const gateContracts = gateMult > 0 ? (gateBaseQty / gateMult) : gateBaseQty;
-        if (!(gateContracts > 0)) {
-          return {
-            ok: false,
-            symbol: sym,
-            error: `gate flatten qty invalid: base=${gateBaseQty} contracts=${gateContracts}`
-          };
-        }
-        actions.push(this.sr.cexManager.placeOrder('gate', {
-          symbol: sym,
-          side: bSide,
-          type: 'market',
-          amount: gateContracts,
-          decimalSize: gateDecimalSize,
-          reduceOnly: true
-        }));
-      }
-      const results = await Promise.allSettled(actions);
-      const failed = results.filter((r) => r.status === 'rejected');
-      if (failed.length > 0) {
-        const msg = failed.map((r) => r.reason?.message || 'unknown').join(' | ');
-        return { ok: false, symbol: sym, error: msg };
-      }
-
-      await this.sr.accountCache.syncSymbolPositionsAfterFill(this.sr.cexManager, sym, {
-        retries: 8,
-        delayMs: 500
-      });
-      aQty = this.sr.accountCache.getPosition('binance', sym);
-      bQty = this.sr.accountCache.getPosition('gate', sym);
-      this.#clearLocksIfFlat(sym);
-      return {
-        ok: true,
-        symbol: sym,
-        aQty,
-        bQty,
-        submitted: {
-          binance: aSide ? Math.abs(aQty) : 0,
-          gateBase: bSide ? Math.abs(bQty) : 0
-        },
-        flat: Math.abs(aQty) < 1e-12 && Math.abs(bQty) < 1e-12
-      };
-    } catch (err) {
-      return { ok: false, symbol: sym, error: err.message || String(err) };
-    } finally {
-      this.executingSymbols.delete(sym);
-    }
-  }
 }
 
 export default CexCexTask;

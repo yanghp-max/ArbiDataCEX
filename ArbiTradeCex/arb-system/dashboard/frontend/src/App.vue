@@ -15,8 +15,7 @@ const {
   pnlBySymbolRows,
   symbolCards,
   refreshAccount,
-  reloadConfigNow,
-  flattenSymbol
+  reloadConfigNow
 } = useDashboardWs();
 const {
   fmt,
@@ -88,7 +87,6 @@ const {
       :fmt-pct="fmtPct"
       :spread-class="spreadClass"
       :status-label="statusLabel"
-      :on-flatten="flattenSymbol"
     />
   </section>
 

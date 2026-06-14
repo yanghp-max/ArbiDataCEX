@@ -44,9 +44,6 @@ export class TaskManager {
     });
     this.task = new CexCexTask(this.sharedResources, strat, precision);
     this.sharedResources.dashboardBridge?.setConfigReloader(() => this.forceReloadConfigNow());
-    this.sharedResources.dashboardBridge?.setManualFlattenHandler(
-      async (symbol) => this.task.manualFlattenSymbol(symbol)
-    );
     this._symbolSet = new Set(strat.symbols.map(compactSymbol));
 
     const cexManager = this.sharedResources.cexManager;
