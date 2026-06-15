@@ -109,6 +109,44 @@ export class PrecisionChecker {
   }
 
   /**
+   * 平仓：min(配置档位, 两腿对冲持仓) 后 floor 对齐。
+   * 剩余不足一档时平掉尾仓，不再 skip。
+   */
+  finalizeCloseOrder({ direction, tick, configQty, holdA, holdB }) {
+    const cfg = this.minQtyBySymbol[tick.symbol];
+    if (!cfg) return null;
+
+    const absA = Math.abs(Number(holdA) || 0);
+    const absB = Math.abs(Number(holdB) || 0);
+    const configQ = Number(configQty);
+    if (!(configQ > 0) || absA <= 0 || absB <= 0) return null;
+
+    const targetQty = Math.min(configQ, absA, absB);
+    const aligned = resolveHedgeQtyFromBaseQty({
+      baseQty: targetQty,
+      binanceCfg: cfg.binance,
+      gateCfg: cfg.gate,
+      round: 'floor'
+    });
+
+    if (aligned.qty <= 0 || aligned.gateSize <= 0) return null;
+    if (absA + 1e-12 < aligned.qty || absB + 1e-12 < aligned.qty) return null;
+
+    const { aPrice } = legPricesForDirection(direction, tick);
+    const gateCfg = cfg.gate;
+    return {
+      qty: aligned.qty,
+      gateSize: aligned.gateSize,
+      gateDecimalSize: Boolean(gateCfg.enableDecimal || gateCfg.quantityUnit === 'base'),
+      gateQuantityUnit: gateCfg.quantityUnit || 'contract',
+      gateQuantoMultiplier: Number(gateCfg.quantoMultiplier) || 1,
+      direction,
+      aPrice,
+      cfg
+    };
+  }
+
+  /**
    * 开仓：持仓上限截取后，对齐 qty/gateSize 且必须 ≥ 两腿最小可成交量。
    * 不满足则返回 null（避免单腿或低于交易所最小量下单）。
    */

@@ -129,12 +129,18 @@ export class AccountCache {
 
   /**
    * 成交回执优先写缓存（同步），再按需 REST 确认；不依赖全所 merge 刷新。
+   * open/add 单腿敞口不入账（由回滚/REST 对账纠正），避免对冲仓位被错误累加。
    */
-  applyFillToCache(symbol, direction, fill) {
+  applyFillToCache(symbol, direction, fill, { action } = {}) {
     const sym = this.#compactSymbol(symbol);
     if (fill?.simulated) {
       this.applyLegDelta(sym, direction, fill.qty);
       this.#markFillSync(sym);
+      return;
+    }
+
+    const isOpenAdd = action === 'open' || action === 'add';
+    if (isOpenAdd && (fill?.legExposure || fill?.rollbackApplied)) {
       return;
     }
 

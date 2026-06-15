@@ -175,5 +175,53 @@ export function calcTradeGrossFromLegs(fill) {
   const bFilled = Number(fill?.bFilledQty) > 0;
   if (!aFilled && !bFilled) return null;
   if (aFilled && bFilled) return net + fees;
+  if (fill?.rollbackApplied && (aFilled || bFilled)) {
+    return net + fees;
+  }
   return null;
+}
+
+function mergeLegRoundTrip(openLeg, closeLeg) {
+  if (!openLeg?.filled || !closeLeg?.filled) return openLeg;
+  const fee = (Number(openLeg.fee) || 0) + (Number(closeLeg.fee) || 0);
+  const quoteVolume = (Number(openLeg.quoteVolume) || 0) + (Number(closeLeg.quoteVolume) || 0);
+  return {
+    ...openLeg,
+    usdtChange: (Number(openLeg.usdtChange) || 0) + (Number(closeLeg.usdtChange) || 0),
+    fee,
+    quoteVolume,
+    closeFillPrice: closeLeg.avgPrice ?? closeLeg.fillPrice ?? null,
+    closeFilledQty: closeLeg.filledQty,
+    pnlComplete: openLeg.pnlComplete !== false && closeLeg.pnlComplete !== false,
+    roundTrip: true
+  };
+}
+
+/**
+ * open/add 单腿成交后回滚：将开仓腿 + 回滚平仓腿合并为同一腿的净 usdtChange。
+ * net_pnl = 开仓 usdtChange + 平仓 usdtChange（等价于价差×数量−两次手续费）。
+ */
+export function mergeOpenAddRollbackPnl(openFill, rollbackFill) {
+  if (!openFill?.legExposure || !rollbackFill) return openFill;
+
+  const fill = { ...openFill };
+  const aOpen = Number(fill.aFilledQty) > 0;
+  const bOpen = Number(fill.bFilledQty) > 0;
+
+  if (aOpen && rollbackFill.aLeg?.filled) {
+    fill.aLeg = mergeLegRoundTrip(fill.aLeg, rollbackFill.aLeg);
+    fill.aRollbackFillPrice = rollbackFill.aFillPrice ?? rollbackFill.aPrice ?? null;
+    fill.aRollbackOrderId = rollbackFill.aOrderId ?? null;
+  }
+  if (bOpen && rollbackFill.bLeg?.filled) {
+    fill.bLeg = mergeLegRoundTrip(fill.bLeg, rollbackFill.bLeg);
+    fill.bRollbackFillPrice = rollbackFill.bFillPrice ?? rollbackFill.bPrice ?? null;
+    fill.bRollbackOrderId = rollbackFill.bOrderId ?? null;
+  }
+
+  fill.rollbackApplied = true;
+  fill.legExposure = false;
+  fill.legMismatch = false;
+  fill.pnlComplete = isFillPnlComplete(fill);
+  return fill;
 }

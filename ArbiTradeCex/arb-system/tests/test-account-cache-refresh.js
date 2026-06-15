@@ -126,4 +126,28 @@ assert.equal(syncRes.hedged, true);
 assert.equal(cache.getPosition('binance', 'SIRENUSDT'), -10);
 assert.equal(cache.getPosition('gate', 'SIRENUSDT'), 10);
 
+cache.setPosition('binance', 'HUSDT', -40);
+cache.setPosition('gate', 'HUSDT', 40);
+cache.applyFillToCache('HUSDT', '-a+b', {
+  aFilledQty: 0,
+  bFilledQty: 20,
+  aSide: 'sell',
+  bSide: 'buy',
+  legExposure: true
+}, { action: 'add' });
+assert.equal(cache.getPosition('binance', 'HUSDT'), -40, 'add 单腿不应改变对冲仓位');
+assert.equal(cache.getPosition('gate', 'HUSDT'), 40);
+
+cache.setPosition('binance', 'HUSDT', 0);
+cache.setPosition('gate', 'HUSDT', 0);
+cache.applyFillToCache('HUSDT', '-a+b', {
+  aFilledQty: 0,
+  bFilledQty: 20,
+  aSide: 'sell',
+  bSide: 'buy',
+  legExposure: true
+}, { action: 'open' });
+assert.equal(cache.getPosition('binance', 'HUSDT'), 0, 'open 单腿不应写入对冲仓位');
+assert.equal(cache.getPosition('gate', 'HUSDT'), 0);
+
 console.log('test-account-cache-refresh: OK');

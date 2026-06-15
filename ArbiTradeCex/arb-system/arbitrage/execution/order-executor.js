@@ -307,6 +307,138 @@ export class OrderExecutor {
     return fill;
   }
 
+  /** 强平/回滚等已提交订单：轮询成交并组装 fill（与 executeBothLegs 回执语义一致） */
+  async assembleFillFromCloseLegs({
+    symbol,
+    direction,
+    tick,
+    order,
+    aOrder = null,
+    bOrder = null,
+    aSide = null,
+    bSide = null,
+    aRequestedQty = 0,
+    bRequestedGateSize = 0
+  }) {
+    const { qty, gateSize, gateDecimalSize } = order ?? {};
+    const quote = quoteSnapshot(direction, tick);
+
+    if (aOrder && aRequestedQty > 0) {
+      const polled = await this.#ensureOrderFill('binance', aOrder, tick.symbol, aRequestedQty);
+      aOrder = polled.order;
+    }
+    if (bOrder && bRequestedGateSize > 0) {
+      const polled = await this.#ensureOrderFill(
+        'gate',
+        bOrder,
+        tick.symbol,
+        bRequestedGateSize,
+        gateDecimalSize
+      );
+      bOrder = polled.order;
+    }
+
+    const aFilled = aOrder ? readFilled(aOrder, aRequestedQty || qty) : 0;
+    const bFilledBase = bOrder
+      ? gateFillToBaseQty(readFilled(bOrder, bRequestedGateSize || gateSize), order)
+      : 0;
+
+    const legMismatch = aFilled > 0 && bFilledBase > 0 && Math.abs(aFilled - bFilledBase) > 1e-6;
+    const legExposure = (aFilled > 0 && bFilledBase <= 0) || (bFilledBase > 0 && aFilled <= 0) || legMismatch;
+    const matchedQty = aFilled > 0 && bFilledBase > 0
+      ? Math.min(aFilled, bFilledBase, qty ?? aRequestedQty ?? bFilledBase)
+      : Math.max(aFilled, bFilledBase);
+
+    const fallback = legPricesForDirection(direction, tick);
+    const aPricePost = aFilled > 0 && aOrder
+      ? Number(aOrder.avgPrice || aOrder.price || fallback.aPrice)
+      : null;
+    const bPricePost = bFilledBase > 0 && bOrder
+      ? Number(bOrder.avgPrice || bOrder.price || fallback.bPrice)
+      : null;
+
+    if (aOrder && aFilled > 0) {
+      if (!(Number(aOrder.cumQuote) > 0) && aPricePost > 0) {
+        aOrder = { ...aOrder, cumQuote: aFilled * aPricePost };
+      }
+      const aTrades = await this.#fetchOrderTradesWithRetry('binance', aOrder.orderId, tick.symbol);
+      aOrder = { ...aOrder, trades: aTrades };
+    }
+    if (bOrder && bFilledBase > 0) {
+      if (!(Number(bOrder.cumQuote) > 0) && bPricePost > 0) {
+        bOrder = { ...bOrder, cumQuote: bFilledBase * bPricePost };
+      }
+      const bTrades = await this.#fetchOrderTradesWithRetry('gate', bOrder.orderId, tick.symbol, {
+        decimalSize: gateDecimalSize
+      });
+      bOrder = { ...bOrder, trades: bTrades };
+    }
+
+    const aLeg = aFilled > 0
+      ? buildLegPnl({
+        exchange: 'binance',
+        side: aSide,
+        filledQty: aFilled,
+        order: aOrder,
+        trades: aOrder?.trades,
+        requireRealFee: true
+      })
+      : {
+        exchange: 'binance',
+        side: aSide,
+        filledQty: 0,
+        usdtChange: 0,
+        quoteVolume: 0,
+        fee: 0,
+        filled: false,
+        pnlComplete: false
+      };
+    const bLeg = bFilledBase > 0
+      ? buildLegPnl({
+        exchange: 'gate',
+        side: bSide,
+        filledQty: bFilledBase,
+        order: bOrder,
+        trades: bOrder?.trades,
+        quantoMultiplier: order?.gateQuantoMultiplier,
+        requireRealFee: true
+      })
+      : {
+        exchange: 'gate',
+        side: bSide,
+        filledQty: 0,
+        usdtChange: 0,
+        quoteVolume: 0,
+        fee: 0,
+        filled: false,
+        pnlComplete: false
+      };
+
+    return {
+      simulated: false,
+      aOrderId: aOrder ? String(aOrder.orderId) : null,
+      bOrderId: bOrder ? String(bOrder.orderId) : null,
+      aSide,
+      bSide,
+      aPrice: aPricePost,
+      bPrice: bPricePost,
+      aFillPrice: aPricePost,
+      bFillPrice: bPricePost,
+      quote,
+      qty: matchedQty,
+      aFilledQty: aFilled,
+      bFilledQty: bFilledBase,
+      aLeg,
+      bLeg,
+      pnlComplete: isFillPnlComplete({ aLeg, bLeg }),
+      legMismatch,
+      legExposure,
+      failedLeg: null,
+      failReason: null,
+      latencyTrace: null
+    };
+  }
+
   #assertOrderPreconditionsFromCache({
     tick,
     quote,
