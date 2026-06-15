@@ -63,11 +63,7 @@ async function main() {
 
   const textLogPath = getTextLogPath();
   if (textLogPath) {
-    console.log(`[strategy] text log -> ${textLogPath} (拦单/延迟等；strategyTextLogToConsole=true 时同步控制台)`);
-    appendTextLog(
-      `[strategy] START mode=${args.mode} trading=${tradingEnabled} symbols=${symbols.length} enforceLatency=${strat.enforceLatency}`,
-      { mirrorConsole: false }
-    );
+    console.log(`[strategy] text log -> ${textLogPath} (仅记录实盘失败事件)`);
   }
 
   const mgr = await startCexCexArbitrage({

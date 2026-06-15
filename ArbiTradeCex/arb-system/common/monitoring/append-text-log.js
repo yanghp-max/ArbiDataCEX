@@ -1,40 +1,12 @@
 /**
- * 追加文本日志（带 ISO 时间戳），供拦单/延迟等需要留痕的输出使用。
+ * 追加文本日志（带 ISO 时间戳）。
+ * 失败事件直接同步落盘，避免批量 flush 带来的周期性写盘高峰。
  */
-import fsp from 'node:fs/promises';
+import fs from 'node:fs';
 import path from 'node:path';
 
 let resolvedLogPath = null;
 let mirrorToConsole = true;
-let flushTimer = null;
-let flushInFlight = false;
-const FILE_FLUSH_INTERVAL_MS = 200;
-const FILE_QUEUE_MAX = 5000;
-const fileQueue = [];
-
-function ensureFlushTimer() {
-  if (flushTimer) return;
-  flushTimer = setInterval(() => {
-    flushFileQueue().catch((err) => {
-      console.error('[append-text-log] async flush failed:', err.message);
-    });
-  }, FILE_FLUSH_INTERVAL_MS);
-  if (typeof flushTimer.unref === 'function') {
-    flushTimer.unref();
-  }
-}
-
-async function flushFileQueue() {
-  if (!resolvedLogPath || flushInFlight || fileQueue.length === 0) return;
-  flushInFlight = true;
-  const batch = fileQueue.splice(0, fileQueue.length);
-  try {
-    await fsp.mkdir(path.dirname(resolvedLogPath), { recursive: true });
-    await fsp.appendFile(resolvedLogPath, `${batch.join('\n')}\n`, 'utf8');
-  } finally {
-    flushInFlight = false;
-  }
-}
 
 export function configureTextLog({ rootDir, filePath, mirrorConsole = true } = {}) {
   if (!filePath) {
@@ -47,7 +19,6 @@ export function configureTextLog({ rootDir, filePath, mirrorConsole = true } = {
     ? filePath
     : path.resolve(root, filePath);
   mirrorToConsole = mirrorConsole !== false;
-  ensureFlushTimer();
 }
 
 export function getTextLogPath() {
@@ -61,12 +32,12 @@ export function getTextLogPath() {
 export function appendTextLog(message, options = {}) {
   const line = `[${new Date().toISOString()}] ${message}`;
   if (resolvedLogPath) {
-    if (fileQueue.length >= FILE_QUEUE_MAX) {
-      // 极端拥塞时丢弃最旧日志，避免内存膨胀。
-      fileQueue.shift();
+    try {
+      fs.mkdirSync(path.dirname(resolvedLogPath), { recursive: true });
+      fs.appendFileSync(resolvedLogPath, `${line}\n`, 'utf8');
+    } catch (err) {
+      console.error('[append-text-log] write failed:', err.message);
     }
-    fileQueue.push(line);
-    ensureFlushTimer();
   }
   const shouldMirror = options.mirrorConsole ?? mirrorToConsole;
   if (shouldMirror) {
