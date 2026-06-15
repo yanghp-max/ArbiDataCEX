@@ -740,23 +740,31 @@ export class CexCexTask {
 
   #logLatency(trace, { reason = null, partial = false } = {}) {
     if (!trace) return;
-    const mirror = false;
+    // 按需仅镜像控制台，不写 strategy.log。
+    if (!this.strategyTextLogToConsole) return;
     if (reason) {
-      appendTextLog(`[延迟·中止] ${reason}`, { level: 'warn', mirrorConsole: mirror });
+      console.warn(`[延迟·中止] ${reason}`);
       if (partial) {
         for (const line of formatLatencyLogLines(trace)) {
-          appendTextLog(line, { level: 'warn', mirrorConsole: mirror });
+          console.warn(line);
         }
       }
       return;
     }
     for (const line of formatLatencyLogLines(trace)) {
-      appendTextLog(line, { level: 'log', mirrorConsole: mirror });
+      console.log(line);
     }
   }
 
   #logFailurePriceAndLatency(symbol, reason, trace) {
     if (!this.sr.tradingEnabled) return;
+    appendTextLog(`[实盘·失败] ${symbol} ${reason}`, { level: 'error', mirrorConsole: false });
+    for (const line of formatPriceStageLines(trace)) {
+      appendTextLog(`[实盘·失败] ${symbol} ${line}`, { level: 'error', mirrorConsole: false });
+    }
+    for (const line of formatLatencyLogLines(trace)) {
+      appendTextLog(`[实盘·失败] ${symbol} ${line}`, { level: 'error', mirrorConsole: false });
+    }
     console.warn(`[实盘·失败] ${symbol} ${reason}`);
     for (const line of formatPriceStageLines(trace)) {
       console.warn(line);

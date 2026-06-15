@@ -1,7 +1,6 @@
 /**
- * 拦单原因日志（按 symbol+阶段节流；写入 strategy 文本日志 + 可选控制台）
+ * 拦单原因日志（按 symbol+阶段节流；仅控制台输出，不落盘）。
  */
-import { appendTextLog } from '../../common/monitoring/append-text-log.js';
 
 const lastLogAt = new Map();
 const latencyBurstAt = new Map();
@@ -38,18 +37,16 @@ export function logTradeSkip(symbol, stage, reason, options = {}) {
     }
   }
   const message = `[拦单·${stage}] [${mode}] ${symbol} ${reason}`;
-  appendTextLog(message, {
-    level: 'warn',
-    mirrorConsole: options.mirrorConsole
-  });
+  if (options.mirrorConsole) {
+    console.warn(message);
+  }
 
   if (parsed) {
     const nowSec = Math.floor(now / 1000);
     const burst = latencyBurstAt.get(nowSec);
-    if (burst?.count === 4) {
-      appendTextLog(
-        `[拦单·${stage}] [${mode}] 进入拥塞抑制：同秒多币延迟拦截（count>=4，当前最大超限${burst.maxExceed}ms）`,
-        { level: 'warn', mirrorConsole: options.mirrorConsole }
+    if (burst?.count === 4 && options.mirrorConsole) {
+      console.warn(
+        `[拦单·${stage}] [${mode}] 进入拥塞抑制：同秒多币延迟拦截（count>=4，当前最大超限${burst.maxExceed}ms）`
       );
     }
   }
