@@ -1,8 +1,9 @@
 import { BinanceAdapter } from './adapters/binance-adapter.js';
 import { GateAdapter } from './adapters/gate-adapter.js';
+import { AsterAdapter } from './adapters/aster-adapter.js';
 import { applyDefaultLeverage } from './leverage-bootstrap.js';
 
-export { BinanceAdapter, GateAdapter };
+export { BinanceAdapter, GateAdapter, AsterAdapter };
 export { BaseAdapter } from './adapters/base-adapter.js';
 
 export class CexManager {
@@ -144,16 +145,19 @@ export class CexManager {
   async startPrivateAccountStreams(symbols = []) {
     const binance = this.get('binance');
     const gate = this.get('gate');
+    const aster = this.get('aster');
     await Promise.all([
       binance?.startPrivateAccountStream?.(),
-      gate?.startPrivateAccountStream?.(symbols)
+      gate?.startPrivateAccountStream?.(symbols),
+      aster?.startPrivateAccountStream?.(symbols)
     ]);
   }
 
   async stopPrivateAccountStreams() {
     await Promise.all([
       this.get('binance')?.stopPrivateAccountStream?.(),
-      this.get('gate')?.stopPrivateAccountStream?.()
+      this.get('gate')?.stopPrivateAccountStream?.(),
+      this.get('aster')?.stopPrivateAccountStream?.()
     ]);
   }
 
@@ -175,9 +179,13 @@ export class CexManager {
       enablePublicStream,
       enablePrivateAccountStream
     });
-    await Promise.all([binance.connect(), gate.connect()]);
+    const aster = new AsterAdapter({
+      enablePublicStream
+    });
+    await Promise.all([binance.connect(), gate.connect(), aster.connect()]);
     mgr.register('binance', binance);
     mgr.register('gate', gate);
+    mgr.register('aster', aster);
     return mgr;
   }
 }
