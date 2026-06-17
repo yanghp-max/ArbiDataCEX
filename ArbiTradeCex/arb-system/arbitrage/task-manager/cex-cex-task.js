@@ -1377,7 +1377,17 @@ export class CexCexTask {
       return { ok: false, symbol: sym, error: `${sym} executing, try later` };
     }
 
-    await this.sr.accountCache.reconcileSymbolPositions(this.sr.cexManager, sym);
+    const syncRes = await this.sr.accountCache.syncSymbolPositionsAfterFill(this.sr.cexManager, sym, {
+      retries: 3,
+      delayMs: 350
+    });
+    if (!syncRes?.ok) {
+      return {
+        ok: false,
+        symbol: sym,
+        error: syncRes?.error || 'position_sync_failed'
+      };
+    }
     await this.#refreshForceCloseCache(sym).catch(() => {});
     const aQty = this.#getPositionA(sym);
     const bQty = this.#getPositionB(sym);
