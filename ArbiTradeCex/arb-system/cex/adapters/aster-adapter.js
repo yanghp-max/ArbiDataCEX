@@ -67,7 +67,7 @@ export class AsterAdapter extends BaseAdapter {
     if (this.enablePublicStream) {
       await this.connectWebSocket();
     }
-    if (process.env.ASTER_USER && process.env.ASTER_SIGNER && process.env.ASTER_PRIVATE_KEY) {
+    if (process.env.ASTER_SIGNER && process.env.ASTER_PRIVATE_KEY) {
       this.authenticated = true;
     }
     await super.connect();
@@ -153,8 +153,14 @@ export class AsterAdapter extends BaseAdapter {
     const symbols = Array.isArray(symbolsOrSymbol) ? symbolsOrSymbol : [symbolsOrSymbol];
     this.subscribedSymbols = symbols.map((symbol) => this.normalizeSymbol(symbol));
     this.subscribedChannels = [...channels];
+    const subscribedAt = Date.now();
     for (const symbol of symbols) {
-      await super.subscribe(this.normalizeSymbol(symbol), channels);
+      const normalized = this.normalizeSymbol(symbol);
+      await super.subscribe(normalized, channels);
+      // 首条 WS 迟迟不来时，也要能被 watchdog 识别为 stale 并触发 REST 补价。
+      if (!this._lastSymbolMessageAt.has(normalized)) {
+        this._lastSymbolMessageAt.set(normalized, subscribedAt);
+      }
       const exSymbol = this.toExchangeSymbol(symbol).toLowerCase();
       for (const ch of channels) {
         this.subscriptionQueue.push(`${exSymbol}@${ch}`);
@@ -301,21 +307,23 @@ export class AsterAdapter extends BaseAdapter {
   }
 
   async #buildV3SignedPayload(params = {}) {
-    const user = String(process.env.ASTER_USER || '').trim();
     const signer = String(process.env.ASTER_SIGNER || '').trim();
     const privateKey = String(process.env.ASTER_PRIVATE_KEY || '').trim();
-    if (!user || !signer || !privateKey) {
-      throw new Error('Aster v3 auth missing: ASTER_USER / ASTER_SIGNER / ASTER_PRIVATE_KEY');
+    const user = String(process.env.ASTER_USER || '').trim();
+    if (!signer || !privateKey) {
+      throw new Error('Aster v3 auth missing: ASTER_SIGNER / ASTER_PRIVATE_KEY');
     }
 
     const normalizedPrivateKey = privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`;
     const wallet = new Wallet(normalizedPrivateKey);
     const payload = {
       ...params,
-      user,
       signer,
       nonce: this.#nextNonceMicros()
     };
+    if (user) {
+      payload.user = user;
+    }
     const encoded = new URLSearchParams(
       Object.entries(payload).reduce((acc, [k, v]) => {
         if (v == null) return acc;
