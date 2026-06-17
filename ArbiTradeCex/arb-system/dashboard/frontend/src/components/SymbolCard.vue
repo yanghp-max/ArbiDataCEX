@@ -188,8 +188,8 @@ async function syncPositionNow() {
         <span class="meta-value">未启用</span>
       </div>
       <div class="meta-line">
-        <span class="meta-label">Funding A / B (%)</span>
-        <span class="meta-value">{{ fmtFundingRate(card.fundingA) }} / {{ fmtFundingRate(card.fundingB) }}</span>
+        <span class="meta-label">Funding A / B</span>
+        <span class="meta-value">{{ fmtFundingRate(card.fundingA, { withRaw: true }) }} / {{ fmtFundingRate(card.fundingB, { withRaw: true }) }}</span>
       </div>
     </div>
   </article>

@@ -20,9 +20,14 @@ export function useFormatters() {
     return `${Number(v).toFixed(4)}%`;
   }
 
-  function fmtFundingRate(v) {
+  function fmtFundingRate(v, options = {}) {
     if (v == null || !Number.isFinite(Number(v))) return '-';
-    return `${(Number(v) * 100).toFixed(4)}%`;
+    const n = Number(v);
+    const pct = (n * 100).toFixed(4);
+    if (options.withRaw) {
+      return `${pct}% (raw ${n.toFixed(6)})`;
+    }
+    return `${pct}%`;
   }
 
   function spreadClass(v) {
