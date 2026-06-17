@@ -11,6 +11,7 @@ const props = defineProps({
   fmt: { type: Function, required: true },
   fmtMs: { type: Function, required: true },
   fmtPct: { type: Function, required: true },
+  fmtFundingRate: { type: Function, required: true },
   spreadClass: { type: Function, required: true },
   statusLabel: { type: Function, required: true },
   onSyncPosition: { type: Function, required: true }
@@ -187,8 +188,8 @@ async function syncPositionNow() {
         <span class="meta-value">未启用</span>
       </div>
       <div class="meta-line">
-        <span class="meta-label">Funding A / B</span>
-        <span class="meta-value">{{ fmt(card.fundingA, 4) }} / {{ fmt(card.fundingB, 4) }}</span>
+        <span class="meta-label">Funding A / B (%)</span>
+        <span class="meta-value">{{ fmtFundingRate(card.fundingA) }} / {{ fmtFundingRate(card.fundingB) }}</span>
       </div>
     </div>
   </article>

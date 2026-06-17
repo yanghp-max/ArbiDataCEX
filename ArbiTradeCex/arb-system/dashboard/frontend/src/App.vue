@@ -23,6 +23,7 @@ const {
   fmt,
   fmtMs,
   fmtPct,
+  fmtFundingRate,
   spreadClass,
   formatTime,
   formatDuration,
@@ -92,6 +93,7 @@ const exchangeB = computed(() => state.account?.exchangeB || 'B');
       :fmt="fmt"
       :fmt-ms="fmtMs"
       :fmt-pct="fmtPct"
+      :fmt-funding-rate="fmtFundingRate"
       :spread-class="spreadClass"
       :status-label="statusLabel"
       :on-sync-position="syncSymbolPosition"

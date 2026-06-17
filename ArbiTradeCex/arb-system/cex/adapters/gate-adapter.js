@@ -622,8 +622,14 @@ export class GateAdapter extends BaseAdapter {
     const symbols = Array.isArray(symbolsOrSymbol) ? symbolsOrSymbol : [symbolsOrSymbol];
     this.subscribed = [...symbols];
     this.subscribedChannels = [...channels];
+    const subscribedAt = Date.now();
     for (const symbol of symbols) {
-      await super.subscribe(this.normalizeSymbol(symbol), channels);
+      const normalized = this.normalizeSymbol(symbol);
+      await super.subscribe(normalized, channels);
+      // 首条 WS 迟迟不来时，也要能被 watchdog 识别为 stale 并触发 REST 补价。
+      if (!this._lastSymbolMessageAt.has(normalized)) {
+        this._lastSymbolMessageAt.set(normalized, subscribedAt);
+      }
     }
     if (!this.enablePublicStream) return;
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
@@ -711,12 +717,12 @@ export class GateAdapter extends BaseAdapter {
 
   async getFundingRate(symbol) {
     const contract = this.toGateContract(symbol);
-    const { data } = await axios.get(`${this.config.restUrl}/futures/usdt/funding_rate`, {
-      params: { contract, limit: 1 },
+    // 对齐 Gate App：优先使用当前合约 funding_rate（预测/当前期），
+    // 而不是 funding_rate 历史接口的上一期结算值 r。
+    const { data } = await axios.get(`${this.config.restUrl}/futures/usdt/contracts/${contract}`, {
       timeout: this.config.timeout
     });
-    const item = Array.isArray(data) ? data[data.length - 1] : data;
-    return Number(item?.r ?? item?.funding_rate ?? item?.rate ?? NaN);
+    return Number(data?.funding_rate ?? data?.funding_rate_indicative ?? NaN);
   }
 
   async getAuthHeaders(method, path, bodyObj = null) {

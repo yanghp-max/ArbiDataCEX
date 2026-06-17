@@ -20,6 +20,11 @@ export function useFormatters() {
     return `${Number(v).toFixed(4)}%`;
   }
 
+  function fmtFundingRate(v) {
+    if (v == null || !Number.isFinite(Number(v))) return '-';
+    return `${(Number(v) * 100).toFixed(4)}%`;
+  }
+
   function spreadClass(v) {
     if (v == null || !Number.isFinite(Number(v))) return '';
     return Number(v) >= 0 ? 'pos' : 'neg';
@@ -94,6 +99,7 @@ export function useFormatters() {
     fmt,
     fmtMs,
     fmtPct,
+    fmtFundingRate,
     spreadClass,
     formatTime,
     formatDuration,
