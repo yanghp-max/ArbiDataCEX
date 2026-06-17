@@ -12,6 +12,7 @@ import { CexPriceHub } from './cex-price-hub.js';
 import eventBus from '../event-bus/index.js';
 import { DashboardBridge } from '../dashboard/dashboard-bridge.js';
 import { resolveEnforceLatency, getRootDir } from '../../config/global-config.js';
+import { resolveAdapterPair, isBinanceGatePair } from '../../cex/adapter-pair.js';
 
 function isCexMarketWorkerEnabled(strat) {
   if (strat.cexMarketWorkerEnabled === false) return false;
@@ -44,6 +45,7 @@ export class SharedResources {
     this.cexMarketWorkerClient = null;
     this.cexPriceHub = null;
     this.useCexMarketWorker = false;
+    this.adapterPair = resolveAdapterPair(config);
   }
 
   async init() {
@@ -69,7 +71,8 @@ export class SharedResources {
       this.dashboardBridge?.recordExecutionStatus(payload);
     });
 
-    this.useCexMarketWorker = isCexMarketWorkerEnabled(strat);
+    const isLegacyWorkerPair = isBinanceGatePair(this.adapterPair);
+    this.useCexMarketWorker = isLegacyWorkerPair && isCexMarketWorkerEnabled(strat);
     const staleMs = buildWorkerStaleMs(strat);
 
     if (this.useCexMarketWorker) {
@@ -88,10 +91,7 @@ export class SharedResources {
       });
       try {
         await this.cexMarketWorkerClient.initialize();
-        console.log(
-          '[SharedResources] CEX market worker ready (Binance+Gate public WS in child process; '
-          + 'Gate account WS on main process)'
-        );
+        console.log('[SharedResources] CEX market worker ready');
       } catch (error) {
         console.warn(`[SharedResources] CEX market worker failed, fallback to main adapter WS: ${error.message}`);
         await this.cexMarketWorkerClient.cleanup().catch(() => {});
@@ -101,13 +101,22 @@ export class SharedResources {
 
     const useWorker = Boolean(this.cexMarketWorkerClient);
     this.cexManager = await CexManager.createDefault(strat, {
-      enablePublicStream: !useWorker
+      enablePublicStream: !useWorker,
+      providers: this.adapterPair.providers
     });
 
     this.cexPriceHub = new CexPriceHub({
       marketWorker: this.cexMarketWorkerClient,
-      binanceSource: this.cexManager.getAdapter('binance'),
-      gateAdapter: this.cexManager.getAdapter('gate')
+      providers: [
+        {
+          provider: this.adapterPair.providerA,
+          adapter: this.cexManager.getAdapter(this.adapterPair.providerA)
+        },
+        {
+          provider: this.adapterPair.providerB,
+          adapter: this.cexManager.getAdapter(this.adapterPair.providerB)
+        }
+      ]
     });
     this.useMockAccount = Boolean(strat.useMockAccount) && !this.tradingEnabled;
 
@@ -118,6 +127,7 @@ export class SharedResources {
 
     this.accountCache.minAvailableUsdt = strat.minAvailableUsdt;
     this.accountCache.accountCacheMaxAgeMs = Number(strat.accountCacheMaxAgeMs) || 5000;
+    this.accountCache.setExchangePair(this.adapterPair.providerA, this.adapterPair.providerB);
     this.accountCache.setTrackedSymbols(strat.symbols);
 
     if (this.useMockAccount) {
@@ -134,13 +144,17 @@ export class SharedResources {
     }
     this.reservationManager = new ReservationManager({
       accountCache: this.accountCache,
+      exchangeA: this.adapterPair.providerA,
+      exchangeB: this.adapterPair.providerB,
       ttlMs: this.config.strategy.reservationTtlMs
     });
     this.orderExecutor = new OrderExecutor({
       cexManager: this.cexManager,
       tradingEnabled: this.tradingEnabled,
       accountCache: this.accountCache,
-      reservationManager: this.reservationManager
+      reservationManager: this.reservationManager,
+      providerA: this.adapterPair.providerA,
+      providerB: this.adapterPair.providerB
     });
 
     if (this.tradingEnabled && strat.tradeLogCsv) {
@@ -150,7 +164,11 @@ export class SharedResources {
       });
       console.log(`[SharedResources] live trade CSV -> ${this.tradeCsvWriter.filePath}`);
     }
-    this.resultReporter = new ResultReporter({ tradeCsvWriter: this.tradeCsvWriter });
+    this.resultReporter = new ResultReporter({
+      tradeCsvWriter: this.tradeCsvWriter,
+      providerA: this.adapterPair.providerA,
+      providerB: this.adapterPair.providerB
+    });
 
     this.dashboardBridge.setAccountServices({
       accountCache: this.accountCache,
@@ -179,4 +197,4 @@ export class SharedResources {
 }
 
 export default SharedResources;
-
+

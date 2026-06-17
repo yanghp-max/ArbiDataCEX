@@ -5,6 +5,7 @@ import AccountPanel from './components/AccountPanel.vue';
 import ProgressPanel from './components/ProgressPanel.vue';
 import SymbolCard from './components/SymbolCard.vue';
 import LogPanel from './components/LogPanel.vue';
+import { computed } from 'vue';
 import { useDashboardWs } from './composables/useDashboardWs.js';
 import { useFormatters } from './composables/useFormatters.js';
 
@@ -31,6 +32,9 @@ const {
   formatTotalPnl,
   totalPnlClass
 } = useFormatters();
+
+const exchangeA = computed(() => state.account?.exchangeA || 'A');
+const exchangeB = computed(() => state.account?.exchangeB || 'B');
 </script>
 
 <template>
@@ -80,6 +84,8 @@ const {
       v-for="card in symbolCards"
       :key="card.symbol"
       :card="card"
+      :exchange-a="exchangeA"
+      :exchange-b="exchangeB"
       :show-latency="state.enforceLatency"
       :enforce-latency="state.enforceLatency"
       :latency-limits="state.latencyLimits"
@@ -94,6 +100,8 @@ const {
 
   <LogPanel
     :state="state"
+    :exchange-a="exchangeA"
+    :exchange-b="exchangeB"
     :pnl-summary="pnlSummary"
     :fmt="fmt"
     :fmt-pct="fmtPct"

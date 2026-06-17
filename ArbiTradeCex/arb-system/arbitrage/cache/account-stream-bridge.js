@@ -70,10 +70,9 @@ export class AccountStreamBridge {
   }
 
   async start() {
-    const binance = this.cexManager.getAdapter('binance');
-    const gate = this.cexManager.getAdapter('gate');
-    if (binance) this.bindAdapter(binance);
-    if (gate) this.bindAdapter(gate);
+    for (const adapter of this.cexManager.adapters.values()) {
+      if (adapter) this.bindAdapter(adapter);
+    }
 
     try {
       await this.cexManager.startPrivateAccountStreams(this.symbols);

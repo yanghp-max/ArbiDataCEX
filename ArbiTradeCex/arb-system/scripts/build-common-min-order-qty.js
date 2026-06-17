@@ -1,36 +1,75 @@
 /**
- * 拉取 Binance/Gate 共有 USDT 永续币种，按流动性排序后生成精度配置。
+ * 生成 min-order-qty（A/B 两腿）：
+ * - 兼容老结构：输出键仍为 binance / gate（分别对应 A / B）
+ * - 支持 B=gate 或 B=aster（A 默认 binance）
  *
- * 排序规则（与 collector/scripts/build-symbol-config.js 一致）：
- *   liquidity_score = min(binance_24h_qv, gate_24h_qv)，降序；同分按 symbol_id 升序
+ * 说明：
+ * - config/min-order-qty.json 是配置文件，不是可执行脚本。
+ * - 你需要执行的是本脚本，生成/更新该 JSON，然后策略启动时读取它。
  *
- * 输出：
- *   config/min-order-qty.json   — selectedSymbols + 各 symbol 最小下单量/步进
+ * 常用命令：
+ * - node scripts/build-common-min-order-qty.js
+ * - npm run build:symbols-min-qty
+ * - npm run build:symbols-min-qty:binance-aster
  *
- * 用法：
- *   node scripts/build-common-min-order-qty.js
- *   node scripts/build-common-min-order-qty.js --top 52
- *   node scripts/build-common-min-order-qty.js --top 0          # 0 表示全部共有币种
+ * 策略读取位置（config.json）：
+ * - strategy.minQtyJson: "config/min-order-qty.json"
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import axios from 'axios';
-import { getRootDir } from '../config/global-config.js';
+import { getRootDir, loadConfig } from '../config/global-config.js';
 import { resolveBinanceOrderLimits } from '../common/utils/binance-order-limits.js';
-import { resolveBinanceSymbolInfoForBuild } from '../common/utils/binance-symbol-info.js';
+import { isBinanceExchangeInfoStale, reconcileBinanceSymbolFilters } from '../common/utils/binance-symbol-info.js';
 import { resolveGateOrderLimits } from '../common/utils/gate-contract-limits.js';
 import { fetchGateContractsDecimal, mapWithConcurrency } from '../common/utils/fetch-market-metadata.js';
 
-const BINANCE_REST = process.env.BINANCE_REST_URL || 'https://fapi.binance.com';
-const GATE_REST = process.env.GATE_REST_URL || 'https://api.gateio.ws/api/v4';
+const DEFAULT_URLS = {
+  binance: process.env.BINANCE_REST_URL || 'https://fapi.binance.com',
+  gate: process.env.GATE_REST_URL || 'https://api.gateio.ws/api/v4',
+  aster: process.env.ASTER_REST_URL || 'https://fapi.asterdex.com'
+};
+
+function isBinanceLikeProvider(provider) {
+  return provider === 'binance' || provider === 'aster';
+}
+
+function binanceLikeApiVersion(provider) {
+  return provider === 'aster' ? 'v3' : 'v1';
+}
+
+function binanceLikePath(provider, endpoint) {
+  return `/fapi/${binanceLikeApiVersion(provider)}${endpoint}`;
+}
+
+function normalizeProvider(value, fallback) {
+  const p = String(value || fallback || '').trim().toLowerCase();
+  return p || fallback;
+}
+
+function resolveDefaultProviders() {
+  let cfg = null;
+  try {
+    cfg = loadConfig();
+  } catch {
+    cfg = null;
+  }
+  return {
+    providerA: normalizeProvider(cfg?.adapters?.A?.provider, 'binance'),
+    providerB: normalizeProvider(cfg?.adapters?.B?.provider, 'gate')
+  };
+}
 
 function parseArgs(argv) {
   const rootDir = getRootDir();
+  const defaults = resolveDefaultProviders();
   const args = {
     top: null,
     outputMinQty: path.join(rootDir, 'config/min-order-qty.json'),
-    skipErrors: false
+    skipErrors: false,
+    providerA: defaults.providerA,
+    providerB: defaults.providerB
   };
 
   for (let i = 2; i < argv.length; i += 1) {
@@ -45,6 +84,16 @@ function parseArgs(argv) {
       i += 1;
       continue;
     }
+    if (token === '--provider-a' && argv[i + 1]) {
+      args.providerA = normalizeProvider(argv[i + 1], args.providerA);
+      i += 1;
+      continue;
+    }
+    if (token === '--provider-b' && argv[i + 1]) {
+      args.providerB = normalizeProvider(argv[i + 1], args.providerB);
+      i += 1;
+      continue;
+    }
     if (token === '--skip-errors') {
       args.skipErrors = true;
       continue;
@@ -54,18 +103,24 @@ function parseArgs(argv) {
   if (args.top != null && (!Number.isFinite(args.top) || args.top < 0)) {
     throw new Error('--top must be a non-negative number (0 = all common symbols)');
   }
+  if (!isBinanceLikeProvider(args.providerA)) {
+    throw new Error(`providerA=${args.providerA} not supported yet (supported: binance, aster)`);
+  }
+  if (!(args.providerB === 'gate' || isBinanceLikeProvider(args.providerB))) {
+    throw new Error(`providerB=${args.providerB} not supported yet (supported: gate, binance, aster)`);
+  }
   return args;
 }
 
-function toGateContract(binanceStyleSymbol) {
-  return `${binanceStyleSymbol.slice(0, -4)}_USDT`;
+function toGateContract(compactSymbol) {
+  return `${compactSymbol.slice(0, -4)}_USDT`;
 }
 
-function binanceRefPrice(ticker) {
-  return ticker?.bid ?? ticker?.mid ?? ticker?.ask ?? null;
+function compactSymbol(symbol) {
+  return String(symbol || '').replace(/[-_]/g, '').toUpperCase();
 }
 
-function buildBinancePerpSet(exchangeInfo) {
+function buildPerpSetBinanceLike(exchangeInfo) {
   const out = new Set();
   for (const s of exchangeInfo.symbols || []) {
     if (s.contractType === 'PERPETUAL' && s.quoteAsset === 'USDT' && s.status === 'TRADING') {
@@ -75,7 +130,7 @@ function buildBinancePerpSet(exchangeInfo) {
   return out;
 }
 
-function buildGatePerpSet(contracts) {
+function buildPerpSetGate(contracts) {
   const out = new Set();
   for (const c of contracts || []) {
     const name = c.name || c.contract;
@@ -86,34 +141,26 @@ function buildGatePerpSet(contracts) {
   return out;
 }
 
-function buildBinanceMap(exchangeInfo) {
+function buildInfoMap(items, keySelector) {
   const map = new Map();
-  for (const s of exchangeInfo.symbols || []) {
-    map.set(String(s.symbol), s);
+  for (const item of items || []) {
+    const key = String(keySelector(item) || '');
+    if (key) map.set(key, item);
   }
   return map;
 }
 
-function buildGateMap(contracts) {
-  const map = new Map();
-  for (const c of contracts || []) {
-    const key = String(c.name || c.contract || '');
-    if (key) map.set(key, c);
-  }
-  return map;
-}
-
-function buildBinanceQvMap(ticker24hr) {
+function buildQvMapBinanceLike(rows) {
   const out = new Map();
-  for (const i of ticker24hr || []) {
+  for (const i of rows || []) {
     out.set(String(i.symbol), Number(i.quoteVolume || 0));
   }
   return out;
 }
 
-function buildGateQvMap(tickers) {
+function buildQvMapGate(rows) {
   const out = new Map();
-  for (const i of tickers || []) {
+  for (const i of rows || []) {
     const c = String(i.contract || '');
     if (!c) continue;
     const v = Number(i.volume_24h_quote ?? i.volume_24h_usd ?? i.volume_24h ?? i.volume ?? 0) || 0;
@@ -122,9 +169,9 @@ function buildGateQvMap(tickers) {
   return out;
 }
 
-function buildBinanceBookTickerMap(bookTickers) {
+function buildBookTickerMapBinanceLike(rows) {
   const map = new Map();
-  for (const t of bookTickers || []) {
+  for (const t of rows || []) {
     const symbol = String(t.symbol || '');
     if (!symbol) continue;
     const bid = Number(t.bidPrice);
@@ -138,9 +185,9 @@ function buildBinanceBookTickerMap(bookTickers) {
   return map;
 }
 
-function buildGateBookTickerMap(tickers) {
+function buildBookTickerMapGate(rows) {
   const map = new Map();
-  for (const t of tickers || []) {
+  for (const t of rows || []) {
     const contract = String(t.contract || '');
     if (!contract) continue;
     const bid = Number(t.highest_bid);
@@ -156,127 +203,242 @@ function buildGateBookTickerMap(tickers) {
   return map;
 }
 
-function buildCommonSymbolRows(bnSet, gtSet, bnQv, gtQv) {
-  const gateNorm = new Map();
-  for (const g of gtSet) gateNorm.set(g.replace('_', ''), g);
+function buildProviderBSymbolMap(providerBSet, providerB) {
+  const map = new Map();
+  for (const raw of providerBSet) {
+    const key = providerB === 'gate' ? compactSymbol(raw) : String(raw);
+    map.set(key, String(raw));
+  }
+  return map;
+}
 
+function buildCommonRows(setA, setB, qvA, qvB, providerB) {
   const rows = [];
-  for (const bn of bnSet) {
-    const gt = gateNorm.get(bn);
-    if (!gt) continue;
-    const bnv = Number(bnQv.get(bn) || 0);
-    const gtv = Number(gtQv.get(gt) || 0);
+  const bMap = buildProviderBSymbolMap(setB, providerB);
+  for (const aSymbol of setA) {
+    const symbolId = String(aSymbol);
+    const bSymbol = bMap.get(symbolId);
+    if (!bSymbol) continue;
+    const av = Number(qvA.get(symbolId) || 0);
+    const bv = Number(qvB.get(bSymbol) || 0);
     rows.push({
-      symbol_id: bn,
-      binance_symbol: bn,
-      gate_symbol: gt,
-      binance_quote_volume_24h: bnv,
-      gate_quote_volume_24h: gtv,
-      liquidity_score: Math.min(bnv, gtv)
+      symbol_id: symbolId,
+      a_symbol: symbolId,
+      b_symbol: bSymbol,
+      a_quote_volume_24h: av,
+      b_quote_volume_24h: bv,
+      liquidity_score: Math.min(av, bv)
     });
   }
-
-  rows.sort((a, b) => b.liquidity_score - a.liquidity_score || a.symbol_id.localeCompare(b.symbol_id));
-  rows.forEach((r, idx) => {
-    r.rank = idx + 1;
-  });
+  rows.sort((x, y) => y.liquidity_score - x.liquidity_score || x.symbol_id.localeCompare(y.symbol_id));
+  rows.forEach((r, idx) => { r.rank = idx + 1; });
   return rows;
 }
 
-async function buildMinQtyEntry({
-  symbolId,
-  gateSymbol,
-  binanceInfo,
-  gateInfo,
-  bTicker,
-  gTicker,
-  priceCollectedAt
-}) {
-  const refPrice = binanceRefPrice(bTicker);
-  const { symbolInfo: resolvedBinanceInfo, refreshed } = await resolveBinanceSymbolInfoForBuild(
-    symbolId,
-    binanceInfo,
-    refPrice
-  );
+function refPriceFromTicker(ticker) {
+  return ticker?.bid ?? ticker?.mid ?? ticker?.ask ?? ticker?.last ?? null;
+}
 
-  const binanceLimits = resolveBinanceOrderLimits(resolvedBinanceInfo, {
-    refPrice
-  });
-
-  const gateLimits = resolveGateOrderLimits(gateInfo, {
-    binanceMinQty: binanceLimits.minQty,
-    binanceStepSize: binanceLimits.stepSize,
-    gateSymbol
-  });
-
+function toBinanceLikeGateEntry(symbol, limits, ticker, priceCollectedAt) {
   return {
-    binance: {
-      symbol: symbolId,
-      lotMinQty: binanceLimits.lotMinQty,
-      minNotional: binanceLimits.minNotional,
-      minQty: binanceLimits.minQty,
-      stepSize: binanceLimits.stepSize,
-      exchangeInfoRefreshed: refreshed,
-      priceRef: {
-        collectedAt: priceCollectedAt,
-        bid: bTicker?.bid ?? null,
-        ask: bTicker?.ask ?? null,
-        mid: bTicker?.mid ?? null
-      }
-    },
-    gate: {
-      symbol: gateSymbol,
-      minQty: gateLimits.minQty,
-      stepSize: gateLimits.stepSize,
-      quantityUnit: gateLimits.quantityUnit,
-      enableDecimal: gateLimits.enableDecimal,
-      quantoMultiplier: gateLimits.quantoMultiplier,
-      minBaseQty: gateLimits.minBaseQty,
-      gateOrderSizeMin: gateLimits.gateOrderSizeMin,
-      gateOrderSizeRound: gateLimits.gateOrderSizeRound,
-      hedgeMinBaseQty: gateLimits.hedgeMinBaseQty ?? null,
-      hedgeMinQtyByBinanceStep: gateLimits.hedgeMinQtyByBinanceStep ?? null,
-      priceRef: {
-        collectedAt: priceCollectedAt,
-        bid: gTicker?.bid ?? null,
-        ask: gTicker?.ask ?? null,
-        mid: gTicker?.mid ?? null,
-        last: gTicker?.last ?? null
-      }
+    symbol,
+    minQty: limits.minQty,
+    stepSize: limits.stepSize,
+    quantityUnit: 'base',
+    enableDecimal: true,
+    quantoMultiplier: 1,
+    minBaseQty: limits.minQty,
+    gateOrderSizeMin: null,
+    gateOrderSizeRound: null,
+    hedgeMinBaseQty: null,
+    hedgeMinQtyByBinanceStep: null,
+    priceRef: {
+      collectedAt: priceCollectedAt,
+      bid: ticker?.bid ?? null,
+      ask: ticker?.ask ?? null,
+      mid: ticker?.mid ?? null,
+      last: ticker?.last ?? null
     }
   };
 }
 
+async function buildMinQtyEntry({
+  symbolId,
+  restA,
+  providerA,
+  restB,
+  bSymbol,
+  providerB,
+  infoA,
+  infoB,
+  tickerA,
+  tickerB,
+  priceCollectedAt
+}) {
+  const refA = refPriceFromTicker(tickerA);
+  const { symbolInfo: resolvedAInfo, refreshed } = await resolveBinanceLikeSymbolInfoForBuild(
+    restA,
+    providerA,
+    symbolId,
+    infoA,
+    refA
+  );
+  const limitsA = resolveBinanceOrderLimits(resolvedAInfo, { refPrice: refA });
+
+  let limitsBCompat;
+  if (providerB === 'gate') {
+    limitsBCompat = resolveGateOrderLimits(infoB, {
+      binanceMinQty: limitsA.minQty,
+      binanceStepSize: limitsA.stepSize,
+      gateSymbol: bSymbol
+    });
+  } else {
+    const refB = refPriceFromTicker(tickerB);
+    const { symbolInfo: resolvedBInfo } = await resolveBinanceLikeSymbolInfoForBuild(
+      restB,
+      providerB,
+      symbolId,
+      infoB,
+      refB
+    );
+    const limitsB = resolveBinanceOrderLimits(resolvedBInfo, { refPrice: refB });
+    limitsBCompat = toBinanceLikeGateEntry(bSymbol, limitsB, tickerB, priceCollectedAt);
+  }
+
+  const legacyA = {
+    symbol: symbolId,
+    lotMinQty: limitsA.lotMinQty,
+    minNotional: limitsA.minNotional,
+    minQty: limitsA.minQty,
+    stepSize: limitsA.stepSize,
+    exchangeInfoRefreshed: refreshed,
+    priceRef: {
+      collectedAt: priceCollectedAt,
+      bid: tickerA?.bid ?? null,
+      ask: tickerA?.ask ?? null,
+      mid: tickerA?.mid ?? null
+    }
+  };
+  const legacyB = providerB === 'gate'
+    ? {
+      symbol: bSymbol,
+      minQty: limitsBCompat.minQty,
+      stepSize: limitsBCompat.stepSize,
+      quantityUnit: limitsBCompat.quantityUnit,
+      enableDecimal: limitsBCompat.enableDecimal,
+      quantoMultiplier: limitsBCompat.quantoMultiplier,
+      minBaseQty: limitsBCompat.minBaseQty,
+      gateOrderSizeMin: limitsBCompat.gateOrderSizeMin,
+      gateOrderSizeRound: limitsBCompat.gateOrderSizeRound,
+      hedgeMinBaseQty: limitsBCompat.hedgeMinBaseQty ?? null,
+      hedgeMinQtyByBinanceStep: limitsBCompat.hedgeMinQtyByBinanceStep ?? null,
+      priceRef: {
+        collectedAt: priceCollectedAt,
+        bid: tickerB?.bid ?? null,
+        ask: tickerB?.ask ?? null,
+        mid: tickerB?.mid ?? null,
+        last: tickerB?.last ?? null
+      }
+    }
+    : limitsBCompat;
+
+  return {
+    // 兼容老代码：A 腿放 binance，B 腿放 gate
+    binance: legacyA,
+    gate: legacyB,
+    // 通用结构：新代码优先读取 legs/providers
+    legs: {
+      A: {
+        provider: providerA,
+        limits: legacyA
+      },
+      B: {
+        provider: providerB,
+        limits: legacyB
+      }
+    },
+    providers: {
+      [providerA]: legacyA,
+      [providerB]: legacyB
+    }
+  };
+}
+
+async function fetchBinanceLikeBundle(restUrl, provider) {
+  const exchangeInfoPath = binanceLikePath(provider, '/exchangeInfo');
+  const ticker24hPath = binanceLikePath(provider, '/ticker/24hr');
+  const bookTickerPath = binanceLikePath(provider, '/ticker/bookTicker');
+  const [exchangeInfo, ticker24h, bookTickers] = await Promise.all([
+    axios.get(`${restUrl}${exchangeInfoPath}`, { timeout: 30000 }).then((r) => r.data),
+    axios.get(`${restUrl}${ticker24hPath}`, { timeout: 30000 }).then((r) => r.data),
+    axios.get(`${restUrl}${bookTickerPath}`, { timeout: 30000 }).then((r) => r.data)
+  ]);
+  return { exchangeInfo, ticker24h, bookTickers };
+}
+
+async function fetchBinanceLikeSymbolExchangeInfo(restUrl, provider, symbol) {
+  const sym = String(symbol || '').toUpperCase();
+  const { data } = await axios.get(`${restUrl}${binanceLikePath(provider, '/exchangeInfo')}`, {
+    params: { symbol: sym },
+    timeout: 15000
+  });
+  const row = Array.isArray(data?.symbols)
+    ? data.symbols.find((s) => String(s.symbol) === sym)
+    : null;
+  if (!row) {
+    throw new Error(`exchangeInfo missing symbol ${sym} on ${restUrl}`);
+  }
+  return row;
+}
+
+async function resolveBinanceLikeSymbolInfoForBuild(restUrl, provider, symbol, symbolInfo, refPrice) {
+  let info = symbolInfo;
+  let refreshed = false;
+  if (info && isBinanceExchangeInfoStale(info, refPrice)) {
+    info = await fetchBinanceLikeSymbolExchangeInfo(restUrl, provider, symbol);
+    refreshed = true;
+  }
+  if (info && isBinanceExchangeInfoStale(info, refPrice)) {
+    info = reconcileBinanceSymbolFilters(info, refPrice);
+  }
+  return { symbolInfo: info, refreshed };
+}
+
 async function main() {
   const args = parseArgs(process.argv);
+  const restA = DEFAULT_URLS[args.providerA];
+  const restB = DEFAULT_URLS[args.providerB];
 
-  const [
-    binanceExchangeInfo,
-    gateContracts,
-    binance24hr,
-    gateTickers,
-    binanceBookTickers
-  ] = await Promise.all([
-    axios.get(`${BINANCE_REST}/fapi/v1/exchangeInfo`, { timeout: 30000 }).then((r) => r.data),
-    fetchGateContractsDecimal(),
-    axios.get(`${BINANCE_REST}/fapi/v1/ticker/24hr`, { timeout: 30000 }).then((r) => r.data),
-    axios.get(`${GATE_REST}/futures/usdt/tickers`, { timeout: 30000 }).then((r) => r.data),
-    axios.get(`${BINANCE_REST}/fapi/v1/ticker/bookTicker`, { timeout: 30000 }).then((r) => r.data)
-  ]);
+  const bundleA = await fetchBinanceLikeBundle(restA, args.providerA);
+  const setA = buildPerpSetBinanceLike(bundleA.exchangeInfo);
+  const qvA = buildQvMapBinanceLike(bundleA.ticker24h);
+  const infoMapA = buildInfoMap(bundleA.exchangeInfo.symbols || [], (s) => s.symbol);
+  const tickerMapA = buildBookTickerMapBinanceLike(bundleA.bookTickers);
 
-  const bnSet = buildBinancePerpSet(binanceExchangeInfo);
-  const gtSet = buildGatePerpSet(gateContracts);
-  const bnQv = buildBinanceQvMap(binance24hr);
-  const gtQv = buildGateQvMap(gateTickers);
-  const allRows = buildCommonSymbolRows(bnSet, gtSet, bnQv, gtQv);
+  let setB;
+  let qvB;
+  let infoMapB;
+  let tickerMapB;
+  if (args.providerB === 'gate') {
+    const [contracts, tickers] = await Promise.all([
+      fetchGateContractsDecimal(),
+      axios.get(`${restB}/futures/usdt/tickers`, { timeout: 30000 }).then((r) => r.data)
+    ]);
+    setB = buildPerpSetGate(contracts);
+    qvB = buildQvMapGate(tickers);
+    infoMapB = buildInfoMap(contracts, (c) => c.name || c.contract);
+    tickerMapB = buildBookTickerMapGate(tickers);
+  } else {
+    const bundleB = await fetchBinanceLikeBundle(restB, args.providerB);
+    setB = buildPerpSetBinanceLike(bundleB.exchangeInfo);
+    qvB = buildQvMapBinanceLike(bundleB.ticker24h);
+    infoMapB = buildInfoMap(bundleB.exchangeInfo.symbols || [], (s) => s.symbol);
+    tickerMapB = buildBookTickerMapBinanceLike(bundleB.bookTickers);
+  }
 
+  const allRows = buildCommonRows(setA, setB, qvA, qvB, args.providerB);
   const topN = args.top == null ? allRows.length : args.top;
   const selectedRows = topN === 0 ? allRows : allRows.slice(0, topN);
-
-  const binanceMap = buildBinanceMap(binanceExchangeInfo);
-  const gateMap = buildGateMap(gateContracts);
-  const binanceTickerMap = buildBinanceBookTickerMap(binanceBookTickers);
-  const gateTickerMap = buildGateBookTickerMap(gateTickers);
   const priceCollectedAt = new Date().toISOString();
 
   const minQtySymbols = {};
@@ -284,23 +446,25 @@ async function main() {
 
   const builtRows = await mapWithConcurrency(selectedRows, 8, async (row) => {
     const symbolId = row.symbol_id;
-    const gateSymbol = row.gate_symbol;
+    const bSymbol = row.b_symbol;
     try {
       const entry = await buildMinQtyEntry({
         symbolId,
-        gateSymbol,
-        binanceInfo: binanceMap.get(symbolId),
-        gateInfo: gateMap.get(gateSymbol),
-        bTicker: binanceTickerMap.get(symbolId) || null,
-        gTicker: gateTickerMap.get(gateSymbol) || null,
+        restA,
+        providerA: args.providerA,
+        restB,
+        bSymbol,
+        providerB: args.providerB,
+        infoA: infoMapA.get(symbolId),
+        infoB: infoMapB.get(bSymbol),
+        tickerA: tickerMapA.get(symbolId) || null,
+        tickerB: tickerMapB.get(bSymbol) || null,
         priceCollectedAt
       });
       return { symbolId, entry, error: null };
     } catch (err) {
-      if (args.skipErrors) {
-        return { symbolId, entry: null, error: err.message };
-      }
-      throw err;
+      if (!args.skipErrors) throw err;
+      return { symbolId, entry: null, error: err.message };
     }
   });
 
@@ -312,35 +476,43 @@ async function main() {
     minQtySymbols[row.symbolId] = row.entry;
   }
 
-  const selectedSymbolIds = selectedRows
-    .map((r) => r.symbol_id)
-    .filter((s) => minQtySymbols[s]);
-
-  const minQtyPayload = {
+  const selectedSymbolIds = selectedRows.map((r) => r.symbol_id).filter((s) => minQtySymbols[s]);
+  const payload = {
+    schemaVersion: 2,
     generatedAt: new Date().toISOString(),
     sortRule: 'liquidity_score_desc_then_symbol_asc',
     totalCommonSymbols: allRows.length,
     selectedSymbolsCount: selectedSymbolIds.length,
     selectedSymbols: selectedSymbolIds,
+    pair: {
+      providerA: args.providerA,
+      providerB: args.providerB
+    },
     source: {
-      binance: `${BINANCE_REST}/fapi/v1/exchangeInfo`,
-      gate: `${GATE_REST}/futures/usdt/contracts (X-Gate-Size-Decimal: 1)`,
-      binanceTicker: `${BINANCE_REST}/fapi/v1/ticker/bookTicker`,
-      gateTicker: `${GATE_REST}/futures/usdt/tickers`,
-      binance24h: `${BINANCE_REST}/fapi/v1/ticker/24hr`,
-      gate24h: `${GATE_REST}/futures/usdt/tickers`
+      providerA: args.providerA,
+      providerB: args.providerB,
+      aExchangeInfo: `${restA}${binanceLikePath(args.providerA, '/exchangeInfo')}`,
+      aBookTicker: `${restA}${binanceLikePath(args.providerA, '/ticker/bookTicker')}`,
+      a24h: `${restA}${binanceLikePath(args.providerA, '/ticker/24hr')}`,
+      bExchangeInfo: args.providerB === 'gate'
+        ? `${restB}/futures/usdt/contracts (X-Gate-Size-Decimal: 1)`
+        : `${restB}${binanceLikePath(args.providerB, '/exchangeInfo')}`,
+      bBookTicker: args.providerB === 'gate'
+        ? `${restB}/futures/usdt/tickers`
+        : `${restB}${binanceLikePath(args.providerB, '/ticker/bookTicker')}`,
+      b24h: args.providerB === 'gate'
+        ? `${restB}/futures/usdt/tickers`
+        : `${restB}${binanceLikePath(args.providerB, '/ticker/24hr')}`
     },
     symbols: minQtySymbols
   };
-
-  if (skipped.length > 0) {
-    minQtyPayload.skipped = skipped;
-  }
+  if (skipped.length > 0) payload.skipped = skipped;
 
   await fs.mkdir(path.dirname(args.outputMinQty), { recursive: true });
-  await fs.writeFile(args.outputMinQty, `${JSON.stringify(minQtyPayload, null, 2)}\n`, 'utf8');
+  await fs.writeFile(args.outputMinQty, `${JSON.stringify(payload, null, 2)}\n`, 'utf8');
 
   console.log(`written min-qty: ${args.outputMinQty}`);
+  console.log(`pair: ${args.providerA}/${args.providerB}`);
   console.log(`common symbols: ${allRows.length}`);
   console.log(`selected: ${selectedSymbolIds.length}${topN < allRows.length ? ` (top ${topN})` : ''}`);
   if (selectedSymbolIds.length > 0) {

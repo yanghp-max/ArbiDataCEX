@@ -43,21 +43,23 @@ export async function buildAccountSnapshot(deps) {
     symbols = [],
     forceRefresh = true
   } = deps;
+  const exchangeA = accountCache.exchangeA || 'binance';
+  const exchangeB = accountCache.exchangeB || 'gate';
 
   if (forceRefresh && cexManager && !accountCache.mockMode) {
     await accountCache.refreshFromCexManager(cexManager, { fullReplace: false });
   }
 
-  const binanceBal = accountCache.getBalance('binance');
-  const gateBal = accountCache.getBalance('gate');
-  const binanceWallet = resolveWalletUsdt(binanceBal);
-  const gateWallet = resolveWalletUsdt(gateBal);
-  const binanceUsdt = binanceWallet.equity;
-  const gateUsdt = gateWallet.equity;
-  const binanceAvail = binanceWallet.available;
-  const gateAvail = gateWallet.available;
-  const binanceMarginUsed = binanceWallet.marginUsed;
-  let gateMarginUsed = gateWallet.marginUsed;
+  const balanceA = accountCache.getBalance(exchangeA);
+  const balanceB = accountCache.getBalance(exchangeB);
+  const walletA = resolveWalletUsdt(balanceA);
+  const walletB = resolveWalletUsdt(balanceB);
+  const equityA = walletA.equity;
+  const equityB = walletB.equity;
+  const availA = walletA.available;
+  const availB = walletB.available;
+  const marginUsedA = walletA.marginUsed;
+  let marginUsedB = walletB.marginUsed;
 
   const positions = [];
   let positionNotionalUsdt = 0;
@@ -65,27 +67,27 @@ export async function buildAccountSnapshot(deps) {
   let initialMarginUsdt = 0;
   let maintMarginUsdt = 0;
 
-  const binPosMap = new Map();
-  const gatePosMap = new Map();
+  const posMapA = new Map();
+  const posMapB = new Map();
   if (cexManager && !accountCache.mockMode) {
-    const [binRows, gateRows] = await Promise.all([
-      cexManager.getPositions('binance', { silent: true }).catch(() => []),
-      cexManager.getPositions('gate', { silent: true }).catch(() => [])
+    const [rowsA, rowsB] = await Promise.all([
+      cexManager.getPositions(exchangeA, { silent: true }).catch(() => []),
+      cexManager.getPositions(exchangeB, { silent: true }).catch(() => [])
     ]);
-    for (const p of binRows || []) binPosMap.set(compactSymbol(p.symbol), p);
-    for (const p of gateRows || []) gatePosMap.set(compactSymbol(p.symbol), p);
+    for (const p of rowsA || []) posMapA.set(compactSymbol(p.symbol), p);
+    for (const p of rowsB || []) posMapB.set(compactSymbol(p.symbol), p);
   }
 
   for (const sym of symbols) {
     const key = compactSymbol(sym);
-    const aPos = binPosMap.get(key);
-    const bPos = gatePosMap.get(key);
+    const aPos = posMapA.get(key);
+    const bPos = posMapB.get(key);
 
     if (aPos != null && Number.isFinite(Number(aPos.qty))) {
-      accountCache.setPosition('binance', key, Number(aPos.qty));
+      accountCache.setPosition(exchangeA, key, Number(aPos.qty));
     }
     if (bPos != null && Number.isFinite(Number(bPos.qty))) {
-      accountCache.setPosition('gate', key, Number(bPos.qty));
+      accountCache.setPosition(exchangeB, key, Number(bPos.qty));
     }
 
     if (
@@ -95,15 +97,15 @@ export async function buildAccountSnapshot(deps) {
       && aPos == null
       && bPos == null
       && !isFlatPosition(
-        accountCache.getPosition('binance', key),
-        accountCache.getPosition('gate', key)
+        accountCache.getPosition(exchangeA, key),
+        accountCache.getPosition(exchangeB, key)
       )
     ) {
       await accountCache.reconcileSymbolPositions(cexManager, key);
     }
 
-    const aQty = accountCache.getPosition('binance', key);
-    const bQty = accountCache.getPosition('gate', key);
+    const aQty = accountCache.getPosition(exchangeA, key);
+    const bQty = accountCache.getPosition(exchangeB, key);
 
     if (Math.abs(aQty) < 1e-12 && Math.abs(bQty) < 1e-12) continue;
     const aUpnl = Number(aPos?.unrealizedPnl ?? 0);
@@ -116,7 +118,7 @@ export async function buildAccountSnapshot(deps) {
     initialMarginUsdt += aInitMargin + bInitMargin;
     maintMarginUsdt += aMaintMargin + bMaintMargin;
 
-    const tick = quoteAggregator.buildTick(key);
+    const tick = quoteAggregator.buildTick(key, { sourceA: exchangeA, sourceB: exchangeB });
     const midA = tick ? midPrice(tick.aBid, tick.aAsk) : (aPos?.markPrice ?? null);
     const midB = tick ? midPrice(tick.bBid, tick.bAsk) : (bPos?.markPrice ?? null);
     const aNotional = midA != null ? Math.abs(aQty) * midA : null;
@@ -145,35 +147,37 @@ export async function buildAccountSnapshot(deps) {
     });
   }
 
-  /** Gate 全仓账户 REST 常不填 position_margin，用持仓 initial_margin 补全展示 */
-  if (gateMarginUsed <= 0) {
-    const gatePosMargin = positions.reduce((s, p) => s + Number(p.bInitialMargin || 0), 0);
-    if (gatePosMargin > 0) gateMarginUsed = gatePosMargin;
+  /** 部分交易所全仓账户 REST 常不填 position_margin，用持仓 initial_margin 补全展示 */
+  if (marginUsedB <= 0) {
+    const posMarginB = positions.reduce((s, p) => s + Number(p.bInitialMargin || 0), 0);
+    if (posMarginB > 0) marginUsedB = posMarginB;
   }
 
   /** 两腿 USDT 钱包合计（PM/统一账户 total 通常已含未实现盈亏） */
-  const totalUsdt = binanceUsdt + gateUsdt;
+  const totalUsdt = equityA + equityB;
 
   return {
     at: Date.now(),
     mock: Boolean(accountCache.mockMode),
-    binance: {
-      equity: binanceUsdt,
-      usdt: binanceUsdt,
-      available: binanceAvail,
-      marginUsed: binanceMarginUsed,
-      balanceAgeMs: accountCache.getBalanceAgeMs('binance')
+    exchangeA,
+    exchangeB,
+    [exchangeA]: {
+      equity: equityA,
+      usdt: equityA,
+      available: availA,
+      marginUsed: marginUsedA,
+      balanceAgeMs: accountCache.getBalanceAgeMs(exchangeA)
     },
-    gate: {
-      equity: gateUsdt,
-      usdt: gateUsdt,
-      available: gateAvail,
-      marginUsed: gateMarginUsed,
-      balanceAgeMs: accountCache.getBalanceAgeMs('gate')
+    [exchangeB]: {
+      equity: equityB,
+      usdt: equityB,
+      available: availB,
+      marginUsed: marginUsedB,
+      balanceAgeMs: accountCache.getBalanceAgeMs(exchangeB)
     },
     totalUsdt,
-    totalAvailableUsdt: binanceAvail + gateAvail,
-    totalMarginUsedUsdt: binanceMarginUsed + gateMarginUsed,
+    totalAvailableUsdt: availA + availB,
+    totalMarginUsedUsdt: marginUsedA + marginUsedB,
     positionNotionalUsdt,
     unrealizedPnlUsdt,
     initialMarginUsdt,

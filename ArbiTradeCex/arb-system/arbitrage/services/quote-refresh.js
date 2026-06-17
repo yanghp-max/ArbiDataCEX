@@ -28,16 +28,18 @@ function emitRestTicker(aggregator, source, payload) {
 export async function refreshTickFromRest(cexManager, aggregator, symbol, options = {}) {
   const sym = compactSymbol(symbol);
   const timeoutMs = Number(options.timeoutMs) || 3000;
+  const sourceA = options.sourceA || 'binance';
+  const sourceB = options.sourceB || 'gate';
 
-  const [binance, gate] = await Promise.all([
-    cexManager.getBookTicker('binance', sym, { timeoutMs }).catch(() => null),
-    cexManager.getBookTicker('gate', sym, { timeoutMs }).catch(() => null)
+  const [tickerA, tickerB] = await Promise.all([
+    cexManager.getBookTicker(sourceA, sym, { timeoutMs }).catch(() => null),
+    cexManager.getBookTicker(sourceB, sym, { timeoutMs }).catch(() => null)
   ]);
 
-  emitRestTicker(aggregator, 'binance', binance);
-  emitRestTicker(aggregator, 'gate', gate);
+  emitRestTicker(aggregator, sourceA, tickerA);
+  emitRestTicker(aggregator, sourceB, tickerB);
 
-  return aggregator.buildTick(sym);
+  return aggregator.buildTick(sym, { sourceA, sourceB });
 }
 
 export default { refreshTickFromRest };

@@ -38,9 +38,9 @@ function exchangeMults(bps) {
 }
 
 /**
- * 信号 spread：先扣 binanceFeeBps / gateFeeBps（手续费），再扣 slippageBps（预估滑点）。
- * binanceBpsPerLeg / gateBpsPerLeg 仍可用作「总 bps」兼容旧配置。
- * cexFeeBpsPerLeg：dry-run 两腿统一 fee fallback；优先用 binanceFeeBps / gateFeeBps。
+ * 信号 spread：先扣 legA/legB fee（手续费），再扣 legA/legB slippage（预估滑点）。
+ * binance/gate 旧字段与 *BpsPerLeg 仍保留为兼容 fallback。
+ * cexFeeBpsPerLeg：dry-run 两腿统一 fee fallback（最低优先级）。
  */
 function compactSymbol(symbol) {
   return String(symbol).replace(/[-_]/g, '').toUpperCase();
@@ -50,13 +50,30 @@ function compactSymbol(symbol) {
 const GLOBAL_COST_KEYS = [
   'binanceFeeBps',
   'gateFeeBps',
+  'legAFeeBps',
+  'legBFeeBps',
   'cexFeeBpsPerLeg',
   'binanceBpsPerLeg',
   'gateBpsPerLeg'
 ];
 
+function sanitizeLegOverrides(overrides = {}) {
+  const next = { ...overrides };
+  if (next.legA && typeof next.legA === 'object') {
+    next.legA = { ...next.legA };
+    delete next.legA.feeBps;
+  }
+  if (next.legB && typeof next.legB === 'object') {
+    next.legB = { ...next.legB };
+    delete next.legB.feeBps;
+  }
+  return next;
+}
+
 function pickGlobalFees(strategyConfig = {}) {
   return {
+    legAFeeBps: strategyConfig.legAFeeBps,
+    legBFeeBps: strategyConfig.legBFeeBps,
     binanceFeeBps: strategyConfig.binanceFeeBps,
     gateFeeBps: strategyConfig.gateFeeBps,
     cexFeeBpsPerLeg: strategyConfig.cexFeeBpsPerLeg,
@@ -69,7 +86,7 @@ function pickGlobalFees(strategyConfig = {}) {
 export function resolveSymbolStrategyConfig(strategyConfig = {}, symbol) {
   const key = compactSymbol(symbol);
   const raw = strategyConfig?.symbolOverrides?.[key] ?? {};
-  const overrides = { ...raw };
+  const overrides = sanitizeLegOverrides(raw);
   for (const k of GLOBAL_COST_KEYS) delete overrides[k];
   return { ...strategyConfig, ...overrides, ...pickGlobalFees(strategyConfig) };
 }
@@ -116,6 +133,9 @@ function resolveExchangeLegBps(strategyConfig, {
 }
 
 export function resolveCexCostConfig(strategyConfig = {}) {
+  const legAConfig = strategyConfig?.legA ?? {};
+  const legBConfig = strategyConfig?.legB ?? {};
+
   const binance = resolveExchangeLegBps(strategyConfig, {
     feeKey: 'binanceFeeBps',
     slipKey: 'binanceSlippageBps',
@@ -134,6 +154,23 @@ export function resolveCexCostConfig(strategyConfig = {}) {
   });
 
   return {
+    // 通用 A/B 配置（推荐）
+    legAFeeBps: clampBps(
+      legAConfig.feeBps ?? strategyConfig.legAFeeBps,
+      binance.feeBps
+    ),
+    legASlippageBps: clampBps(
+      legAConfig.slippageBps ?? strategyConfig.legASlippageBps,
+      binance.slippageBps
+    ),
+    legBFeeBps: clampBps(
+      legBConfig.feeBps ?? strategyConfig.legBFeeBps,
+      gate.feeBps
+    ),
+    legBSlippageBps: clampBps(
+      legBConfig.slippageBps ?? strategyConfig.legBSlippageBps,
+      gate.slippageBps
+    ),
     binanceFeeBps: binance.feeBps,
     binanceSlippageBps: binance.slippageBps,
     gateFeeBps: gate.feeBps,
@@ -159,18 +196,23 @@ export function resolveCexCostConfigForSymbol(strategyConfig = {}, symbol) {
  * bn / gt = 每腿 fee + slippage 总 bps（可由 resolveCexCostConfig 提供）
  */
 export function calcSpreads(tick, options = {}) {
+  const legAFee = options.legAFeeBps ?? options.binanceFeeBps;
+  const legASlip = options.legASlippageBps ?? options.binanceSlippageBps;
+  const legBFee = options.legBFeeBps ?? options.gateFeeBps;
+  const legBSlip = options.legBSlippageBps ?? options.gateSlippageBps;
+
   const bn = options.binanceBpsPerLeg != null
     ? clampBps(options.binanceBpsPerLeg, DEFAULT_BINANCE_BPS_PER_LEG)
     : clampBps(
-      (options.binanceFeeBps ?? DEFAULT_BINANCE_FEE_BPS)
-      + (options.binanceSlippageBps ?? DEFAULT_BINANCE_SLIPPAGE_BPS),
+      (legAFee ?? DEFAULT_BINANCE_FEE_BPS)
+      + (legASlip ?? DEFAULT_BINANCE_SLIPPAGE_BPS),
       DEFAULT_BINANCE_BPS_PER_LEG
     );
   const gt = options.gateBpsPerLeg != null
     ? clampBps(options.gateBpsPerLeg, DEFAULT_GATE_BPS_PER_LEG)
     : clampBps(
-      (options.gateFeeBps ?? DEFAULT_GATE_FEE_BPS)
-      + (options.gateSlippageBps ?? DEFAULT_GATE_SLIPPAGE_BPS),
+      (legBFee ?? DEFAULT_GATE_FEE_BPS)
+      + (legBSlip ?? DEFAULT_GATE_SLIPPAGE_BPS),
       DEFAULT_GATE_BPS_PER_LEG
     );
   const a = exchangeMults(bn);

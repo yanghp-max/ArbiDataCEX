@@ -2,7 +2,7 @@
   "strategy": {
     "minDataPoints": 50,
     "zOpen": 2.0,
-    "zClose": 2.0,
+    "zClose": 1.0,
     "orderUsd": 5,
     "qtyFromConfigOnly": false,
     "forceClosePriceMultiplier": 2,
@@ -17,10 +17,20 @@
     "restRefreshBeforeOrder": false,
     "signalMaxAgeMs": 100,
     "fundingMin": -0.1,
+    "_deprecated_binanceFeeBps": "deprecated: use strategy.legA.feeBps",
     "binanceFeeBps": 5,
+    "_deprecated_gateFeeBps": "deprecated: use strategy.legB.feeBps",
     "gateFeeBps": 5,
     "binanceSlippageBps": 4,
-    "gateSlippageBps": 45,
+    "gateSlippageBps": 4,
+    "legA": {
+      "feeBps": 5,
+      "slippageBps": 4
+    },
+    "legB": {
+      "feeBps": 5,
+      "slippageBps": 4
+    },
     "cexFeeBpsPerLeg": 4,
     "symbolOverrides": {
       
@@ -40,9 +50,9 @@
     "strategyTextLogToConsole": true,
     "processHealthIntervalMs": 30000,
     "minQtyJson": "config/min-order-qty.json",
-    "windowSeconds": 43200,
-    "enforceLatency": true,
-    "useMockAccount": false
+    "windowSeconds": 600,
+    "enforceLatency": false,
+    "useMockAccount": true
   },
   "dashboard": {
     "enabled": true,
@@ -51,6 +61,6 @@
   },
   "adapters": {
     "A": { "provider": "binance" },
-    "B": { "provider": "gate" }
+    "B": { "provider": "aster" }
   }
 }

@@ -64,6 +64,7 @@ export class PrecisionChecker {
   buildOrder({ direction, tick, orderUsd }) {
     const cfg = this.minQtyBySymbol[tick.symbol];
     if (!cfg) return { qty: 0 };
+    const effectiveCfg = this.#resolveLegConfig(cfg);
 
     const { aPrice } = legPricesForDirection(direction, tick);
     const minU = Number(orderUsd ?? this.orderUsd);
@@ -73,15 +74,15 @@ export class PrecisionChecker {
     const resolved = resolveMinHedgeQty({
       orderUsd: minU,
       aPrice,
-      binanceCfg: cfg.binance,
-      gateCfg: cfg.gate,
+      binanceCfg: effectiveCfg.binance,
+      gateCfg: effectiveCfg.gate,
       useLotMinQty
     });
     const { qty, gateSize, effectiveMinNotional, qBinance, qGate } = resolved;
 
     if (qty <= 0 || gateSize <= 0) return { qty: 0, gateSize: 0 };
 
-    const gateCfg = cfg.gate;
+    const gateCfg = effectiveCfg.gate;
 
     return {
       qty,
@@ -94,17 +95,18 @@ export class PrecisionChecker {
       gateQuantoMultiplier: Number(gateCfg.quantoMultiplier) || 1,
       direction,
       aPrice,
-      cfg
+      cfg: effectiveCfg
     };
   }
 
   alignHedgeFromBaseQty(tick, baseQty) {
     const cfg = this.minQtyBySymbol[tick.symbol];
     if (!cfg || !(baseQty > 0)) return { qty: 0, gateSize: 0 };
+    const effectiveCfg = this.#resolveLegConfig(cfg);
     return resolveHedgeQtyFromBaseQty({
       baseQty,
-      binanceCfg: cfg.binance,
-      gateCfg: cfg.gate
+      binanceCfg: effectiveCfg.binance,
+      gateCfg: effectiveCfg.gate
     });
   }
 
@@ -115,6 +117,7 @@ export class PrecisionChecker {
   finalizeCloseOrder({ direction, tick, configQty, holdA, holdB }) {
     const cfg = this.minQtyBySymbol[tick.symbol];
     if (!cfg) return null;
+    const effectiveCfg = this.#resolveLegConfig(cfg);
 
     const absA = Math.abs(Number(holdA) || 0);
     const absB = Math.abs(Number(holdB) || 0);
@@ -124,8 +127,8 @@ export class PrecisionChecker {
     const targetQty = Math.min(configQ, absA, absB);
     const aligned = resolveHedgeQtyFromBaseQty({
       baseQty: targetQty,
-      binanceCfg: cfg.binance,
-      gateCfg: cfg.gate,
+      binanceCfg: effectiveCfg.binance,
+      gateCfg: effectiveCfg.gate,
       round: 'floor'
     });
 
@@ -133,7 +136,7 @@ export class PrecisionChecker {
     if (absA + 1e-12 < aligned.qty || absB + 1e-12 < aligned.qty) return null;
 
     const { aPrice } = legPricesForDirection(direction, tick);
-    const gateCfg = cfg.gate;
+    const gateCfg = effectiveCfg.gate;
     return {
       qty: aligned.qty,
       gateSize: aligned.gateSize,
@@ -142,7 +145,7 @@ export class PrecisionChecker {
       gateQuantoMultiplier: Number(gateCfg.quantoMultiplier) || 1,
       direction,
       aPrice,
-      cfg
+      cfg: effectiveCfg
     };
   }
 
@@ -153,6 +156,7 @@ export class PrecisionChecker {
   finalizeOpenOrder({ direction, tick, clippedQty, orderUsd }) {
     const cfg = this.minQtyBySymbol[tick.symbol];
     if (!cfg) return null;
+    const effectiveCfg = this.#resolveLegConfig(cfg);
 
     const { aPrice } = legPricesForDirection(direction, tick);
     const useLotMinQty = this.qtyFromConfigOnly
@@ -162,14 +166,14 @@ export class PrecisionChecker {
     const min = resolveMinHedgeQty({
       orderUsd: minU,
       aPrice,
-      binanceCfg: cfg.binance,
-      gateCfg: cfg.gate,
+      binanceCfg: effectiveCfg.binance,
+      gateCfg: effectiveCfg.gate,
       useLotMinQty
     });
     const aligned = resolveHedgeQtyFromBaseQty({
       baseQty: clippedQty,
-      binanceCfg: cfg.binance,
-      gateCfg: cfg.gate,
+      binanceCfg: effectiveCfg.binance,
+      gateCfg: effectiveCfg.gate,
       round: 'ceil'
     });
 
@@ -179,7 +183,7 @@ export class PrecisionChecker {
       return null;
     }
 
-    const gateCfg = cfg.gate;
+    const gateCfg = effectiveCfg.gate;
     return {
       qty: aligned.qty,
       gateSize: aligned.gateSize,
@@ -191,7 +195,19 @@ export class PrecisionChecker {
       gateQuantoMultiplier: Number(gateCfg.quantoMultiplier) || 1,
       direction,
       aPrice,
-      cfg
+      cfg: effectiveCfg
+    };
+  }
+
+  #resolveLegConfig(cfg) {
+    if (cfg?.binance && cfg?.gate) return cfg;
+    const a = cfg?.legs?.A?.limits || cfg?.providers?.binance || null;
+    const b = cfg?.legs?.B?.limits || cfg?.providers?.gate || null;
+    if (!a || !b) return cfg;
+    return {
+      ...cfg,
+      binance: a,
+      gate: b
     };
   }
 
@@ -211,8 +227,10 @@ export class PrecisionChecker {
 }
 
 export class RiskManager {
-  constructor(config) {
+  constructor(config, options = {}) {
     this.config = config;
+    this.exchangeA = options.exchangeA || 'binance';
+    this.exchangeB = options.exchangeB || 'gate';
   }
 
   wouldIncreaseAbs(posBefore, direction, qty) {
@@ -236,8 +254,8 @@ export class RiskManager {
   clipQty(qty, tick, direction, accountCache) {
     const maxQ = this.maxPositionQty(tick, direction);
     const sym = tick.symbol;
-    const aBefore = accountCache.getPosition('binance', sym);
-    const bBefore = accountCache.getPosition('gate', sym);
+    const aBefore = accountCache.getPosition(this.exchangeA, sym);
+    const bBefore = accountCache.getPosition(this.exchangeB, sym);
     let aAfter = aBefore;
     let bAfter = bBefore;
     if (direction === '-a+b') {
@@ -256,8 +274,8 @@ export class RiskManager {
 
   clipCloseQty(qty, tick, accountCache) {
     const sym = tick.symbol;
-    const aBefore = accountCache.getPosition('binance', sym);
-    const bBefore = accountCache.getPosition('gate', sym);
+    const aBefore = accountCache.getPosition(this.exchangeA, sym);
+    const bBefore = accountCache.getPosition(this.exchangeB, sym);
     const held = Math.min(Math.abs(aBefore), Math.abs(bBefore));
     return Math.max(0, Math.min(qty, held));
   }
@@ -441,11 +459,13 @@ export function tickPriceSlippagePass(snapshot, tick, direction, slippage = {}) 
     return { ok: false, reason: '缺少行情快照或最新 tick' };
   }
   const { aSide, bSide } = tradeLegSides(direction);
+  const legASlip = slippage.legASlippageBps ?? slippage.binanceSlippageBps;
+  const legBSlip = slippage.legBSlippageBps ?? slippage.gateSlippageBps;
   const binanceBps = clampSlippageBps(
-    slippage.binanceSlippageBps,
+    legASlip,
     DEFAULT_BINANCE_SLIPPAGE_BPS
   );
-  const gateBps = clampSlippageBps(slippage.gateSlippageBps, DEFAULT_GATE_SLIPPAGE_BPS);
+  const gateBps = clampSlippageBps(legBSlip, DEFAULT_GATE_SLIPPAGE_BPS);
 
   const aSnap = aSide === 'sell' ? snapshot.aBid : snapshot.aAsk;
   const aFresh = aSide === 'sell' ? tick.aBid : tick.aAsk;

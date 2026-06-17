@@ -54,11 +54,20 @@ export function gateFillToBaseQty(filledContracts, order) {
 }
 
 export class OrderExecutor {
-  constructor({ cexManager, tradingEnabled, accountCache, reservationManager }) {
+  constructor({
+    cexManager,
+    tradingEnabled,
+    accountCache,
+    reservationManager,
+    providerA = 'binance',
+    providerB = 'gate'
+  }) {
     this.cexManager = cexManager;
     this.tradingEnabled = tradingEnabled;
     this.accountCache = accountCache;
     this.reservationManager = reservationManager;
+    this.providerA = providerA;
+    this.providerB = providerB;
   }
 
   async executeBothLegs({
@@ -69,6 +78,8 @@ export class OrderExecutor {
     lockedDirection = null,
     latencyTrace = null,
     cexFeeBpsPerLeg = 2,
+    legAFeeBps = null,
+    legBFeeBps = null,
     binanceFeeBps = null,
     gateFeeBps = null,
     maxPositionQty = null
@@ -83,17 +94,17 @@ export class OrderExecutor {
     const binanceStepSize = order.cfg?.binance?.stepSize;
 
     if (!this.tradingEnabled) {
-      const aFeeBps = binanceFeeBps ?? cexFeeBpsPerLeg;
-      const bFeeBps = gateFeeBps ?? cexFeeBpsPerLeg;
+      const aFeeBps = legAFeeBps ?? binanceFeeBps ?? cexFeeBpsPerLeg;
+      const bFeeBps = legBFeeBps ?? gateFeeBps ?? cexFeeBpsPerLeg;
       const aLeg = buildLegPnl({
-        exchange: 'binance',
+        exchange: this.providerA,
         side: aSide,
         filledQty: qty,
         order: { avgPrice: quote.aPriceNominal, cumQuote: qty * quote.aPriceNominal },
         feeBpsFallback: aFeeBps
       });
       const bLeg = buildLegPnl({
-        exchange: 'gate',
+        exchange: this.providerB,
         side: bSide,
         filledQty: qty,
         order: { avgPrice: quote.bPriceNominal, cumQuote: qty * quote.bPriceNominal },
@@ -134,11 +145,11 @@ export class OrderExecutor {
     markLatency(latencyTrace, 'pre_order_done');
     markLatency(latencyTrace, 'order_send_start');
 
-    const submitMs = { binance: null, gate: null };
+    const submitMs = { [this.providerA]: null, [this.providerB]: null };
     const placeBinance = async () => {
       const t0 = Date.now();
       try {
-        return await this.cexManager.placeOrder('binance', {
+        return await this.cexManager.placeOrder(this.providerA, {
           symbol: tick.symbol,
           side: binanceSide,
           type: 'market',
@@ -149,14 +160,14 @@ export class OrderExecutor {
           positionSide: binancePositionSide
         });
       } finally {
-        submitMs.binance = Date.now() - t0;
+        submitMs[this.providerA] = Date.now() - t0;
       }
     };
 
     const placeGate = async () => {
       const t0 = Date.now();
       try {
-        return await this.cexManager.placeOrder('gate', {
+        return await this.cexManager.placeOrder(this.providerB, {
           symbol: tick.symbol,
           side: gateSide,
           type: 'market',
@@ -165,7 +176,7 @@ export class OrderExecutor {
           reduceOnly
         });
       } finally {
-        submitMs.gate = Date.now() - t0;
+        submitMs[this.providerB] = Date.now() - t0;
       }
     };
 
@@ -180,29 +191,29 @@ export class OrderExecutor {
 
     if (aResult.status === 'rejected' && bResult.status === 'rejected') {
       throw new Error(
-        `两腿都失败: Binance=${aResult.reason?.message}; Gate=${bResult.reason?.message}`
+        `两腿都失败: ${this.providerA}=${aResult.reason?.message}; ${this.providerB}=${bResult.reason?.message}`
       );
     }
 
     let aOrder = aResult.status === 'fulfilled' ? aResult.value : null;
     let bOrder = bResult.status === 'fulfilled' ? bResult.value : null;
     const failedLeg = aResult.status === 'rejected'
-      ? 'binance'
+      ? this.providerA
       : bResult.status === 'rejected'
-        ? 'gate'
+        ? this.providerB
         : null;
-    const failReason = failedLeg === 'binance'
+    const failReason = failedLeg === this.providerA
       ? aResult.reason?.message
-      : failedLeg === 'gate'
+      : failedLeg === this.providerB
         ? bResult.reason?.message
         : null;
 
     if (aOrder) {
-      const polled = await this.#ensureOrderFill('binance', aOrder, tick.symbol, qty);
+      const polled = await this.#ensureOrderFill(this.providerA, aOrder, tick.symbol, qty);
       aOrder = polled.order;
     }
     if (bOrder) {
-      const polled = await this.#ensureOrderFill('gate', bOrder, tick.symbol, gateSize, gateDecimalSize);
+      const polled = await this.#ensureOrderFill(this.providerB, bOrder, tick.symbol, gateSize, gateDecimalSize);
       bOrder = polled.order;
     }
     const aFilled = aOrder ? readFilled(aOrder, qty) : 0;
@@ -210,7 +221,7 @@ export class OrderExecutor {
 
     if (aFilled <= 0 && bFilledBase <= 0) {
       const detail = failedLeg
-        ? `${failedLeg === 'binance' ? 'Binance' : 'Gate'}拒单: ${failReason}`
+        ? `${failedLeg}拒单: ${failReason}`
         : '两腿都没成交';
       throw new Error(detail);
     }
@@ -236,14 +247,14 @@ export class OrderExecutor {
       if (!(Number(aOrder.cumQuote) > 0) && aPricePost > 0) {
         aOrder = { ...aOrder, cumQuote: aFilled * aPricePost };
       }
-      const aTrades = await this.#fetchOrderTradesWithRetry('binance', aOrder.orderId, tick.symbol);
+      const aTrades = await this.#fetchOrderTradesWithRetry(this.providerA, aOrder.orderId, tick.symbol);
       aOrder = { ...aOrder, trades: aTrades };
     }
     if (bOrder && bFilledBase > 0) {
       if (!(Number(bOrder.cumQuote) > 0) && bPricePost > 0) {
         bOrder = { ...bOrder, cumQuote: bFilledBase * bPricePost };
       }
-      const bTrades = await this.#fetchOrderTradesWithRetry('gate', bOrder.orderId, tick.symbol, {
+      const bTrades = await this.#fetchOrderTradesWithRetry(this.providerB, bOrder.orderId, tick.symbol, {
         decimalSize: gateDecimalSize
       });
       bOrder = { ...bOrder, trades: bTrades };
@@ -251,17 +262,17 @@ export class OrderExecutor {
 
     const aLeg = aFilled > 0
       ? buildLegPnl({
-        exchange: 'binance',
+        exchange: this.providerA,
         side: aSide,
         filledQty: aFilled,
         order: aOrder,
         trades: aOrder?.trades,
         requireRealFee: true
       })
-      : { exchange: 'binance', side: aSide, filledQty: 0, usdtChange: 0, quoteVolume: 0, fee: 0, filled: false, pnlComplete: false };
+      : { exchange: this.providerA, side: aSide, filledQty: 0, usdtChange: 0, quoteVolume: 0, fee: 0, filled: false, pnlComplete: false };
     const bLeg = bFilledBase > 0
       ? buildLegPnl({
-        exchange: 'gate',
+        exchange: this.providerB,
         side: bSide,
         filledQty: bFilledBase,
         order: bOrder,
@@ -269,7 +280,7 @@ export class OrderExecutor {
         quantoMultiplier: order.gateQuantoMultiplier,
         requireRealFee: true
       })
-      : { exchange: 'gate', side: bSide, filledQty: 0, usdtChange: 0, quoteVolume: 0, fee: 0, filled: false, pnlComplete: false };
+      : { exchange: this.providerB, side: bSide, filledQty: 0, usdtChange: 0, quoteVolume: 0, fee: 0, filled: false, pnlComplete: false };
 
     const fill = {
       simulated: false,
@@ -297,8 +308,8 @@ export class OrderExecutor {
 
     if (!fill.pnlComplete) {
       const missing = [];
-      if (aLeg.filled && aLeg.pnlComplete === false) missing.push('Binance');
-      if (bLeg.filled && bLeg.pnlComplete === false) missing.push('Gate');
+      if (aLeg.filled && aLeg.pnlComplete === false) missing.push(this.providerA);
+      if (bLeg.filled && bLeg.pnlComplete === false) missing.push(this.providerB);
       console.warn(
         `[OrderExecutor] 真实 PnL 不完整（未拿到成交 fee）: ${tick.symbol} ${missing.join(', ')}`
       );
@@ -324,12 +335,12 @@ export class OrderExecutor {
     const quote = quoteSnapshot(direction, tick);
 
     if (aOrder && aRequestedQty > 0) {
-      const polled = await this.#ensureOrderFill('binance', aOrder, tick.symbol, aRequestedQty);
+      const polled = await this.#ensureOrderFill(this.providerA, aOrder, tick.symbol, aRequestedQty);
       aOrder = polled.order;
     }
     if (bOrder && bRequestedGateSize > 0) {
       const polled = await this.#ensureOrderFill(
-        'gate',
+        this.providerB,
         bOrder,
         tick.symbol,
         bRequestedGateSize,
@@ -361,14 +372,14 @@ export class OrderExecutor {
       if (!(Number(aOrder.cumQuote) > 0) && aPricePost > 0) {
         aOrder = { ...aOrder, cumQuote: aFilled * aPricePost };
       }
-      const aTrades = await this.#fetchOrderTradesWithRetry('binance', aOrder.orderId, tick.symbol);
+      const aTrades = await this.#fetchOrderTradesWithRetry(this.providerA, aOrder.orderId, tick.symbol);
       aOrder = { ...aOrder, trades: aTrades };
     }
     if (bOrder && bFilledBase > 0) {
       if (!(Number(bOrder.cumQuote) > 0) && bPricePost > 0) {
         bOrder = { ...bOrder, cumQuote: bFilledBase * bPricePost };
       }
-      const bTrades = await this.#fetchOrderTradesWithRetry('gate', bOrder.orderId, tick.symbol, {
+      const bTrades = await this.#fetchOrderTradesWithRetry(this.providerB, bOrder.orderId, tick.symbol, {
         decimalSize: gateDecimalSize
       });
       bOrder = { ...bOrder, trades: bTrades };
@@ -376,7 +387,7 @@ export class OrderExecutor {
 
     const aLeg = aFilled > 0
       ? buildLegPnl({
-        exchange: 'binance',
+        exchange: this.providerA,
         side: aSide,
         filledQty: aFilled,
         order: aOrder,
@@ -384,7 +395,7 @@ export class OrderExecutor {
         requireRealFee: true
       })
       : {
-        exchange: 'binance',
+        exchange: this.providerA,
         side: aSide,
         filledQty: 0,
         usdtChange: 0,
@@ -395,7 +406,7 @@ export class OrderExecutor {
       };
     const bLeg = bFilledBase > 0
       ? buildLegPnl({
-        exchange: 'gate',
+        exchange: this.providerB,
         side: bSide,
         filledQty: bFilledBase,
         order: bOrder,
@@ -404,7 +415,7 @@ export class OrderExecutor {
         requireRealFee: true
       })
       : {
-        exchange: 'gate',
+        exchange: this.providerB,
         side: bSide,
         filledQty: 0,
         usdtChange: 0,
@@ -460,7 +471,7 @@ export class OrderExecutor {
     };
 
     const binanceCheck = checkOrderPreconditionsFromCache(this.accountCache, {
-      exchange: 'binance',
+      exchange: this.providerA,
       symbol: tick.symbol,
       side: binanceSide,
       amount: qty,
@@ -470,7 +481,7 @@ export class OrderExecutor {
       ...cacheOpts
     });
     const gateCheck = checkOrderPreconditionsFromCache(this.accountCache, {
-      exchange: 'gate',
+      exchange: this.providerB,
       symbol: tick.symbol,
       side: gateSide,
       amount: qty,
@@ -483,10 +494,10 @@ export class OrderExecutor {
     });
 
     if (!binanceCheck.overall) {
-      throw new Error(formatPreconditionFail('Binance', binanceCheck));
+      throw new Error(formatPreconditionFail(this.providerA, binanceCheck));
     }
     if (!gateCheck.overall) {
-      throw new Error(formatPreconditionFail('Gate', gateCheck));
+      throw new Error(formatPreconditionFail(this.providerB, gateCheck));
     }
   }
 
@@ -502,14 +513,14 @@ export class OrderExecutor {
     };
     console.log(
       `[发单·提交] ${symbol}`
-      + ` ${fmtLeg('Binance', submitMs.binance, aResult)}`
-      + ` | ${fmtLeg('Gate', submitMs.gate, bResult)}`
+      + ` ${fmtLeg(this.providerA, submitMs[this.providerA], aResult)}`
+      + ` | ${fmtLeg(this.providerB, submitMs[this.providerB], bResult)}`
       + ` | 并行 ${parallelMs}ms（placeOrder 返回，不含等成交）`
     );
   }
 
   async #fetchOrderTradesWithRetry(exchange, orderId, symbol, options = {}) {
-    await sleep(exchange === 'gate' ? TRADE_FETCH_INITIAL_DELAY_MS : 150);
+    await sleep(exchange === this.providerB ? TRADE_FETCH_INITIAL_DELAY_MS : 150);
     const orderKey = String(orderId);
     for (let i = 0; i < TRADE_FETCH_ATTEMPTS; i += 1) {
       try {

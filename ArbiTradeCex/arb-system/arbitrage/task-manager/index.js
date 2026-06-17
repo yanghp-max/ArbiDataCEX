@@ -6,6 +6,7 @@ import { loadConfig, reloadConfig, getRootDir } from '../../config/global-config
 import { SharedResources } from './shared-resources.js';
 import { CexCexTask } from './cex-cex-task.js';
 import { PrecisionChecker } from '../risk/risk-manager.js';
+import { resolveAdapterPair } from '../../cex/adapter-pair.js';
 
 function compactSymbol(symbol) {
   return String(symbol).replace(/[-_]/g, '').toUpperCase();
@@ -23,11 +24,13 @@ export class TaskManager {
     /** 同 symbol 同一事件循环内合并为一次 onTick（来价驱动，非定频） */
     this._priceTickCoalesce = new Set();
     this._symbolSet = new Set();
+    this.adapterPair = resolveAdapterPair(this.config);
   }
 
   async start() {
     const rootDir = getRootDir();
     const strat = this.config.strategy;
+    this.adapterPair = resolveAdapterPair(this.config);
     const minQtyPath = path.isAbsolute(strat.minQtyJson)
       ? strat.minQtyJson
       : path.resolve(rootDir, strat.minQtyJson);
@@ -50,7 +53,7 @@ export class TaskManager {
     this._symbolSet = new Set(strat.symbols.map(compactSymbol));
 
     const cexManager = this.sharedResources.cexManager;
-    const adapterSymbols = strat.symbols.map((s) => cexManager.normalizeSymbol('binance', s));
+    const adapterSymbols = strat.symbols.map((s) => cexManager.normalizeSymbol(this.adapterPair.providerA, s));
 
     const priceUpdateMode = strat.priceUpdateMode ?? 'any';
     const onPriceTicker = (source, ticker) => {
@@ -63,7 +66,7 @@ export class TaskManager {
       this.#schedulePriceTick(sym);
     };
     const onMarketRefresh = (payload = {}) => {
-      const source = payload.exchange === 'gate' ? 'gate' : 'binance';
+      const source = payload.exchange || this.adapterPair.providerA;
       if (payload.clearCache) {
         this.sharedResources.quoteAggregator.clearSource(source);
       }
@@ -115,6 +118,7 @@ export class TaskManager {
     console.log(
       `[TaskManager] started symbols=${strat.symbols.join(',')} trading=${this.tradingEnabled}`
       + ` priceMode=ws-driven(${priceUpdateMode}) market=${this.sharedResources.cexMarketWorkerClient ? 'worker(binance+gate)' : 'adapter'}`
+      + ` pair=${this.adapterPair.providerA}/${this.adapterPair.providerB}`
       + ` windowSeconds=${strat.windowSeconds}`
       + ` minDataPoints=${strat.minDataPoints} enforceLatency=${this.sharedResources.enforceLatency}`
       + ` restBeforeOrder=${strat.restRefreshBeforeOrder === true}`
@@ -142,6 +146,7 @@ export class TaskManager {
 
   forceReloadConfigNow() {
     const nextCfg = reloadConfig();
+    this.adapterPair = resolveAdapterPair(nextCfg);
     const prevStrategy = this.task?.getStrategyConfig?.() ?? this.config.strategy;
     const nextStrategy = nextCfg?.strategy ?? {};
     const nextSymbols = Array.isArray(nextStrategy.symbols) ? nextStrategy.symbols : [];
@@ -154,16 +159,35 @@ export class TaskManager {
     this.config = nextCfg;
     this.task.updateStrategyConfig(nextStrategy);
     this.sharedResources.enforceLatency = this.task.enforceLatency;
+    const legASlippage = nextStrategy?.legA?.slippageBps
+      ?? nextStrategy?.legASlippageBps
+      ?? nextStrategy?.binanceSlippageBps;
+    const legBSlippage = nextStrategy?.legB?.slippageBps
+      ?? nextStrategy?.legBSlippageBps
+      ?? nextStrategy?.gateSlippageBps;
+    const legAFee = nextStrategy?.legA?.feeBps
+      ?? nextStrategy?.legAFeeBps
+      ?? nextStrategy?.binanceFeeBps;
+    const legBFee = nextStrategy?.legB?.feeBps
+      ?? nextStrategy?.legBFeeBps
+      ?? nextStrategy?.gateFeeBps;
     console.log(
-      `[TaskManager] config reloaded by API: slippage bn=${nextStrategy.binanceSlippageBps ?? '-'} `
-      + `gt=${nextStrategy.gateSlippageBps ?? '-'}`
+      `[TaskManager] config reloaded by API: slippage A=${legASlippage ?? '-'} `
+      + `B=${legBSlippage ?? '-'} `
+      + `fee A=${legAFee ?? '-'} B=${legBFee ?? '-'}`
     );
     return {
       ok: true,
       at: Date.now(),
       strategy: {
+        legASlippageBps: legASlippage ?? null,
+        legBSlippageBps: legBSlippage ?? null,
+        legAFeeBps: legAFee ?? null,
+        legBFeeBps: legBFee ?? null,
         binanceSlippageBps: nextStrategy.binanceSlippageBps ?? null,
-        gateSlippageBps: nextStrategy.gateSlippageBps ?? null
+        gateSlippageBps: nextStrategy.gateSlippageBps ?? null,
+        binanceFeeBps: nextStrategy.binanceFeeBps ?? null,
+        gateFeeBps: nextStrategy.gateFeeBps ?? null
       }
     };
   }

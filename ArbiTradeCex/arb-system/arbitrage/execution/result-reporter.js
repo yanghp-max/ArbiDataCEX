@@ -63,8 +63,10 @@ export function calcTradeFeeCost(fill) {
 }
 
 export class ResultReporter {
-  constructor({ tradeCsvWriter = null } = {}) {
+  constructor({ tradeCsvWriter = null, providerA = 'binance', providerB = 'gate' } = {}) {
     this.tradeCsvWriter = tradeCsvWriter;
+    this.providerA = providerA;
+    this.providerB = providerB;
     this.cumPnl = 0;
     this.tradeCount = 0;
     this.winCount = 0;
@@ -174,8 +176,8 @@ export class ResultReporter {
       legExposure: Boolean(fill.legExposure),
       failedLeg: fill.failedLeg ?? null,
       failReason: fill.failReason ?? null,
-      aPosQty: accountCache.getPosition('binance', symbol),
-      bPosQty: accountCache.getPosition('gate', symbol),
+      aPosQty: accountCache.getPosition(this.providerA, symbol),
+      bPosQty: accountCache.getPosition(this.providerB, symbol),
       latency: latencyCsvFields(latencyTrace)
     };
     this.trades.push(row);

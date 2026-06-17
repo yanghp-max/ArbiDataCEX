@@ -1,5 +1,5 @@
 <script setup>
-import { ref } from 'vue';
+import { computed, ref } from 'vue';
 
 const props = defineProps({
   account: { type: Object, default: null },
@@ -44,6 +44,19 @@ function fmtU(v) {
   if (v == null || !Number.isFinite(Number(v))) return '—';
   return Number(v).toFixed(2);
 }
+
+const exchangeCards = computed(() => {
+  const account = props.account || {};
+  const exA = account.exchangeA || 'binance';
+  const exB = account.exchangeB || 'gate';
+  const normalizeName = (name) => String(name || '').toUpperCase();
+  const build = (name, leg) => ({
+    name: normalizeName(name),
+    leg,
+    data: account?.[name] || null
+  });
+  return [build(exA, 'A'), build(exB, 'B')];
+});
 </script>
 
 <template>
@@ -85,35 +98,23 @@ function fmtU(v) {
       </div>
 
       <div class="account-exchange-grid">
-        <article class="account-exchange-card">
-          <header class="account-exchange-head">Binance PM</header>
+        <article
+          v-for="card in exchangeCards"
+          :key="card.name"
+          class="account-exchange-card"
+        >
+          <header class="account-exchange-head">{{ card.name }} (Leg {{ card.leg }})</header>
           <div class="account-metric primary">
             <span class="account-metric-label">实际可用</span>
-            <strong class="account-metric-value avail">{{ fmtU(account.binance?.available) }}</strong>
+            <strong class="account-metric-value avail">{{ fmtU(card.data?.available) }}</strong>
           </div>
           <div class="account-metric">
             <span class="account-metric-label">占用保证金</span>
-            <strong class="account-metric-value used">{{ fmtU(account.binance?.marginUsed) }}</strong>
+            <strong class="account-metric-value used">{{ fmtU(card.data?.marginUsed) }}</strong>
           </div>
           <div class="account-metric subtle">
             <span class="account-metric-label">账户权益</span>
-            <span>{{ fmtU(account.binance?.equity ?? account.binance?.usdt) }}</span>
-          </div>
-        </article>
-
-        <article class="account-exchange-card">
-          <header class="account-exchange-head">Gate USDT 永续</header>
-          <div class="account-metric primary">
-            <span class="account-metric-label">实际可用</span>
-            <strong class="account-metric-value avail">{{ fmtU(account.gate?.available) }}</strong>
-          </div>
-          <div class="account-metric">
-            <span class="account-metric-label">占用保证金</span>
-            <strong class="account-metric-value used">{{ fmtU(account.gate?.marginUsed) }}</strong>
-          </div>
-          <div class="account-metric subtle">
-            <span class="account-metric-label">账户权益</span>
-            <span>{{ fmtU(account.gate?.equity ?? account.gate?.usdt) }}</span>
+            <span>{{ fmtU(card.data?.equity ?? card.data?.usdt) }}</span>
           </div>
         </article>
       </div>
@@ -152,7 +153,7 @@ function fmtU(v) {
             <span v-if="p.hedgedBaseQty">对冲 {{ Math.round(p.hedgedBaseQty) }} 币</span>
           </div>
           <div class="account-pos-row">
-            <span>Binance</span>
+            <span>{{ account.exchangeA || 'A' }}</span>
             <span>{{ p.aQty }} 币</span>
             <span v-if="p.aInitialMargin > 0">占用 {{ fmtU(p.aInitialMargin) }}U</span>
             <span v-if="p.aUnrealizedPnl != null" :class="pnlClass(p.aUnrealizedPnl)">
@@ -160,7 +161,7 @@ function fmtU(v) {
             </span>
           </div>
           <div class="account-pos-row">
-            <span>Gate</span>
+            <span>{{ account.exchangeB || 'B' }}</span>
             <span>{{ p.bQty }} 币</span>
             <span v-if="p.bInitialMargin > 0">占用 {{ fmtU(p.bInitialMargin) }}U</span>
             <span v-if="p.bUnrealizedPnl != null" :class="pnlClass(p.bUnrealizedPnl)">

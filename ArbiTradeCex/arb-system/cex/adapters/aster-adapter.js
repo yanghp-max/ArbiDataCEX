@@ -1,9 +1,10 @@
 /**
  * Aster Futures 适配器（接口风格对齐 BinanceAdapter）
- * 说明：当前实现采用 v1 HMAC 接口；后续若切换 v3 EIP-712，可在 #signedRequest 内扩展。
+ * 说明：当前实现已切换到 v3 REST 路径；签名暂沿用现有实现。
  */
 import WebSocket from 'ws';
 import axios from 'axios';
+import { Wallet } from 'ethers';
 import { BaseAdapter } from './base-adapter.js';
 import { Balance, Order, Position, OrderStatus, EventTypes } from '../types.js';
 import { cryptoUtils } from '../utils.js';
@@ -35,6 +36,7 @@ export class AsterAdapter extends BaseAdapter {
     this._symbolStaleMs = Number(config.symbolStaleMs) || 900;
     this._balanceCache = null;
     this._positionCache = new Map();
+    this._lastNonce = 0n;
   }
 
   toCompactSymbol(symbol) {
@@ -65,7 +67,7 @@ export class AsterAdapter extends BaseAdapter {
     if (this.enablePublicStream) {
       await this.connectWebSocket();
     }
-    if (process.env.ASTER_API_KEY && process.env.ASTER_API_SECRET) {
+    if (process.env.ASTER_USER && process.env.ASTER_SIGNER && process.env.ASTER_PRIVATE_KEY) {
       this.authenticated = true;
     }
     await super.connect();
@@ -83,11 +85,14 @@ export class AsterAdapter extends BaseAdapter {
   }
 
   async getAuthHeaders() {
-    return { 'X-MBX-APIKEY': process.env.ASTER_API_KEY || '' };
+    return {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      'User-Agent': 'ARB-System/1.0'
+    };
   }
 
   async loadSymbols() {
-    const response = await axios.get(`${this.config.restUrl}/fapi/v1/exchangeInfo`, {
+    const response = await axios.get(`${this.config.restUrl}/fapi/v3/exchangeInfo`, {
       timeout: this.config.timeout
     });
     const set = new Set();
@@ -278,27 +283,84 @@ export class AsterAdapter extends BaseAdapter {
   }
 
   async getFundingRate(symbol) {
-    const { data } = await axios.get(`${this.config.restUrl}/fapi/v1/premiumIndex`, {
+    const { data } = await axios.get(`${this.config.restUrl}/fapi/v3/premiumIndex`, {
       params: { symbol: this.toExchangeSymbol(symbol) },
       timeout: this.config.timeout
     });
     return Number(data.lastFundingRate);
   }
 
-  #signQuery(params) {
-    const p = new URLSearchParams({ ...params, timestamp: String(Date.now()), recvWindow: '5000' });
-    const sig = cryptoUtils.hmacSha256(p.toString(), process.env.ASTER_API_SECRET || '');
-    return `${p}&signature=${sig}`;
+  #nextNonceMicros() {
+    const now = BigInt(Date.now()) * 1000n;
+    if (now <= this._lastNonce) {
+      this._lastNonce += 1n;
+    } else {
+      this._lastNonce = now;
+    }
+    return this._lastNonce.toString();
+  }
+
+  async #buildV3SignedPayload(params = {}) {
+    const user = String(process.env.ASTER_USER || '').trim();
+    const signer = String(process.env.ASTER_SIGNER || '').trim();
+    const privateKey = String(process.env.ASTER_PRIVATE_KEY || '').trim();
+    if (!user || !signer || !privateKey) {
+      throw new Error('Aster v3 auth missing: ASTER_USER / ASTER_SIGNER / ASTER_PRIVATE_KEY');
+    }
+
+    const normalizedPrivateKey = privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`;
+    const wallet = new Wallet(normalizedPrivateKey);
+    const payload = {
+      ...params,
+      user,
+      signer,
+      nonce: this.#nextNonceMicros()
+    };
+    const encoded = new URLSearchParams(
+      Object.entries(payload).reduce((acc, [k, v]) => {
+        if (v == null) return acc;
+        acc[k] = String(v);
+        return acc;
+      }, {})
+    ).toString();
+
+    const signature = await wallet.signTypedData(
+      {
+        name: 'AsterSignTransaction',
+        version: '1',
+        chainId: 1666,
+        verifyingContract: '0x0000000000000000000000000000000000000000'
+      },
+      {
+        Message: [{ name: 'msg', type: 'string' }]
+      },
+      {
+        msg: encoded
+      }
+    );
+
+    return { encoded, signature };
   }
 
   async #signedRequest(method, path, params = {}) {
-    const query = this.#signQuery(params);
-    const url = `${this.config.restUrl}${path}?${query}`;
-    const { data } = await axios({
-      method,
-      url,
-      headers: { 'X-MBX-APIKEY': process.env.ASTER_API_KEY || '' },
+    const { encoded, signature } = await this.#buildV3SignedPayload(params);
+    const upperMethod = String(method || 'GET').toUpperCase();
+    const headers = await this.getAuthHeaders();
+    const url = `${this.config.restUrl}${path}`;
+    const signedBody = `${encoded}&signature=${signature}`;
+    const requestConfig = {
+      method: upperMethod,
+      headers,
       timeout: 15000
+    };
+    if (upperMethod === 'GET') {
+      requestConfig.url = `${url}?${signedBody}`;
+    } else {
+      requestConfig.url = url;
+      requestConfig.data = signedBody;
+    }
+    const { data } = await axios({
+      ...requestConfig
     });
     return data;
   }
@@ -325,7 +387,7 @@ export class AsterAdapter extends BaseAdapter {
   async getBookTicker(symbol, options = {}) {
     const exSymbol = this.toExchangeSymbol(symbol);
     const timeout = Number(options.timeoutMs) || this.config.timeout || 5000;
-    const { data } = await axios.get(`${this.config.restUrl}/fapi/v1/ticker/bookTicker`, {
+    const { data } = await axios.get(`${this.config.restUrl}/fapi/v3/ticker/bookTicker`, {
       params: { symbol: exSymbol },
       timeout
     });
@@ -349,7 +411,7 @@ export class AsterAdapter extends BaseAdapter {
     const sym = this.toExchangeSymbol(symbol);
     const depthLimit = Math.min(Math.max(Number(limit) || 20, 5), 1000);
     const timeout = Number(options.timeoutMs) || 5000;
-    const { data } = await axios.get(`${this.config.restUrl}/fapi/v1/depth`, {
+    const { data } = await axios.get(`${this.config.restUrl}/fapi/v3/depth`, {
       params: { symbol: sym, limit: depthLimit },
       timeout
     });
@@ -367,7 +429,7 @@ export class AsterAdapter extends BaseAdapter {
   }
 
   async getBalance(options = {}) {
-    const rows = await this.#signedRequest('GET', '/fapi/v2/balance');
+    const rows = await this.#signedRequest('GET', '/fapi/v3/balance');
     const balances = (rows || [])
       .map((row) => {
         const asset = String(row.asset || '').toUpperCase();
@@ -401,7 +463,7 @@ export class AsterAdapter extends BaseAdapter {
   }
 
   async getPositions(options = {}) {
-    const rows = await this.#signedRequest('GET', '/fapi/v2/positionRisk');
+    const rows = await this.#signedRequest('GET', '/fapi/v3/positionRisk');
     const positions = (rows || [])
       .filter((r) => Math.abs(Number(r.positionAmt)) > 0)
       .map((r) => {
@@ -460,7 +522,7 @@ export class AsterAdapter extends BaseAdapter {
     if (orderData.reduceOnly) {
       params.reduceOnly = 'true';
     }
-    const response = await this.#signedRequest('POST', '/fapi/v1/order', params);
+    const response = await this.#signedRequest('POST', '/fapi/v3/order', params);
     return new Order({
       orderId: String(response.orderId),
       clientOrderId: response.clientOrderId,
@@ -488,14 +550,14 @@ export class AsterAdapter extends BaseAdapter {
   }
 
   async cancelOrder(orderId, symbol) {
-    return this.#signedRequest('DELETE', '/fapi/v1/order', {
+    return this.#signedRequest('DELETE', '/fapi/v3/order', {
       symbol: this.toExchangeSymbol(symbol),
       orderId
     });
   }
 
   async getOrderStatus(orderId, symbol) {
-    const response = await this.#signedRequest('GET', '/fapi/v1/order', {
+    const response = await this.#signedRequest('GET', '/fapi/v3/order', {
       symbol: this.toExchangeSymbol(symbol),
       orderId
     });
@@ -518,7 +580,7 @@ export class AsterAdapter extends BaseAdapter {
   }
 
   async getOrderHistory(symbol, limit = 100) {
-    const response = await this.#signedRequest('GET', '/fapi/v1/allOrders', {
+    const response = await this.#signedRequest('GET', '/fapi/v3/allOrders', {
       symbol: this.toExchangeSymbol(symbol),
       limit
     });
@@ -541,7 +603,7 @@ export class AsterAdapter extends BaseAdapter {
   }
 
   async getOrderTrades(orderId, symbol) {
-    const rows = await this.#signedRequest('GET', '/fapi/v1/userTrades', {
+    const rows = await this.#signedRequest('GET', '/fapi/v3/userTrades', {
       symbol: this.toExchangeSymbol(symbol),
       orderId
     });

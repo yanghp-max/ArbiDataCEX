@@ -143,22 +143,17 @@ export class CexManager {
   }
 
   async startPrivateAccountStreams(symbols = []) {
-    const binance = this.get('binance');
-    const gate = this.get('gate');
-    const aster = this.get('aster');
-    await Promise.all([
-      binance?.startPrivateAccountStream?.(),
-      gate?.startPrivateAccountStream?.(symbols),
-      aster?.startPrivateAccountStream?.(symbols)
-    ]);
+    await Promise.all([...this.adapters.values()].map((adapter) => {
+      if (typeof adapter?.startPrivateAccountStream !== 'function') return null;
+      return adapter.startPrivateAccountStream(symbols);
+    }));
   }
 
   async stopPrivateAccountStreams() {
-    await Promise.all([
-      this.get('binance')?.stopPrivateAccountStream?.(),
-      this.get('gate')?.stopPrivateAccountStream?.(),
-      this.get('aster')?.stopPrivateAccountStream?.()
-    ]);
+    await Promise.all([...this.adapters.values()].map((adapter) => {
+      if (typeof adapter?.stopPrivateAccountStream !== 'function') return null;
+      return adapter.stopPrivateAccountStream();
+    }));
   }
 
   async applyDefaultLeverage(symbols, leverage) {
@@ -170,22 +165,57 @@ export class CexManager {
     const enablePublicStream = options.enablePublicStream !== false;
     const enablePrivateAccountStream = options.enablePrivateAccountStream
       ?? (enablePublicStream === false);
-    const binance = new BinanceAdapter({
-      listenKeyKeepaliveMin: strategyConfig.listenKeyKeepaliveMin ?? 30,
-      enablePublicStream
-    });
-    const gate = new GateAdapter({
-      accountMode: strategyConfig.gateAccountMode,
-      enablePublicStream,
-      enablePrivateAccountStream
-    });
-    const aster = new AsterAdapter({
-      enablePublicStream
-    });
-    await Promise.all([binance.connect(), gate.connect(), aster.connect()]);
-    mgr.register('binance', binance);
-    mgr.register('gate', gate);
-    mgr.register('aster', aster);
+    const configured = Array.isArray(options.providers)
+      ? options.providers
+      : ['binance', 'gate'];
+    const providers = [...new Set(
+      configured
+        .map((name) => String(name || '').trim().toLowerCase())
+        .filter(Boolean)
+    )];
+    if (providers.length === 0) {
+      throw new Error('No providers configured for CexManager');
+    }
+
+    const adapters = [];
+    for (const provider of providers) {
+      if (provider === 'binance') {
+        adapters.push({
+          name: provider,
+          adapter: new BinanceAdapter({
+            listenKeyKeepaliveMin: strategyConfig.listenKeyKeepaliveMin ?? 30,
+            enablePublicStream
+          })
+        });
+        continue;
+      }
+      if (provider === 'gate') {
+        adapters.push({
+          name: provider,
+          adapter: new GateAdapter({
+            accountMode: strategyConfig.gateAccountMode,
+            enablePublicStream,
+            enablePrivateAccountStream
+          })
+        });
+        continue;
+      }
+      if (provider === 'aster') {
+        adapters.push({
+          name: provider,
+          adapter: new AsterAdapter({
+            enablePublicStream
+          })
+        });
+        continue;
+      }
+      throw new Error(`Unsupported provider: ${provider}`);
+    }
+
+    await Promise.all(adapters.map(({ adapter }) => adapter.connect()));
+    for (const { name, adapter } of adapters) {
+      mgr.register(name, adapter);
+    }
     return mgr;
   }
 }

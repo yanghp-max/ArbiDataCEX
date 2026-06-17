@@ -14,8 +14,15 @@ export class ReservationManager {
     this.ttlMs = options.ttlMs ?? 30000;
     this.mutex = new Mutex();
     this.accountCache = options.accountCache;
+    this.exchangeA = options.exchangeA || 'binance';
+    this.exchangeB = options.exchangeB || 'gate';
     /** 执行中的 tradeId，purgeExpired 不得释放 */
     this.executingTradeIds = new Set();
+  }
+
+  setExchangePair(exchangeA, exchangeB) {
+    this.exchangeA = String(exchangeA || this.exchangeA || 'binance');
+    this.exchangeB = String(exchangeB || this.exchangeB || 'gate');
   }
 
   #compactSymbol(symbol) {
@@ -54,26 +61,26 @@ export class ReservationManager {
     }
 
     const minUsdt = this.accountCache.minAvailableUsdt ?? 50;
-    const availA = this.getAvailableUsdt('binance');
+    const availA = this.getAvailableUsdt(this.exchangeA);
     const needA = Math.max(minUsdt, aNeed);
     if (availA < needA) {
-      return `Binance USDT 不足 可用${availA.toFixed(2)} < 需要${needA.toFixed(2)} (差${(needA - availA).toFixed(2)})`;
+      return `${this.exchangeA} USDT 不足 可用${availA.toFixed(2)} < 需要${needA.toFixed(2)} (差${(needA - availA).toFixed(2)})`;
     }
 
-    const availB = this.getAvailableUsdt('gate');
+    const availB = this.getAvailableUsdt(this.exchangeB);
     const needB = Math.max(minUsdt, bNeed);
     if (availB < needB) {
-      return `Gate USDT 不足 可用${availB.toFixed(2)} < 需要${needB.toFixed(2)} (差${(needB - availB).toFixed(2)})`;
+      return `${this.exchangeB} USDT 不足 可用${availB.toFixed(2)} < 需要${needB.toFixed(2)} (差${(needB - availB).toFixed(2)})`;
     }
 
     if (increasesAbs) {
-      const capA = this.getAvailablePositionCapacity('binance', sym, maxPositionQty);
-      const capB = this.getAvailablePositionCapacity('gate', sym, maxPositionQty);
+      const capA = this.getAvailablePositionCapacity(this.exchangeA, sym, maxPositionQty);
+      const capB = this.getAvailablePositionCapacity(this.exchangeB, sym, maxPositionQty);
       if (qty > capA) {
-        return `Binance 仓位上限 qty=${qty} > 可用容量${capA.toFixed(6)} (超出${(qty - capA).toFixed(6)}) maxPos=${maxPositionQty}`;
+        return `${this.exchangeA} 仓位上限 qty=${qty} > 可用容量${capA.toFixed(6)} (超出${(qty - capA).toFixed(6)}) maxPos=${maxPositionQty}`;
       }
       if (qty > capB) {
-        return `Gate 仓位上限 qty=${qty} > 可用容量${capB.toFixed(6)} (超出${(qty - capB).toFixed(6)}) maxPos=${maxPositionQty}`;
+        return `${this.exchangeB} 仓位上限 qty=${qty} > 可用容量${capB.toFixed(6)} (超出${(qty - capB).toFixed(6)}) maxPos=${maxPositionQty}`;
       }
     }
 
@@ -87,27 +94,27 @@ export class ReservationManager {
 
       const minUsdt = this.accountCache.minAvailableUsdt ?? 50;
 
-      if (this.getAvailableUsdt('binance') < Math.max(minUsdt, aNeed)) return null;
-      if (this.getAvailableUsdt('gate') < Math.max(minUsdt, bNeed)) return null;
+      if (this.getAvailableUsdt(this.exchangeA) < Math.max(minUsdt, aNeed)) return null;
+      if (this.getAvailableUsdt(this.exchangeB) < Math.max(minUsdt, bNeed)) return null;
 
       const ids = { balA: null, balB: null, pos: [] };
 
       if (increasesAbs) {
-        const capA = this.getAvailablePositionCapacity('binance', sym, maxPositionQty);
-        const capB = this.getAvailablePositionCapacity('gate', sym, maxPositionQty);
+        const capA = this.getAvailablePositionCapacity(this.exchangeA, sym, maxPositionQty);
+        const capB = this.getAvailablePositionCapacity(this.exchangeB, sym, maxPositionQty);
         if (qty > capA || qty > capB) return null;
       }
 
       this.busySymbols.add(sym);
 
-      ids.balA = this.#addReservation('balance', 'binance:USDT', aNeed, tradeId);
-      ids.balB = this.#addReservation('balance', 'gate:USDT', bNeed, tradeId);
+      ids.balA = this.#addReservation('balance', `${this.exchangeA}:USDT`, aNeed, tradeId);
+      ids.balB = this.#addReservation('balance', `${this.exchangeB}:USDT`, bNeed, tradeId);
       ids.symbol = sym;
 
       if (increasesAbs) {
-        this.#addPositionReserved('binance', sym, qty);
-        this.#addPositionReserved('gate', sym, qty);
-        ids.pos = ['binance', 'gate'].map((ex) =>
+        this.#addPositionReserved(this.exchangeA, sym, qty);
+        this.#addPositionReserved(this.exchangeB, sym, qty);
+        ids.pos = [this.exchangeA, this.exchangeB].map((ex) =>
           this.#addReservation('position', `${ex}:${sym}`, qty, tradeId)
         );
       }
@@ -171,8 +178,8 @@ export class ReservationManager {
       const ids = { balA: null, balB: null, pos: [], symbol: null };
       for (const [id, r] of this.reservations) {
         if (r.tradeId !== tradeId || r.status !== 'active') continue;
-        if (r.type === 'balance' && r.key === 'binance:USDT') ids.balA = id;
-        if (r.type === 'balance' && r.key === 'gate:USDT') ids.balB = id;
+        if (r.type === 'balance' && r.key === `${this.exchangeA}:USDT`) ids.balA = id;
+        if (r.type === 'balance' && r.key === `${this.exchangeB}:USDT`) ids.balB = id;
         if (r.type === 'position') {
           ids.pos.push(id);
           const parts = String(r.key).split(':');

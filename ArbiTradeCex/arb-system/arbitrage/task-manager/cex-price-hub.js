@@ -6,11 +6,10 @@ import { EventTypes } from '../../cex/types.js';
 import { MARKET_TICKER_FLUSH, WORKER_EXIT } from './cex-market-worker-client.js';
 
 export class CexPriceHub extends EventEmitter {
-  constructor({ marketWorker = null, binanceSource = null, gateAdapter = null } = {}) {
+  constructor({ marketWorker = null, providers = [] } = {}) {
     super();
     this.marketWorker = marketWorker;
-    this.binanceSource = binanceSource;
-    this.gateAdapter = gateAdapter;
+    this.providers = providers.filter((item) => item?.provider && item?.adapter);
     this._useWorker = Boolean(marketWorker);
     this._queue = new Map();
     this._flushScheduled = false;
@@ -35,16 +34,16 @@ export class CexPriceHub extends EventEmitter {
 
     this._reconnectHandler = (payload = {}) => {
       this._onMarketRefresh?.({
-        exchange: payload.exchange === 'gate' ? 'gate' : 'binance',
+        exchange: payload.exchange || payload.provider || null,
         reason: payload.reason || 'reconnected',
         clearCache: Boolean(payload.clearCache)
       });
     };
 
     this._workerExitHandler = () => {
-      for (const exchange of ['binance', 'gate']) {
+      for (const { provider } of this.providers) {
         this._onMarketRefresh?.({
-          exchange,
+          exchange: provider,
           reason: 'worker-exit',
           clearCache: true
         });
@@ -53,7 +52,7 @@ export class CexPriceHub extends EventEmitter {
 
     this._workerDisconnectHandler = (payload = {}) => {
       this._onMarketRefresh?.({
-        exchange: payload.exchange === 'gate' ? 'gate' : 'binance',
+        exchange: payload.exchange || payload.provider || null,
         reason: 'ws-disconnected',
         clearCache: true
       });
@@ -78,16 +77,13 @@ export class CexPriceHub extends EventEmitter {
       return;
     }
 
-    this._setupProvider('binance', this.binanceSource);
-    this._setupProvider('gate', this.gateAdapter);
-    this.binanceSource?.on('PUBLIC_WS_RECONNECTED', this._reconnectHandler);
-    this.binanceSource?.on(EventTypes.RECONNECTED, this._reconnectHandler);
-    this.gateAdapter?.on('PUBLIC_WS_RECONNECTED', this._reconnectHandler);
-
-    await Promise.all([
-      this.binanceSource.subscribe(adapterSymbols, ['bookTicker']),
-      this.gateAdapter.subscribe(adapterSymbols, ['book_ticker'])
-    ]);
+    await Promise.all(this.providers.map(async ({ provider, adapter }) => {
+      this._setupProvider(provider, adapter);
+      adapter?.on('PUBLIC_WS_RECONNECTED', this._reconnectHandler);
+      adapter?.on(EventTypes.RECONNECTED, this._reconnectHandler);
+      const channels = provider === 'gate' ? ['book_ticker'] : ['bookTicker'];
+      await adapter.subscribe(adapterSymbols, channels);
+    }));
 
     this._started = true;
     console.log(`[CexPriceHub] started mode=fallback symbols=${adapterSymbols.length}`);
@@ -102,7 +98,7 @@ export class CexPriceHub extends EventEmitter {
 
   _enqueue(source, ticker) {
     if (!ticker?.symbol) return;
-    const provider = source === 'gate' ? 'gate' : 'binance';
+    const provider = source;
     const key = `${provider}:${ticker.symbol}`;
     this._queue.set(key, { provider, ticker });
     this._scheduleFlush();
@@ -138,9 +134,10 @@ export class CexPriceHub extends EventEmitter {
     for (const [, { adapter, handler }] of this._handlers) {
       adapter.off(EventTypes.TICKER, handler);
     }
-    this.binanceSource?.off('PUBLIC_WS_RECONNECTED', this._reconnectHandler);
-    this.binanceSource?.off(EventTypes.RECONNECTED, this._reconnectHandler);
-    this.gateAdapter?.off('PUBLIC_WS_RECONNECTED', this._reconnectHandler);
+    for (const { adapter } of this.providers) {
+      adapter?.off('PUBLIC_WS_RECONNECTED', this._reconnectHandler);
+      adapter?.off(EventTypes.RECONNECTED, this._reconnectHandler);
+    }
 
     this._handlers.clear();
     this._queue.clear();

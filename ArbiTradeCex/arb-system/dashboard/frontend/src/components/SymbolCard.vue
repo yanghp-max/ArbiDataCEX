@@ -3,6 +3,8 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue';
 
 const props = defineProps({
   card: { type: Object, required: true },
+  exchangeA: { type: String, default: 'A' },
+  exchangeB: { type: String, default: 'B' },
   showLatency: { type: Boolean, default: true },
   enforceLatency: { type: Boolean, default: false },
   latencyLimits: { type: Object, default: null },
@@ -139,12 +141,12 @@ async function syncPositionNow() {
 
     <div class="exchange-row">
       <div class="exchange">
-        <div class="exchange-name binance">Binance</div>
+        <div class="exchange-name binance">{{ exchangeA }}</div>
         <div class="quote-line"><span>Bid</span><strong>{{ fmt(card.aBid) }}</strong></div>
         <div class="quote-line"><span>Ask</span><strong>{{ fmt(card.aAsk) }}</strong></div>
       </div>
       <div class="exchange">
-        <div class="exchange-name gate">Gate</div>
+        <div class="exchange-name gate">{{ exchangeB }}</div>
         <div class="quote-line"><span>Bid</span><strong>{{ fmt(card.bBid) }}</strong></div>
         <div class="quote-line"><span>Ask</span><strong>{{ fmt(card.bAsk) }}</strong></div>
       </div>

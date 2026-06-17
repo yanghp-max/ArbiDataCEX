@@ -3,6 +3,8 @@ import { computed } from 'vue';
 
 const props = defineProps({
   state: { type: Object, required: true },
+  exchangeA: { type: String, default: 'A' },
+  exchangeB: { type: String, default: 'B' },
   pnlSummary: { type: Object, required: true },
   fmt: { type: Function, required: true },
   formatPnl: { type: Function, required: true },
@@ -23,10 +25,12 @@ function buildLegRow(base) {
 
 function filledLegs(trade) {
   const legs = [];
+  const exchangeAName = String(props.exchangeA || 'A');
+  const exchangeBName = String(props.exchangeB || 'B');
   if (hasFill(trade.aFilledQty)) {
     legs.push(buildLegRow({
       key: 'binance',
-      exchange: 'Binance',
+      exchange: exchangeAName,
       side: trade.aSide,
       bid: trade.aBid,
       ask: trade.aAsk,
@@ -41,7 +45,7 @@ function filledLegs(trade) {
   if (hasFill(trade.bFilledQty)) {
     legs.push(buildLegRow({
       key: 'gate',
-      exchange: 'Gate',
+      exchange: exchangeBName,
       side: trade.bSide,
       bid: trade.bBid,
       ask: trade.bAsk,
@@ -220,7 +224,7 @@ const combinedLogs = computed(() => {
           <div class="log-message trade-profit" :class="pnlClass(log.trade.pnlComplete === false ? null : log.trade.netPnl)">
             <strong>实际利润</strong>
             <template v-if="log.trade.pnlComplete === false || log.trade.netPnl == null">
-              待确认（Gate/Binance fee 回执未齐）
+              待确认（{{ exchangeA }}/{{ exchangeB }} fee 回执未齐）
             </template>
             <template v-else-if="hasDualLegGross(log.trade)">
               毛 {{ formatPnl(log.trade.grossPnl) }} USDT · 净 {{ formatPnl(log.trade.netPnl) }} USDT
@@ -234,10 +238,16 @@ const combinedLogs = computed(() => {
           <div class="log-message trade-summary">
             计划 qty {{ fmt(log.trade.qty, 4) }}
             · cum {{ fmt(log.trade.cumPnl, 4) }}
-            · pos Binance={{ fmt(log.trade.aPosQty, 4) }} Gate={{ fmt(log.trade.bPosQty, 4) }}
+            · pos {{ exchangeA }}={{ fmt(log.trade.aPosQty, 4) }} {{ exchangeB }}={{ fmt(log.trade.bPosQty, 4) }}
           </div>
           <div v-if="log.trade.failReason" class="log-message trade-warn-line">
-            未成交 {{ log.trade.failedLeg === 'binance' ? 'Binance' : log.trade.failedLeg === 'gate' ? 'Gate' : log.trade.failedLeg }}:
+            未成交 {{
+              log.trade.failedLeg === 'binance'
+                ? exchangeA
+                : log.trade.failedLeg === 'gate'
+                  ? exchangeB
+                  : log.trade.failedLeg
+            }}:
             {{ log.trade.failReason }}
           </div>
         </template>

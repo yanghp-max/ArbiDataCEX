@@ -53,8 +53,15 @@ function resolveReceiveMs(ticker, now = Date.now()) {
 
 export class QuoteAggregator {
   constructor() {
-    /** symbol(compact) -> { binance, gate, funding } */
+    /** symbol(compact) -> { sources: Map<provider,ticker>, funding } */
     this.latest = new Map();
+  }
+
+  #ensureRow(sym) {
+    if (!this.latest.has(sym)) {
+      this.latest.set(sym, { sources: new Map(), funding: {} });
+    }
+    return this.latest.get(sym);
   }
 
   onTicker(source, ticker) {
@@ -69,33 +76,33 @@ export class QuoteAggregator {
       localTimestamp: receiveMs
     };
 
-    if (!this.latest.has(sym)) {
-      this.latest.set(sym, { binance: null, gate: null, funding: {} });
-    }
-    const row = this.latest.get(sym);
-    if (source === 'binance') row.binance = cached;
-    else if (source === 'gate') row.gate = cached;
+    const row = this.#ensureRow(sym);
+    row.sources.set(source, cached);
   }
 
   /** 公共 WS 重连后清掉陈旧腿，避免单腿来价时拼到断线前的旧价 */
   clearSource(source) {
     for (const row of this.latest.values()) {
-      if (source === 'binance') row.binance = null;
-      else if (source === 'gate') row.gate = null;
+      row.sources?.delete(source);
     }
   }
 
   setFunding(symbol, fundingA, fundingB) {
     const sym = compactSymbol(symbol);
-    if (!this.latest.has(sym)) this.latest.set(sym, { binance: null, gate: null, funding: {} });
-    this.latest.get(sym).funding = { a: fundingA, b: fundingB };
+    const row = this.#ensureRow(sym);
+    row.funding = { a: fundingA, b: fundingB };
   }
 
-  buildTick(symbol) {
+  buildTick(symbol, options = {}) {
     const sym = compactSymbol(symbol);
     const row = this.latest.get(sym);
-    if (!row?.binance || !row?.gate) return null;
-    const { binance: b, gate: g, funding } = row;
+    if (!row?.sources) return null;
+    const sourceA = options.sourceA || 'binance';
+    const sourceB = options.sourceB || 'gate';
+    const b = row.sources.get(sourceA);
+    const g = row.sources.get(sourceB);
+    const funding = row.funding || {};
+    if (!b || !g) return null;
     if (![b.bid, b.ask, g.bid, g.ask].every(Number.isFinite)) return null;
 
     const now = Date.now();

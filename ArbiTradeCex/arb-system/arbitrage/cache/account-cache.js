@@ -22,11 +22,35 @@ export class AccountCache {
       binance: { connected: false, reliable: false },
       gate: { connected: false, reliable: false }
     };
+    this.exchangePair = { a: 'binance', b: 'gate' };
+  }
+
+  setExchangePair(exchangeA, exchangeB) {
+    this.exchangePair = {
+      a: String(exchangeA || 'binance'),
+      b: String(exchangeB || 'gate')
+    };
+    for (const ex of [this.exchangePair.a, this.exchangePair.b]) {
+      if (!this.wsStatus[ex]) {
+        this.wsStatus[ex] = { connected: false, reliable: false };
+      }
+      if (this._lastRestRefreshMs[ex] == null) {
+        this._lastRestRefreshMs[ex] = 0;
+      }
+    }
+  }
+
+  get exchangeA() {
+    return this.exchangePair.a;
+  }
+
+  get exchangeB() {
+    return this.exchangePair.b;
   }
 
   seedMock({ balanceUsdt = 10000 } = {}) {
     const now = Date.now();
-    for (const exchange of ['binance', 'gate']) {
+    for (const exchange of [this.exchangeA, this.exchangeB]) {
       this.setBalance(exchange, { total: balanceUsdt, available: balanceUsdt, updatedAtMs: now });
       this.wsStatus[exchange] = { connected: true, reliable: true };
     }
@@ -95,8 +119,8 @@ export class AccountCache {
 
   #markFillSync(symbol) {
     const sym = this.#compactSymbol(symbol);
-    const aQty = this.getPosition('binance', sym);
-    const bQty = this.getPosition('gate', sym);
+    const aQty = this.getPosition(this.exchangeA, sym);
+    const bQty = this.getPosition(this.exchangeB, sym);
     this._fillSyncProtect.set(sym, {
       until: Date.now() + (this.fillSyncProtectMs ?? 90000),
       aQty,
@@ -116,7 +140,7 @@ export class AccountCache {
   #shouldKeepAbsentLeg(exchange, sym, now, grace) {
     const protect = this.#fillSyncActive(sym, now);
     if (protect) {
-      const expected = exchange === 'binance' ? protect.aQty : protect.bQty;
+      const expected = exchange === this.exchangeA ? protect.aQty : protect.bQty;
       const cached = this.getPosition(exchange, sym);
       if (Math.abs(expected) > 1e-12 && Math.abs(cached - expected) <= 1e-6) {
         return true;
@@ -149,8 +173,8 @@ export class AccountCache {
     if (!fill?.legExposure && aFill > 0 && bFill > 0) {
       this.applyLegDelta(sym, direction, Math.min(aFill, bFill));
     } else if (aFill > 0 || bFill > 0) {
-      let aQty = this.getPosition('binance', sym);
-      let bQty = this.getPosition('gate', sym);
+      let aQty = this.getPosition(this.exchangeA, sym);
+      let bQty = this.getPosition(this.exchangeB, sym);
       if (aFill > 0) {
         if (fill.aSide === 'sell') aQty -= aFill;
         else aQty += aFill;
@@ -159,13 +183,13 @@ export class AccountCache {
         if (fill.bSide === 'sell') bQty -= bFill;
         else bQty += bFill;
       }
-      this.setPosition('binance', sym, aQty);
-      this.setPosition('gate', sym, bQty);
+      this.setPosition(this.exchangeA, sym, aQty);
+      this.setPosition(this.exchangeB, sym, bQty);
     }
 
     this.#markFillSync(sym);
-    const aQty = this.getPosition('binance', sym);
-    const bQty = this.getPosition('gate', sym);
+    const aQty = this.getPosition(this.exchangeA, sym);
+    const bQty = this.getPosition(this.exchangeB, sym);
     if (isFlatPosition(aQty, bQty)) {
       this.#clearFillSync(sym);
     }
@@ -181,8 +205,8 @@ export class AccountCache {
 
     for (let i = 0; i < retries; i += 1) {
       last = await this.reconcileSymbolPositions(cexManager, sym, { graceMs: grace });
-      const aQty = this.getPosition('binance', sym);
-      const bQty = this.getPosition('gate', sym);
+      const aQty = this.getPosition(this.exchangeA, sym);
+      const bQty = this.getPosition(this.exchangeB, sym);
       if (isFlatPosition(aQty, bQty)) {
         this.#clearFillSync(sym);
         return { ...last, ok: true, flat: true };
@@ -196,8 +220,8 @@ export class AccountCache {
       }
     }
 
-    const aQty = this.getPosition('binance', sym);
-    const bQty = this.getPosition('gate', sym);
+    const aQty = this.getPosition(this.exchangeA, sym);
+    const bQty = this.getPosition(this.exchangeB, sym);
     if (isFlatPosition(aQty, bQty)) this.#clearFillSync(sym);
     return { ...last, ok: last.ok !== false, timeout: true };
   }
@@ -216,25 +240,25 @@ export class AccountCache {
       return (rows || []).find((p) => this.#compactSymbol(p.symbol) === sym) ?? null;
     };
 
-    let binRow;
-    let gateRow;
+    let aRow;
+    let bRow;
     try {
-      [binRow, gateRow] = await Promise.all([
-        fetchLeg('binance'),
-        fetchLeg('gate')
+      [aRow, bRow] = await Promise.all([
+        fetchLeg(this.exchangeA),
+        fetchLeg(this.exchangeB)
       ]);
     } catch (err) {
       console.warn(`[AccountCache] reconcile ${sym} failed: ${err.message}`);
       return { ok: false, error: err.message };
     }
 
-    if (binRow == null && gateRow == null) {
+    if (aRow == null && bRow == null) {
       const protect = this.#fillSyncActive(sym, now);
       if (protect && !isFlatPosition(protect.aQty, protect.bQty)) {
         return { ok: true, bothAbsent: false, deferred: true };
       }
-      this.setPosition('binance', sym, 0);
-      this.setPosition('gate', sym, 0);
+      this.setPosition(this.exchangeA, sym, 0);
+      this.setPosition(this.exchangeB, sym, 0);
       this.#clearFillSync(sym);
       return { ok: true, bothAbsent: true };
     }
@@ -248,11 +272,11 @@ export class AccountCache {
       this.setPosition(exchange, sym, 0);
     };
 
-    applyLeg('binance', binRow);
-    applyLeg('gate', gateRow);
+    applyLeg(this.exchangeA, aRow);
+    applyLeg(this.exchangeB, bRow);
 
-    const aQty = this.getPosition('binance', sym);
-    const bQty = this.getPosition('gate', sym);
+    const aQty = this.getPosition(this.exchangeA, sym);
+    const bQty = this.getPosition(this.exchangeB, sym);
     if (isFlatPosition(aQty, bQty)) this.#clearFillSync(sym);
     else if (isHedgedPosition(aQty, bQty)) this.#markFillSync(sym);
 
@@ -305,7 +329,7 @@ export class AccountCache {
       connected: connected ?? prev.connected,
       reliable: reliable ?? prev.reliable
     };
-    this.reliable = ['binance', 'gate'].every((ex) => this.wsStatus[ex].reliable);
+    this.reliable = [this.exchangeA, this.exchangeB].every((ex) => this.wsStatus[ex]?.reliable);
   }
 
   /**
@@ -316,8 +340,8 @@ export class AccountCache {
     const q = Number(qty);
     if (!Number.isFinite(q) || q <= 0) return;
 
-    let aQty = this.getPosition('binance', sym);
-    let bQty = this.getPosition('gate', sym);
+    let aQty = this.getPosition(this.exchangeA, sym);
+    let bQty = this.getPosition(this.exchangeB, sym);
     if (direction === '-a+b') {
       aQty -= q;
       bQty += q;
@@ -325,8 +349,8 @@ export class AccountCache {
       aQty += q;
       bQty -= q;
     }
-    this.setPosition('binance', sym, aQty);
-    this.setPosition('gate', sym, bQty);
+    this.setPosition(this.exchangeA, sym, aQty);
+    this.setPosition(this.exchangeB, sym, bQty);
   }
 
   #compactSymbol(symbol) {
@@ -407,8 +431,8 @@ export class AccountCache {
 
   async refreshFromCexManager(cexManager, { fullReplace = false } = {}) {
     await Promise.all([
-      this.refreshExchange(cexManager, 'binance', { force: true, fullReplace }),
-      this.refreshExchange(cexManager, 'gate', { force: true, fullReplace })
+      this.refreshExchange(cexManager, this.exchangeA, { force: true, fullReplace }),
+      this.refreshExchange(cexManager, this.exchangeB, { force: true, fullReplace })
     ]);
     this.markRestSnapshotReliable();
   }
@@ -425,7 +449,7 @@ export class AccountCache {
 
   /** 启动时 REST 全量同步后标记可用，避免私有 WS 连上前每笔信号都打 REST */
   markRestSnapshotReliable() {
-    for (const exchange of ['binance', 'gate']) {
+    for (const exchange of [this.exchangeA, this.exchangeB]) {
       this.setWsStatus(exchange, { connected: false, reliable: true });
     }
     this.reliable = true;
@@ -438,7 +462,7 @@ export class AccountCache {
     if (this.mockMode) return;
     const maxAge = this.accountCacheMaxAgeMs ?? 5000;
     const tasks = [];
-    for (const exchange of ['binance', 'gate']) {
+    for (const exchange of [this.exchangeA, this.exchangeB]) {
       if (!this.isReliable(exchange) || this.isStale(exchange, maxAge)) {
         const force = !this.isReliable(exchange);
         tasks.push(this.refreshExchange(cexManager, exchange, { force }));

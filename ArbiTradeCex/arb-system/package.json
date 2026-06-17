@@ -11,13 +11,16 @@
     "build:dashboard": "npm install --prefix dashboard/frontend && npm run build --prefix dashboard/frontend",
     "dev:dashboard": "npm run dev --prefix dashboard/frontend",
     "fetch:min-qty": "node scripts/fetch-min-order-qty.js",
-    "build:symbols-min-qty": "node scripts/build-common-min-order-qty.js"
+    "build:symbols-min-qty": "node scripts/build-common-min-order-qty.js",
+    "build:symbols-min-qty:pair": "node scripts/build-common-min-order-qty.js --provider-a binance --provider-b gate",
+    "build:symbols-min-qty:binance-aster": "node scripts/build-common-min-order-qty.js --provider-a binance --provider-b aster"
   },
   "dependencies": {
     "async-mutex": "^0.5.0",
     "axios": "^1.7.9",
     "big.js": "^6.2.2",
     "dotenv": "^16.4.7",
+    "ethers": "^6.16.0",
     "ws": "^8.18.0"
   }
 }

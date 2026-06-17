@@ -85,6 +85,8 @@ function resolveForceCloseExecDirection(aQty, bQty, lockedDirection) {
 export class CexCexTask {
   constructor(sharedResources, strategyConfig, precisionChecker) {
     this.sr = sharedResources;
+    this.providerA = sharedResources?.adapterPair?.providerA || 'binance';
+    this.providerB = sharedResources?.adapterPair?.providerB || 'gate';
     this.cfg = {
       ...strategyConfig,
       zOpen: strategyConfig.zOpen ?? strategyConfig.zOpenAb ?? 2.0,
@@ -92,7 +94,10 @@ export class CexCexTask {
       signalMaxAgeMs: strategyConfig.signalMaxAgeMs ?? 100
     };
     this.precision = precisionChecker;
-    this.risk = new RiskManager(strategyConfig);
+    this.risk = new RiskManager(strategyConfig, {
+      exchangeA: this.providerA,
+      exchangeB: this.providerB
+    });
     this.engines = new Map();
     this.lastOrderTs = new Map();
     this.lockedDirection = new Map();
@@ -123,6 +128,27 @@ export class CexCexTask {
     }
   }
 
+  #buildPairTick(symbol) {
+    return this.sr.quoteAggregator.buildTick(symbol, {
+      sourceA: this.providerA,
+      sourceB: this.providerB
+    });
+  }
+
+  #getPositionA(symbol) {
+    return this.sr.accountCache.getPosition(this.providerA, symbol);
+  }
+
+  #getPositionB(symbol) {
+    return this.sr.accountCache.getPosition(this.providerB, symbol);
+  }
+
+  #getTickSourceLabel(source) {
+    if (source === this.providerA) return 'A';
+    if (source === this.providerB) return 'B';
+    return source;
+  }
+
   getStrategyConfig() {
     return this.cfg;
   }
@@ -134,7 +160,10 @@ export class CexCexTask {
       zClose: nextStrategyConfig.zClose ?? 0.0,
       signalMaxAgeMs: nextStrategyConfig.signalMaxAgeMs ?? 100
     };
-    this.risk = new RiskManager(this.cfg);
+    this.risk = new RiskManager(this.cfg, {
+      exchangeA: this.providerA,
+      exchangeB: this.providerB
+    });
     this.latencyLimits = resolveLatencyLimits(this.cfg, this.enforceLatency);
     this.cexCost = resolveCexCostConfig(this.cfg);
     this.logTradeSkips = this.cfg.logTradeSkips !== false;
@@ -143,8 +172,8 @@ export class CexCexTask {
   }
 
   #syncLockState(symbol, signal) {
-    const aQty = this.sr.accountCache.getPosition('binance', symbol);
-    const bQty = this.sr.accountCache.getPosition('gate', symbol);
+    const aQty = this.#getPositionA(symbol);
+    const bQty = this.#getPositionB(symbol);
     const inFlight = this.executingSymbols.has(symbol);
 
     if (isFlatPosition(aQty, bQty)) {
@@ -198,8 +227,8 @@ export class CexCexTask {
   }
 
   #clearLocksIfFlat(symbol) {
-    const aQty = this.sr.accountCache.getPosition('binance', symbol);
-    const bQty = this.sr.accountCache.getPosition('gate', symbol);
+    const aQty = this.#getPositionA(symbol);
+    const bQty = this.#getPositionB(symbol);
     if (isFlatPosition(aQty, bQty)) {
       this.lockedDirection.delete(symbol);
       this.lockedBranch.delete(symbol);
@@ -210,8 +239,8 @@ export class CexCexTask {
   async #reconcileStalePositionsIfNeeded(symbol) {
     if (this.sr.useMockAccount || this.executingSymbols.has(symbol)) return;
 
-    const aQty = this.sr.accountCache.getPosition('binance', symbol);
-    const bQty = this.sr.accountCache.getPosition('gate', symbol);
+    const aQty = this.#getPositionA(symbol);
+    const bQty = this.#getPositionB(symbol);
     if (isFlatPosition(aQty, bQty) || isHedgedPosition(aQty, bQty)) return;
 
     const now = Date.now();
@@ -260,7 +289,7 @@ export class CexCexTask {
       const quote = fill.quote ?? {};
       if (fill.aFilledQty > 0) {
         console.warn(formatFilledLegLine(
-          'Binance',
+          this.providerA,
           fill.aSide,
           quote.aBid,
           quote.aAsk,
@@ -271,7 +300,7 @@ export class CexCexTask {
       }
       if (fill.bFilledQty > 0) {
         console.warn(formatFilledLegLine(
-          'Gate',
+          this.providerB,
           fill.bSide,
           quote.bBid,
           quote.bAsk,
@@ -314,10 +343,10 @@ export class CexCexTask {
       const tasks = [];
       if (aSide) {
         tasks.push({
-          exchange: 'binance',
+          exchange: this.providerA,
           side: aSide,
           requestedQty: Math.abs(beforeA),
-          run: () => this.sr.cexManager.placeOrder('binance', {
+          run: () => this.sr.cexManager.placeOrder(this.providerA, {
             symbol: sym,
             side: aSide,
             type: 'market',
@@ -337,10 +366,10 @@ export class CexCexTask {
           return false;
         }
         tasks.push({
-          exchange: 'gate',
+          exchange: this.providerB,
           side: bSide,
           requestedGateSize: gateContracts,
-          run: () => this.sr.cexManager.placeOrder('gate', {
+          run: () => this.sr.cexManager.placeOrder(this.providerB, {
             symbol: sym,
             side: bSide,
             type: 'market',
@@ -366,7 +395,7 @@ export class CexCexTask {
       for (let i = 0; i < tasks.length; i += 1) {
         if (results[i].status !== 'fulfilled') continue;
         const task = tasks[i];
-        if (task.exchange === 'binance') {
+        if (task.exchange === this.providerA) {
           aOrder = results[i].value;
           aRequestedQty = task.requestedQty;
         } else {
@@ -375,7 +404,7 @@ export class CexCexTask {
         }
       }
 
-      const freshTick = tick || this.sr.quoteAggregator?.buildTick(sym);
+      const freshTick = tick || this.#buildPairTick(sym);
       let fill = null;
       if (freshTick && this.sr.orderExecutor) {
         fill = await this.sr.orderExecutor.assembleFillFromCloseLegs({
@@ -417,8 +446,8 @@ export class CexCexTask {
       }
 
       await this.#refreshForceCloseCache(sym);
-      const afterA = this.sr.accountCache.getPosition('binance', sym);
-      const afterB = this.sr.accountCache.getPosition('gate', sym);
+      const afterA = this.#getPositionA(sym);
+      const afterB = this.#getPositionB(sym);
       this.#clearLocksIfFlat(sym);
       console.warn(`[FORCE_CLOSE] ${sym} 强平完成，仓位 A=${afterA} B=${afterB}`);
       return true;
@@ -439,8 +468,8 @@ export class CexCexTask {
 
     const key = String(sym).replace(/[-_]/g, '');
     const [binRows, gateRows] = await Promise.all([
-      this.sr.cexManager.getPositions('binance', { silent: true }).catch(() => []),
-      this.sr.cexManager.getPositions('gate', { silent: true }).catch(() => [])
+      this.sr.cexManager.getPositions(this.providerA, { silent: true }).catch(() => []),
+      this.sr.cexManager.getPositions(this.providerB, { silent: true }).catch(() => [])
     ]);
     const aPos = (binRows || []).find((p) => String(p.symbol).replace(/[-_]/g, '') === key) || null;
     const bPos = (gateRows || []).find((p) => String(p.symbol).replace(/[-_]/g, '') === key) || null;
@@ -484,8 +513,8 @@ export class CexCexTask {
   async #forceCloseByEntryMultiplierIfNeeded(symbol, tick) {
     const multiplier = Number(this.cfg.forceClosePriceMultiplier);
     if (!(multiplier > 1) || this.sr.useMockAccount || this.executingSymbols.has(symbol)) return false;
-    const aQty = this.sr.accountCache.getPosition('binance', symbol);
-    const bQty = this.sr.accountCache.getPosition('gate', symbol);
+    const aQty = this.#getPositionA(symbol);
+    const bQty = this.#getPositionB(symbol);
     if (isFlatPosition(aQty, bQty)) {
       this._forceCloseCache.delete(symbol);
       return false;
@@ -522,8 +551,8 @@ export class CexCexTask {
     if (this.sr.useMockAccount) return;
     for (const sym of this.cfg.symbols || []) {
       if (this.executingSymbols.has(sym)) continue;
-      const aQty = this.sr.accountCache.getPosition('binance', sym);
-      const bQty = this.sr.accountCache.getPosition('gate', sym);
+      const aQty = this.#getPositionA(sym);
+      const bQty = this.#getPositionB(sym);
       if (isFlatPosition(aQty, bQty) || isHedgedPosition(aQty, bQty)) continue;
       await this.sr.accountCache.reconcileSymbolPositions(this.sr.cexManager, sym);
       this.#clearLocksIfFlat(sym);
@@ -531,7 +560,7 @@ export class CexCexTask {
   }
 
   async onTick(symbol) {
-    const tick = this.sr.quoteAggregator.buildTick(symbol);
+    const tick = this.#buildPairTick(symbol);
     const engine = this.engines.get(symbol);
 
     if (!tick) {
@@ -599,7 +628,7 @@ export class CexCexTask {
       this.#logSkip(
         symbol,
         '资金费率',
-        `Binance funding=${tick.fundingA} < 下限${this.cfg.fundingMin}`
+        `${this.providerA} funding=${tick.fundingA} < 下限${this.cfg.fundingMin}`
           + ` (低${(this.cfg.fundingMin - tick.fundingA).toFixed(4)})`
       );
       return;
@@ -608,7 +637,7 @@ export class CexCexTask {
       this.#logSkip(
         symbol,
         '资金费率',
-        `Gate funding=${tick.fundingB} < 下限${this.cfg.fundingMin}`
+        `${this.providerB} funding=${tick.fundingB} < 下限${this.cfg.fundingMin}`
           + ` (低${(this.cfg.fundingMin - tick.fundingB).toFixed(4)})`
       );
       return;
@@ -656,12 +685,12 @@ export class CexCexTask {
       const execDirection = lock.direction;
       const adjSpread = execDirection === '-a+b' ? spreads.spreadAbAdj : spreads.spreadBaAdj;
       if (decision.action === 'add') {
-        let aQty = this.sr.accountCache.getPosition('binance', symbol);
-        let bQty = this.sr.accountCache.getPosition('gate', symbol);
+        let aQty = this.#getPositionA(symbol);
+        let bQty = this.#getPositionB(symbol);
         if (!isHedgedPosition(aQty, bQty) && !this.sr.useMockAccount) {
           await this.sr.accountCache.reconcileSymbolPositions(this.sr.cexManager, symbol);
-          aQty = this.sr.accountCache.getPosition('binance', symbol);
-          bQty = this.sr.accountCache.getPosition('gate', symbol);
+          aQty = this.#getPositionA(symbol);
+          bQty = this.#getPositionB(symbol);
         }
         if (!isHedgedPosition(aQty, bQty)) {
           if (isFlatPosition(aQty, bQty)) {
@@ -729,8 +758,8 @@ export class CexCexTask {
     let orderForExec = orderBuild;
     let qty = orderBuild.qty;
     if (isClose) {
-      const holdA = this.sr.accountCache.getPosition('binance', symbol);
-      const holdB = this.sr.accountCache.getPosition('gate', symbol);
+      const holdA = this.#getPositionA(symbol);
+      const holdB = this.#getPositionB(symbol);
       const finalized = this.precision.finalizeCloseOrder({
         direction: execDirection,
         tick,
@@ -772,8 +801,8 @@ export class CexCexTask {
     markLatency(latencyTrace, 'prep_done');
 
     const posBefore = {
-      a: this.sr.accountCache.getPosition('binance', symbol),
-      b: this.sr.accountCache.getPosition('gate', symbol)
+      a: this.#getPositionA(symbol),
+      b: this.#getPositionB(symbol)
     };
     const increasesAbs = !isClose && this.risk.wouldIncreaseAbs(posBefore, execDirection, qty);
     const maxPosQty = this.risk.maxPositionQty(tick, isClose ? tradePlan.direction : execDirection);
@@ -782,7 +811,7 @@ export class CexCexTask {
     if (!this.sr.useMockAccount) {
       const cache = this.sr.accountCache;
       const maxAge = cache.accountCacheMaxAgeMs ?? 5000;
-      const needFresh = ['binance', 'gate'].some(
+      const needFresh = [this.providerA, this.providerB].some(
         (ex) => !cache.isReliable(ex) || cache.isStale(ex, maxAge)
       );
       if (needFresh) {
@@ -866,12 +895,12 @@ export class CexCexTask {
   async #auditPostTradeHedge(symbol, fill) {
     if (fill?.legExposure || !(fill?.aFilledQty > 0 && fill?.bFilledQty > 0)) return;
 
-    const aQty = this.sr.accountCache.getPosition('binance', symbol);
-    const bQty = this.sr.accountCache.getPosition('gate', symbol);
+    const aQty = this.#getPositionA(symbol);
+    const bQty = this.#getPositionB(symbol);
     if (isHedgedPosition(aQty, bQty)) return;
 
     const key = String(symbol).replace(/[-_]/g, '');
-    const gateRows = await this.sr.cexManager.getPositions('gate', { silent: true }).catch(() => []);
+    const gateRows = await this.sr.cexManager.getPositions(this.providerB, { silent: true }).catch(() => []);
     const raw = (gateRows || []).find(
       (p) => String(p.symbol).replace(/[-_]/g, '') === key
     );
@@ -880,10 +909,10 @@ export class CexCexTask {
       `[CexCexTask] ${symbol} 成交后未对冲: cache A=${aQty} B=${bQty}`
       + ` | 回执 A=${fill.aFilledQty} B=${fill.bFilledQty}`
       + (raw
-        ? ` | Gate REST contracts=${raw.contracts ?? '?'} baseQty=${raw.qty}`
-        : ' | Gate REST 无该合约持仓')
+        ? ` | ${this.providerB} REST contracts=${raw.contracts ?? '?'} baseQty=${raw.qty}`
+        : ` | ${this.providerB} REST 无该合约持仓`)
       + (Math.abs(aQty) > 1e-6 && Math.abs(bQty) < 1e-6
-        ? ` → 建议 Gate 开多 ${Math.abs(aQty)} 或 Binance 平空 ${Math.abs(aQty)}`
+        ? ` → 建议 ${this.providerB} 开多 ${Math.abs(aQty)} 或 ${this.providerA} 平空 ${Math.abs(aQty)}`
         : '')
     );
   }
@@ -942,12 +971,12 @@ export class CexCexTask {
       return baseQty;
     };
 
-    const buildBinanceRollback = (baseQty, filledSide) => {
+    const buildARollback = (baseQty, filledSide) => {
       if (!(baseQty > eps)) return;
       const openLong = filledSide === 'buy';
       const side = openLong ? 'sell' : 'buy';
       rollbackPlan = {
-        exchange: 'binance',
+        exchange: this.providerA,
         side,
         amount: baseQty,
         order: {
@@ -963,13 +992,13 @@ export class CexCexTask {
       };
     };
 
-    const buildGateRollback = (baseQty, filledSide) => {
+    const buildBRollback = (baseQty, filledSide) => {
       if (!(baseQty > eps)) return;
       const contracts = gateBaseToContracts(baseQty);
       if (!(contracts > eps)) return;
       const side = filledSide === 'buy' ? 'sell' : 'buy';
       rollbackPlan = {
-        exchange: 'gate',
+        exchange: this.providerB,
         side,
         amount: baseQty,
         order: {
@@ -985,10 +1014,10 @@ export class CexCexTask {
 
     if (aFilled > eps && bFilled <= eps) {
       // 严格按“刚刚成交量”回滚，不做差额推导
-      buildBinanceRollback(aFilled, fill.aSide);
+      buildARollback(aFilled, fill.aSide);
     } else if (bFilled > eps && aFilled <= eps) {
       // 严格按“刚刚成交量”回滚，不做差额推导
-      buildGateRollback(bFilled, fill.bSide);
+      buildBRollback(bFilled, fill.bSide);
     }
 
     if (!rollbackPlan) {
@@ -1012,9 +1041,9 @@ export class CexCexTask {
     }
 
     let mergedFill = null;
-    const freshTick = tick || this.sr.quoteAggregator?.buildTick(symbol);
+    const freshTick = tick || this.#buildPairTick(symbol);
     if (freshTick && this.sr.orderExecutor && rollbackOrder) {
-      const gateContracts = rollbackPlan.exchange === 'gate'
+      const gateContracts = rollbackPlan.exchange === this.providerB
         ? Number(rollbackPlan.order.amount)
         : 0;
       const rollbackFill = await this.sr.orderExecutor.assembleFillFromCloseLegs({
@@ -1022,11 +1051,11 @@ export class CexCexTask {
         direction: execDirection,
         tick: freshTick,
         order,
-        aOrder: rollbackPlan.exchange === 'binance' ? rollbackOrder : null,
-        bOrder: rollbackPlan.exchange === 'gate' ? rollbackOrder : null,
-        aSide: rollbackPlan.exchange === 'binance' ? rollbackPlan.side : fill.aSide,
-        bSide: rollbackPlan.exchange === 'gate' ? rollbackPlan.side : fill.bSide,
-        aRequestedQty: rollbackPlan.exchange === 'binance' ? rollbackPlan.amount : 0,
+        aOrder: rollbackPlan.exchange === this.providerA ? rollbackOrder : null,
+        bOrder: rollbackPlan.exchange === this.providerB ? rollbackOrder : null,
+        aSide: rollbackPlan.exchange === this.providerA ? rollbackPlan.side : fill.aSide,
+        bSide: rollbackPlan.exchange === this.providerB ? rollbackPlan.side : fill.bSide,
+        aRequestedQty: rollbackPlan.exchange === this.providerA ? rollbackPlan.amount : 0,
         bRequestedGateSize: gateContracts
       });
       mergedFill = mergeOpenAddRollbackPnl(fill, rollbackFill);
@@ -1042,8 +1071,8 @@ export class CexCexTask {
       retries: 8,
       delayMs: 500
     });
-    const aQty = this.sr.accountCache.getPosition('binance', symbol);
-    const bQty = this.sr.accountCache.getPosition('gate', symbol);
+    const aQty = this.#getPositionA(symbol);
+    const bQty = this.#getPositionB(symbol);
     console.warn(`[ADD_ROLLBACK] ${symbol} 自动回滚完成，当前仓位 A=${aQty} B=${bQty}`);
     return { attempted: true, ok: true, aQty, bQty, mergedFill };
   }
@@ -1053,8 +1082,8 @@ export class CexCexTask {
     if (restoreCooldown) {
       this.lastOrderTs.set(symbol, 0);
     }
-    const aQty = this.sr.accountCache.getPosition('binance', symbol);
-    const bQty = this.sr.accountCache.getPosition('gate', symbol);
+    const aQty = this.#getPositionA(symbol);
+    const bQty = this.#getPositionB(symbol);
     if (isFlatPosition(aQty, bQty)) {
       this.lockedDirection.delete(symbol);
       this.lockedBranch.delete(symbol);
@@ -1080,13 +1109,18 @@ export class CexCexTask {
       markLatency(latencyTrace, 'exec_async_start');
       const restBeforeOrder = this.cfg.restRefreshBeforeOrder === true;
       const freshTick = restBeforeOrder
-        ? await refreshTickFromRest(this.sr.cexManager, this.sr.quoteAggregator, symbol)
-        : this.sr.quoteAggregator.buildTick(symbol);
+        ? await refreshTickFromRest(this.sr.cexManager, this.sr.quoteAggregator, symbol, {
+          sourceA: this.providerA,
+          sourceB: this.providerB
+        })
+        : this.#buildPairTick(symbol);
       const latencyAtExec = analyzeLatencyFail(freshTick, this.latencyLimits);
       const latencyOk = !this.enforceLatency || latencyAtExec.pass;
       const symbolCost = resolveCexCostConfigForSymbol(this.cfg, symbol);
       const slipCheck = freshTick
         ? tickPriceSlippagePass(priceSnapshot, freshTick, execDirection, {
+          legASlippageBps: symbolCost.legASlippageBps ?? symbolCost.binanceSlippageBps,
+          legBSlippageBps: symbolCost.legBSlippageBps ?? symbolCost.gateSlippageBps,
           binanceSlippageBps: symbolCost.binanceSlippageBps,
           gateSlippageBps: symbolCost.gateSlippageBps
         })
@@ -1134,6 +1168,8 @@ export class CexCexTask {
           lockedDirection,
           latencyTrace,
           cexFeeBpsPerLeg: symbolCost.cexFeeBpsPerLeg,
+          legAFeeBps: symbolCost.legAFeeBps ?? symbolCost.binanceFeeBps,
+          legBFeeBps: symbolCost.legBFeeBps ?? symbolCost.gateFeeBps,
           binanceFeeBps: symbolCost.binanceFeeBps,
           gateFeeBps: symbolCost.gateFeeBps,
           maxPositionQty: this.risk.maxPositionQty(
@@ -1186,8 +1222,8 @@ export class CexCexTask {
         if (syncRes.timeout && !syncRes.hedged && !syncRes.flat) {
           console.warn(
             `[CexCexTask] ${symbol} 成交后 REST 未在时限内确认对冲，保留回执缓存 A=`
-            + `${this.sr.accountCache.getPosition('binance', symbol)} B=`
-            + `${this.sr.accountCache.getPosition('gate', symbol)}`
+            + `${this.#getPositionA(symbol)} B=`
+            + `${this.#getPositionB(symbol)}`
           );
         }
         await this.#auditPostTradeHedge(symbol, fill);
@@ -1208,8 +1244,8 @@ export class CexCexTask {
         latencyTrace
       });
 
-      const aQty = this.sr.accountCache.getPosition('binance', symbol);
-      const bQty = this.sr.accountCache.getPosition('gate', symbol);
+      const aQty = this.#getPositionA(symbol);
+      const bQty = this.#getPositionB(symbol);
       if ((action === 'open' || action === 'add') && !fill.legExposure && !fill.rollbackApplied) {
         this.lockedDirection.set(symbol, lockedDirection ?? execDirection);
         if (branch) this.lockedBranch.set(symbol, branch);
@@ -1226,7 +1262,7 @@ export class CexCexTask {
         const legLines = [];
         if (fill.aFilledQty > 0) {
           legLines.push(formatFilledLegLine(
-            'Binance',
+            this.providerA,
             fill.aSide,
             quote.aBid,
             quote.aAsk,
@@ -1237,7 +1273,7 @@ export class CexCexTask {
         }
         if (fill.bFilledQty > 0) {
           legLines.push(formatFilledLegLine(
-            'Gate',
+            this.providerB,
             fill.bSide,
             quote.bBid,
             quote.bAsk,
@@ -1273,24 +1309,24 @@ export class CexCexTask {
         if (fill.aLeg?.filled) {
           const feeTag = fill.aLeg.pnlComplete === false ? 'fee待确认' : `fee ${Number(fill.aLeg.fee || 0).toFixed(4)}`;
           console.log(
-            `  Binance USDT ${fill.aLeg.usdtChange >= 0 ? '+' : ''}${fill.aLeg.usdtChange.toFixed(4)}`
+            `  ${this.providerA} USDT ${fill.aLeg.usdtChange >= 0 ? '+' : ''}${fill.aLeg.usdtChange.toFixed(4)}`
             + ` (${feeTag} · quote ${Number(fill.aLeg.quoteVolume || 0).toFixed(4)})`
           );
         }
         if (fill.bLeg?.filled) {
           const feeTag = fill.bLeg.pnlComplete === false ? 'fee待确认' : `fee ${Number(fill.bLeg.fee || 0).toFixed(4)}`;
           console.log(
-            `  Gate USDT ${fill.bLeg.usdtChange >= 0 ? '+' : ''}${fill.bLeg.usdtChange.toFixed(4)}`
+            `  ${this.providerB} USDT ${fill.bLeg.usdtChange >= 0 ? '+' : ''}${fill.bLeg.usdtChange.toFixed(4)}`
             + ` (${feeTag} · quote ${Number(fill.bLeg.quoteVolume || 0).toFixed(4)})`
           );
         }
         if (fill.legExposure) {
           const why = fill.rollbackApplied
             ? '已回滚'
-            : fill.failedLeg === 'binance'
-              ? `Binance未成交: ${fill.failReason || '成交量为0'}`
-              : fill.failedLeg === 'gate'
-                ? `Gate未成交: ${fill.failReason || '成交量为0'}`
+            : fill.failedLeg === this.providerA
+              ? `${this.providerA}未成交: ${fill.failReason || '成交量为0'}`
+              : fill.failedLeg === this.providerB
+                ? `${this.providerB}未成交: ${fill.failReason || '成交量为0'}`
                 : `A=${fill.aFilledQty} B=${fill.bFilledQty}`;
           console.warn(`[实盘·单腿风险] ${symbol} ${why}`);
         } else if (fill.rollbackApplied) {
@@ -1322,8 +1358,8 @@ export class CexCexTask {
   async refreshFunding(symbol) {
     try {
       const [fa, fb] = await Promise.all([
-        this.sr.cexManager.getFundingRate('binance', symbol),
-        this.sr.cexManager.getFundingRate('gate', symbol)
+        this.sr.cexManager.getFundingRate(this.providerA, symbol),
+        this.sr.cexManager.getFundingRate(this.providerB, symbol)
       ]);
       this.sr.quoteAggregator.setFunding(symbol, fa, fb);
     } catch {
@@ -1343,8 +1379,8 @@ export class CexCexTask {
 
     await this.sr.accountCache.reconcileSymbolPositions(this.sr.cexManager, sym);
     await this.#refreshForceCloseCache(sym).catch(() => {});
-    const aQty = this.sr.accountCache.getPosition('binance', sym);
-    const bQty = this.sr.accountCache.getPosition('gate', sym);
+    const aQty = this.#getPositionA(sym);
+    const bQty = this.#getPositionB(sym);
     const inferred = inferDirectionFromPosition(aQty, bQty);
 
     if (isFlatPosition(aQty, bQty)) {

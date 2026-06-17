@@ -155,9 +155,13 @@ export class DashboardBridge {
     snap.vsBaselineUsdt = snap.totalUsdt - baseline;
     snap.realizedPnlUsdt = this.state.summary?.totalPnl ?? 0;
     const baselineNote = this.state.accountBaseline?.auto === false ? '较基准' : '较启动';
+    const exA = snap.exchangeA || 'binance';
+    const exB = snap.exchangeB || 'gate';
+    const usdtA = Number(snap?.[exA]?.usdt ?? snap?.[exA]?.equity ?? 0);
+    const usdtB = Number(snap?.[exB]?.usdt ?? snap?.[exB]?.equity ?? 0);
     this.#pushLog({
       level: 'info',
-      message: `[ACCOUNT] 总 U ${snap.totalUsdt.toFixed(2)} (Binance ${snap.binance.usdt.toFixed(2)} + Gate ${snap.gate.usdt.toFixed(2)}) · ${baselineNote} ${snap.vsBaselineUsdt >= 0 ? '+' : ''}${snap.vsBaselineUsdt.toFixed(2)}`
+      message: `[ACCOUNT] 总 U ${snap.totalUsdt.toFixed(2)} (${exA} ${usdtA.toFixed(2)} + ${exB} ${usdtB.toFixed(2)}) · ${baselineNote} ${snap.vsBaselineUsdt >= 0 ? '+' : ''}${snap.vsBaselineUsdt.toFixed(2)}`
     });
     this.#flushAccountUpdate();
     this.#flushLogsUpdate();
@@ -187,11 +191,14 @@ export class DashboardBridge {
       throw new Error('config reloader not ready');
     }
     const result = this.configReloader();
-    const bn = result?.strategy?.binanceSlippageBps;
-    const gt = result?.strategy?.gateSlippageBps;
+    const legASlippage = result?.strategy?.legASlippageBps ?? result?.strategy?.binanceSlippageBps;
+    const legBSlippage = result?.strategy?.legBSlippageBps ?? result?.strategy?.gateSlippageBps;
+    const legAFee = result?.strategy?.legAFeeBps ?? result?.strategy?.binanceFeeBps;
+    const legBFee = result?.strategy?.legBFeeBps ?? result?.strategy?.gateFeeBps;
     this.#pushLog({
       level: 'info',
-      message: `[CONFIG] 已重载 slippage bn=${bn ?? '-'} gt=${gt ?? '-'}`
+      message: `[CONFIG] 已重载 slippage A=${legASlippage ?? '-'} B=${legBSlippage ?? '-'}`
+        + ` · fee A=${legAFee ?? '-'} B=${legBFee ?? '-'}`
     });
     this.#flushLogsUpdate();
     return result;
