@@ -61,6 +61,6 @@
   },
   "adapters": {
     "A": { "provider": "binance" },
-    "B": { "provider": "gate" }
+    "B": { "provider": "aster" }
   }
 }

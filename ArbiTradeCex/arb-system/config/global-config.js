@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { config as dotenvConfig } from 'dotenv';
+import { resolveAdapterPair } from '../cex/adapter-pair.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const rootDir = path.resolve(__dirname, '..');
@@ -34,9 +35,32 @@ export function loadMinOrderQtyJson(config = null) {
   return JSON.parse(fs.readFileSync(minQtyPath, 'utf8'));
 }
 
+function validateMinQtyPair(config, minQty) {
+  const configuredPair = resolveAdapterPair(config);
+  const minQtyPair = minQty?.pair || null;
+  if (!minQtyPair?.providerA || !minQtyPair?.providerB) {
+    return;
+  }
+  const minQtyProviderA = String(minQtyPair.providerA).trim().toLowerCase();
+  const minQtyProviderB = String(minQtyPair.providerB).trim().toLowerCase();
+  if (
+    configuredPair.providerA === minQtyProviderA
+    && configuredPair.providerB === minQtyProviderB
+  ) {
+    return;
+  }
+  const minQtyPath = resolveMinQtyJsonPath(config);
+  throw new Error(
+    `[global-config] adapters pair ${configuredPair.providerA}/${configuredPair.providerB} `
+    + `does not match min-order-qty pair ${minQtyProviderA}/${minQtyProviderB} (${minQtyPath}). `
+    + `Please rebuild min-order-qty for current pair.`
+  );
+}
+
 /** 可交易币种：以 min-order-qty.json 的 selectedSymbols 为准，且必须有精度条目 */
 export function resolveStrategySymbols(config) {
   const minQty = loadMinOrderQtyJson(config);
+  validateMinQtyPair(config, minQty);
   const precisionSet = new Set(
     minQty?.symbols && typeof minQty.symbols === 'object'
       ? Object.keys(minQty.symbols).map((s) => s.toUpperCase())

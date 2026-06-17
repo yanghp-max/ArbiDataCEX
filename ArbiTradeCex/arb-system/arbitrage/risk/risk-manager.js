@@ -39,7 +39,8 @@ export class PrecisionChecker {
     const missing = [];
     for (const sym of symbols) {
       if (lotSet.has(String(sym).toUpperCase())) continue;
-      const b = this.minQtyBySymbol[sym]?.binance;
+      const cfg = this.minQtyBySymbol[sym];
+      const b = this.#resolveLegConfig(cfg)?.binance;
       if (!b) {
         missing.push(`${sym}(no entry)`);
         continue;
@@ -200,9 +201,17 @@ export class PrecisionChecker {
   }
 
   #resolveLegConfig(cfg) {
-    if (cfg?.binance && cfg?.gate) return cfg;
-    const a = cfg?.legs?.A?.limits || cfg?.providers?.binance || null;
-    const b = cfg?.legs?.B?.limits || cfg?.providers?.gate || null;
+    if (!cfg) return cfg;
+    const a = cfg?.legs?.A?.limits
+      || cfg?.providers?.[cfg?.legs?.A?.provider]
+      || cfg?.providers?.binance
+      || cfg?.binance
+      || null;
+    const b = cfg?.legs?.B?.limits
+      || cfg?.providers?.[cfg?.legs?.B?.provider]
+      || cfg?.providers?.gate
+      || cfg?.gate
+      || null;
     if (!a || !b) return cfg;
     return {
       ...cfg,

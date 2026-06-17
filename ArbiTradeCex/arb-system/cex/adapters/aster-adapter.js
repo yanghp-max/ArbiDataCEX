@@ -67,7 +67,7 @@ export class AsterAdapter extends BaseAdapter {
     if (this.enablePublicStream) {
       await this.connectWebSocket();
     }
-    if (process.env.ASTER_SIGNER && process.env.ASTER_PRIVATE_KEY) {
+    if (process.env.ASTER_USER && process.env.ASTER_SIGNER && process.env.ASTER_PRIVATE_KEY) {
       this.authenticated = true;
     }
     await super.connect();
@@ -157,7 +157,7 @@ export class AsterAdapter extends BaseAdapter {
     for (const symbol of symbols) {
       const normalized = this.normalizeSymbol(symbol);
       await super.subscribe(normalized, channels);
-      // 首条 WS 迟迟不来时，也要能被 watchdog 识别为 stale 并触发 REST 补价。
+      // 首条 WS 迟迟不来时，watchdog 也能识别 stale 并触发 REST 补价。
       if (!this._lastSymbolMessageAt.has(normalized)) {
         this._lastSymbolMessageAt.set(normalized, subscribedAt);
       }
@@ -296,6 +296,19 @@ export class AsterAdapter extends BaseAdapter {
     return Number(data.lastFundingRate);
   }
 
+  async setSymbolLeverage(symbol, leverage = 1) {
+    const lev = Math.max(1, Math.min(125, Math.floor(Number(leverage) || 1)));
+    const response = await this.#signedRequest('POST', '/fapi/v3/leverage', {
+      symbol: this.toExchangeSymbol(symbol),
+      leverage: String(lev)
+    });
+    return {
+      symbol: this.toCompactSymbol(symbol),
+      leverage: Number(response?.leverage ?? lev),
+      maxNotionalValue: response?.maxNotionalValue != null ? Number(response.maxNotionalValue) : null
+    };
+  }
+
   #nextNonceMicros() {
     const now = BigInt(Date.now()) * 1000n;
     if (now <= this._lastNonce) {
@@ -307,23 +320,21 @@ export class AsterAdapter extends BaseAdapter {
   }
 
   async #buildV3SignedPayload(params = {}) {
+    const user = String(process.env.ASTER_USER || '').trim();
     const signer = String(process.env.ASTER_SIGNER || '').trim();
     const privateKey = String(process.env.ASTER_PRIVATE_KEY || '').trim();
-    const user = String(process.env.ASTER_USER || '').trim();
-    if (!signer || !privateKey) {
-      throw new Error('Aster v3 auth missing: ASTER_SIGNER / ASTER_PRIVATE_KEY');
+    if (!user || !signer || !privateKey) {
+      throw new Error('Aster v3 auth missing: ASTER_USER / ASTER_SIGNER / ASTER_PRIVATE_KEY');
     }
 
     const normalizedPrivateKey = privateKey.startsWith('0x') ? privateKey : `0x${privateKey}`;
     const wallet = new Wallet(normalizedPrivateKey);
     const payload = {
       ...params,
+      user,
       signer,
       nonce: this.#nextNonceMicros()
     };
-    if (user) {
-      payload.user = user;
-    }
     const encoded = new URLSearchParams(
       Object.entries(payload).reduce((acc, [k, v]) => {
         if (v == null) return acc;

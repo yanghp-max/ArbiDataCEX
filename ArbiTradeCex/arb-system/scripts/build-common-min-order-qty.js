@@ -1,19 +1,22 @@
 /**
- * 生成 min-order-qty（A/B 两腿）：
- * - 兼容老结构：输出键仍为 binance / gate（分别对应 A / B）
- * - 支持 B=gate 或 B=aster（A 默认 binance）
+ * Build min-order-qty snapshot for pair A/B.
  *
- * 说明：
- * - config/min-order-qty.json 是配置文件，不是可执行脚本。
- * - 你需要执行的是本脚本，生成/更新该 JSON，然后策略启动时读取它。
+ * Output schema:
+ * - symbols.<SYMBOL>.legs.A/B
+ * - symbols.<SYMBOL>.providers.<provider>
+ * - no legacy binance/gate compatibility keys
  *
- * 常用命令：
- * - node scripts/build-common-min-order-qty.js
- * - npm run build:symbols-min-qty
- * - npm run build:symbols-min-qty:binance-aster
- *
- * 策略读取位置（config.json）：
- * - strategy.minQtyJson: "config/min-order-qty.json"
+ * Usage:
+ * - Default pair from config.json:
+ *   node scripts/build-common-min-order-qty.js
+ * - Specify pair:
+ *   node scripts/build-common-min-order-qty.js --provider-a binance --provider-b aster
+ * - Top N by liquidity:
+ *   node scripts/build-common-min-order-qty.js --top 50
+ * - All common symbols:
+ *   node scripts/build-common-min-order-qty.js --top all
+ * - Custom output path:
+ *   node scripts/build-common-min-order-qty.js --output-min-qty config/min-order-qty.json
  */
 import fs from 'node:fs/promises';
 import path from 'node:path';
@@ -75,7 +78,12 @@ function parseArgs(argv) {
   for (let i = 2; i < argv.length; i += 1) {
     const token = argv[i];
     if (token === '--top' && argv[i + 1] != null) {
-      args.top = Number(argv[i + 1]);
+      const raw = String(argv[i + 1]).trim().toLowerCase();
+      if (raw === 'all') {
+        args.top = 0;
+      } else {
+        args.top = Number(argv[i + 1]);
+      }
       i += 1;
       continue;
     }
@@ -235,6 +243,21 @@ function buildCommonRows(setA, setB, qvA, qvB, providerB) {
   return rows;
 }
 
+function withLiquidityShares(rows) {
+  const total = rows.reduce((acc, row) => acc + Number(row.liquidity_score || 0), 0);
+  let cumulative = 0;
+  return rows.map((row) => {
+    const score = Number(row.liquidity_score || 0);
+    const share = total > 0 ? score / total : 0;
+    cumulative += share;
+    return {
+      ...row,
+      liquidity_share: share,
+      cumulative_liquidity_share: cumulative
+    };
+  });
+}
+
 function refPriceFromTicker(ticker) {
   return ticker?.bid ?? ticker?.mid ?? ticker?.ask ?? ticker?.last ?? null;
 }
@@ -285,9 +308,9 @@ async function buildMinQtyEntry({
   );
   const limitsA = resolveBinanceOrderLimits(resolvedAInfo, { refPrice: refA });
 
-  let limitsBCompat;
+  let limitsB;
   if (providerB === 'gate') {
-    limitsBCompat = resolveGateOrderLimits(infoB, {
+    limitsB = resolveGateOrderLimits(infoB, {
       binanceMinQty: limitsA.minQty,
       binanceStepSize: limitsA.stepSize,
       gateSymbol: bSymbol
@@ -301,11 +324,11 @@ async function buildMinQtyEntry({
       infoB,
       refB
     );
-    const limitsB = resolveBinanceOrderLimits(resolvedBInfo, { refPrice: refB });
-    limitsBCompat = toBinanceLikeGateEntry(bSymbol, limitsB, tickerB, priceCollectedAt);
+    const resolvedBLimits = resolveBinanceOrderLimits(resolvedBInfo, { refPrice: refB });
+    limitsB = toBinanceLikeGateEntry(bSymbol, resolvedBLimits, tickerB, priceCollectedAt);
   }
 
-  const legacyA = {
+  const limitsAEntry = {
     symbol: symbolId,
     lotMinQty: limitsA.lotMinQty,
     minNotional: limitsA.minNotional,
@@ -319,19 +342,19 @@ async function buildMinQtyEntry({
       mid: tickerA?.mid ?? null
     }
   };
-  const legacyB = providerB === 'gate'
+  const limitsBEntry = providerB === 'gate'
     ? {
       symbol: bSymbol,
-      minQty: limitsBCompat.minQty,
-      stepSize: limitsBCompat.stepSize,
-      quantityUnit: limitsBCompat.quantityUnit,
-      enableDecimal: limitsBCompat.enableDecimal,
-      quantoMultiplier: limitsBCompat.quantoMultiplier,
-      minBaseQty: limitsBCompat.minBaseQty,
-      gateOrderSizeMin: limitsBCompat.gateOrderSizeMin,
-      gateOrderSizeRound: limitsBCompat.gateOrderSizeRound,
-      hedgeMinBaseQty: limitsBCompat.hedgeMinBaseQty ?? null,
-      hedgeMinQtyByBinanceStep: limitsBCompat.hedgeMinQtyByBinanceStep ?? null,
+      minQty: limitsB.minQty,
+      stepSize: limitsB.stepSize,
+      quantityUnit: limitsB.quantityUnit,
+      enableDecimal: limitsB.enableDecimal,
+      quantoMultiplier: limitsB.quantoMultiplier,
+      minBaseQty: limitsB.minBaseQty,
+      gateOrderSizeMin: limitsB.gateOrderSizeMin,
+      gateOrderSizeRound: limitsB.gateOrderSizeRound,
+      hedgeMinBaseQty: limitsB.hedgeMinBaseQty ?? null,
+      hedgeMinQtyByBinanceStep: limitsB.hedgeMinQtyByBinanceStep ?? null,
       priceRef: {
         collectedAt: priceCollectedAt,
         bid: tickerB?.bid ?? null,
@@ -340,26 +363,22 @@ async function buildMinQtyEntry({
         last: tickerB?.last ?? null
       }
     }
-    : limitsBCompat;
+    : limitsB;
 
   return {
-    // 兼容老代码：A 腿放 binance，B 腿放 gate
-    binance: legacyA,
-    gate: legacyB,
-    // 通用结构：新代码优先读取 legs/providers
     legs: {
       A: {
         provider: providerA,
-        limits: legacyA
+        limits: limitsAEntry
       },
       B: {
         provider: providerB,
-        limits: legacyB
+        limits: limitsBEntry
       }
     },
     providers: {
-      [providerA]: legacyA,
-      [providerB]: legacyB
+      [providerA]: limitsAEntry,
+      [providerB]: limitsBEntry
     }
   };
 }
@@ -436,7 +455,7 @@ async function main() {
     tickerMapB = buildBookTickerMapBinanceLike(bundleB.bookTickers);
   }
 
-  const allRows = buildCommonRows(setA, setB, qvA, qvB, args.providerB);
+  const allRows = withLiquidityShares(buildCommonRows(setA, setB, qvA, qvB, args.providerB));
   const topN = args.top == null ? allRows.length : args.top;
   const selectedRows = topN === 0 ? allRows : allRows.slice(0, topN);
   const priceCollectedAt = new Date().toISOString();
@@ -477,6 +496,8 @@ async function main() {
   }
 
   const selectedSymbolIds = selectedRows.map((r) => r.symbol_id).filter((s) => minQtySymbols[s]);
+  const totalLiquidityScore = allRows.reduce((acc, row) => acc + Number(row.liquidity_score || 0), 0);
+  const selectedLiquidityScore = selectedRows.reduce((acc, row) => acc + Number(row.liquidity_score || 0), 0);
   const payload = {
     schemaVersion: 2,
     generatedAt: new Date().toISOString(),
@@ -484,6 +505,22 @@ async function main() {
     totalCommonSymbols: allRows.length,
     selectedSymbolsCount: selectedSymbolIds.length,
     selectedSymbols: selectedSymbolIds,
+    selection: {
+      mode: topN === 0 || topN >= allRows.length ? 'all' : 'top',
+      top: topN,
+      totalLiquidityScore,
+      selectedLiquidityScore,
+      selectedLiquidityShare: totalLiquidityScore > 0 ? selectedLiquidityScore / totalLiquidityScore : 0
+    },
+    liquidityRanking: selectedRows.map((row) => ({
+      symbol: row.symbol_id,
+      rank: row.rank,
+      score: row.liquidity_score,
+      share: row.liquidity_share,
+      cumulativeShare: row.cumulative_liquidity_share,
+      providerAQuoteVolume24h: row.a_quote_volume_24h,
+      providerBQuoteVolume24h: row.b_quote_volume_24h
+    })),
     pair: {
       providerA: args.providerA,
       providerB: args.providerB
@@ -515,6 +552,11 @@ async function main() {
   console.log(`pair: ${args.providerA}/${args.providerB}`);
   console.log(`common symbols: ${allRows.length}`);
   console.log(`selected: ${selectedSymbolIds.length}${topN < allRows.length ? ` (top ${topN})` : ''}`);
+  console.log(
+    `selected liquidity share: ${
+      totalLiquidityScore > 0 ? `${((selectedLiquidityScore / totalLiquidityScore) * 100).toFixed(2)}%` : '0.00%'
+    }`
+  );
   if (selectedSymbolIds.length > 0) {
     console.log(`top 5: ${selectedSymbolIds.slice(0, 5).join(', ')}`);
   }

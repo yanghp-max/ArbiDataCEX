@@ -116,6 +116,14 @@ function alignDecimalGateHedge({ baseQty, binanceCfg, gateCfg, round }) {
   return { qty, gateSize };
 }
 
+function isGateContractConfig(gateCfg) {
+  if (!gateCfg) return false;
+  if (gateCfg.quantityUnit === 'contract') return true;
+  const sizeMin = Number(gateCfg.gateOrderSizeMin);
+  const sizeRound = Number(gateCfg.gateOrderSizeRound);
+  return (Number.isFinite(sizeMin) && sizeMin > 0) || (Number.isFinite(sizeRound) && sizeRound > 0);
+}
+
 /**
  * 币安有效最小名义 U：config.orderUsd 与 JSON 里该币 API minNotional 取大。
  */
@@ -151,7 +159,7 @@ export function alignHedgeBaseQty({ baseQty, binanceCfg, gateCfg, round = 'ceil'
   }
 
   const multiplier = Number(gateCfg?.quantoMultiplier || 0);
-  if (gateCfg?.enableDecimal && multiplier > 0) {
+  if (gateCfg?.enableDecimal && multiplier > 0 && isGateContractConfig(gateCfg)) {
     return alignDecimalGateHedge({ baseQty, binanceCfg, gateCfg, round });
   }
 
