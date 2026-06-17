@@ -44,6 +44,11 @@ function readFilled(order, requestedQty) {
   return 0;
 }
 
+function isTransientOrderLookupError(err) {
+  const msg = String(err?.message || '');
+  return /-2013|order does not exist/i.test(msg);
+}
+
 /** Gate 合约张数 → Binance 基础数量 */
 export function gateFillToBaseQty(filledContracts, order) {
   const filled = Number(filledContracts);
@@ -556,7 +561,20 @@ export class OrderExecutor {
     for (let i = 0; i < POLL_ATTEMPTS; i += 1) {
       polled = true;
       await sleep(POLL_INTERVAL_MS);
-      current = await this.cexManager.getOrderStatus(exchange, current.orderId, symbol);
+      try {
+        current = await this.cexManager.getOrderStatus(exchange, current.orderId, symbol);
+      } catch (err) {
+        const transient = isTransientOrderLookupError(err);
+        const lastAttempt = i >= POLL_ATTEMPTS - 1;
+        if (!transient || lastAttempt) {
+          throw err;
+        }
+        console.warn(
+          `[OrderExecutor] ${exchange} getOrderStatus transient miss order=${current?.orderId} `
+          + `(attempt ${i + 1}/${POLL_ATTEMPTS}): ${err.message}`
+        );
+        continue;
+      }
       if (!needsPoll()) break;
     }
     return { order: current, pollMs: polled ? Date.now() - pollStart : 0 };
