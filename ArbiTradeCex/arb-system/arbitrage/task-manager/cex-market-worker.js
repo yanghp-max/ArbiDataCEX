@@ -54,20 +54,26 @@ class CexMarketWorkerRuntime {
   async _initializeInternal(config = {}) {
     const binanceCfg = config.binance || {};
     const gateCfg = config.gate || {};
+    const enableGate = config.enableGate !== false && gateCfg != null;
 
     this.binance = new BinanceAdapter({
       ...binanceCfg,
       enablePublicStream: true
     });
-    this.gate = new GateAdapter({
-      ...gateCfg,
-      enablePublicStream: true
-    });
+    this.gate = enableGate
+      ? new GateAdapter({
+        ...gateCfg,
+        enablePublicStream: true
+      })
+      : null;
 
     this.binance.on(EventTypes.TICKER, (ticker) => this._onTicker('binance', ticker));
-    this.gate.on(EventTypes.TICKER, (ticker) => this._onTicker('gate', ticker));
+    if (this.gate) {
+      this.gate.on(EventTypes.TICKER, (ticker) => this._onTicker('gate', ticker));
+    }
 
     for (const [source, adapter] of [['binance', this.binance], ['gate', this.gate]]) {
+      if (!adapter) continue;
       adapter.on('PUBLIC_WS_RECONNECTED', (payload) => {
         this._send({
           type: MSG_WS_RECONNECTED,
@@ -86,14 +92,18 @@ class CexMarketWorkerRuntime {
       });
     }
 
-    await Promise.all([this.binance.connect(), this.gate.connect()]);
+    await Promise.all([
+      this.binance.connect(),
+      this.gate ? this.gate.connect() : Promise.resolve()
+    ]);
     this.ready = true;
     this._startDiagTimer();
     this._send({
       type: MSG_READY,
       payload: {
         binanceConnected: this.binance.publicConnected === true,
-        gateConnected: this.gate.publicConnected === true
+        gateConnected: this.gate?.publicConnected === true,
+        gateEnabled: enableGate
       }
     });
   }
@@ -104,10 +114,10 @@ class CexMarketWorkerRuntime {
     const newSymbols = list.filter((s) => !this.subscribedSymbols.has(s));
     if (newSymbols.length === 0) return;
 
-    await Promise.all([
-      this.binance.subscribe(newSymbols, ['bookTicker']),
-      this.gate.subscribe(newSymbols, ['book_ticker'])
-    ]);
+    await this.binance.subscribe(newSymbols, ['bookTicker']);
+    if (this.gate) {
+      await this.gate.subscribe(newSymbols, ['book_ticker']);
+    }
     for (const symbol of newSymbols) {
       this.subscribedSymbols.add(symbol);
     }
@@ -119,7 +129,9 @@ class CexMarketWorkerRuntime {
       const normalized = this.binance.normalizeSymbol(symbol);
       try {
         await this.binance.unsubscribe(normalized, ['bookTicker']);
-        await this.gate.unsubscribe(normalized, ['book_ticker']);
+        if (this.gate) {
+          await this.gate.unsubscribe(normalized, ['book_ticker']);
+        }
       } finally {
         this.subscribedSymbols.delete(normalized);
         this.latestTickerByKey.delete(flushKey('binance', normalized));
@@ -134,7 +146,7 @@ class CexMarketWorkerRuntime {
     if (provider === 'binance' || provider === 'all') {
       await this.binance?.reconnectWebSocket();
     }
-    if (provider === 'gate' || provider === 'all') {
+    if (this.gate && (provider === 'gate' || provider === 'all')) {
       await this.gate?.reconnectWebSocket();
     }
   }

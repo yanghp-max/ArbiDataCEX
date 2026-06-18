@@ -103,6 +103,21 @@ export function calcCexLegUsdtChange({
   };
 }
 
+export function resolveTradeAggregationFormat({ quantityUnit, tradeFormat, exchange } = {}) {
+  if (tradeFormat === 'gate-contract' || quantityUnit === 'contract') return 'gate-contract';
+  if (tradeFormat === 'binance-like' || quantityUnit === 'base') return 'binance-like';
+  if (String(exchange || '').toLowerCase() === 'gate') return 'gate-contract';
+  return 'binance-like';
+}
+
+export function aggregateLegTrades(trades = [], options = {}) {
+  const format = resolveTradeAggregationFormat(options);
+  if (format === 'gate-contract') {
+    return aggregateGateTrades(trades, options.quantoMultiplier ?? 1);
+  }
+  return aggregateBinanceTrades(trades);
+}
+
 export function buildLegPnl({
   exchange,
   side,
@@ -110,6 +125,8 @@ export function buildLegPnl({
   order,
   trades = null,
   quantoMultiplier = 1,
+  quantityUnit = null,
+  tradeFormat = null,
   feeBpsFallback = DEFAULT_CEX_FEE_BPS_PER_LEG,
   requireRealFee = false
 }) {
@@ -118,9 +135,12 @@ export function buildLegPnl({
   let feeFromTrades = false;
 
   if (Array.isArray(trades) && trades.length > 0) {
-    const agg = exchange === 'gate'
-      ? aggregateGateTrades(trades, quantoMultiplier)
-      : aggregateBinanceTrades(trades);
+    const agg = aggregateLegTrades(trades, {
+      quantityUnit,
+      tradeFormat,
+      exchange,
+      quantoMultiplier
+    });
     if (agg.quoteVolume > 0) quote = agg.quoteVolume;
     fee = agg.fee;
     feeFromTrades = true;

@@ -12,6 +12,7 @@ import {
   checkOrderPreconditionsFromCache,
   formatPreconditionFail
 } from '../../cex/utils/check-order-preconditions.js';
+import { resolveBLegOrderContextFromOrder } from '../../cex/utils/leg-order-context.js';
 
 function quoteSnapshot(direction, tick, spreadOptions = {}) {
   const nominal = legPricesForDirection(direction, tick);
@@ -97,6 +98,7 @@ export class OrderExecutor {
     const binanceSide = aSide;
     const gateSide = bSide;
     const binanceStepSize = order.cfg?.binance?.stepSize;
+    const bLegPnlOpts = this.#bLegPnlOptions(order);
 
     if (!this.tradingEnabled) {
       const aFeeBps = legAFeeBps ?? binanceFeeBps ?? cexFeeBpsPerLeg;
@@ -113,7 +115,8 @@ export class OrderExecutor {
         side: bSide,
         filledQty: qty,
         order: { avgPrice: quote.bPriceNominal, cumQuote: qty * quote.bPriceNominal },
-        feeBpsFallback: bFeeBps
+        feeBpsFallback: bFeeBps,
+        ...bLegPnlOpts
       });
       return {
         simulated: true,
@@ -282,8 +285,8 @@ export class OrderExecutor {
         filledQty: bFilledBase,
         order: bOrder,
         trades: bOrder?.trades,
-        quantoMultiplier: order.gateQuantoMultiplier,
-        requireRealFee: true
+        requireRealFee: true,
+        ...bLegPnlOpts
       })
       : { exchange: this.providerB, side: bSide, filledQty: 0, usdtChange: 0, quoteVolume: 0, fee: 0, filled: false, pnlComplete: false };
 
@@ -338,6 +341,7 @@ export class OrderExecutor {
   }) {
     const { qty, gateSize, gateDecimalSize } = order ?? {};
     const quote = quoteSnapshot(direction, tick);
+    const bLegPnlOpts = this.#bLegPnlOptions(order);
 
     if (aOrder && aRequestedQty > 0) {
       const polled = await this.#ensureOrderFill(this.providerA, aOrder, tick.symbol, aRequestedQty);
@@ -416,8 +420,8 @@ export class OrderExecutor {
         filledQty: bFilledBase,
         order: bOrder,
         trades: bOrder?.trades,
-        quantoMultiplier: order?.gateQuantoMultiplier,
-        requireRealFee: true
+        requireRealFee: true,
+        ...bLegPnlOpts
       })
       : {
         exchange: this.providerB,
@@ -455,6 +459,15 @@ export class OrderExecutor {
     };
   }
 
+  #bLegPnlOptions(order) {
+    const ctx = resolveBLegOrderContextFromOrder(order);
+    return {
+      quantityUnit: ctx.quantityUnit,
+      tradeFormat: ctx.tradeFormat,
+      quantoMultiplier: ctx.quantoMultiplier
+    };
+  }
+
   #assertOrderPreconditionsFromCache({
     tick,
     quote,
@@ -469,6 +482,7 @@ export class OrderExecutor {
       throw new Error('[OrderExecutor] accountCache 未注入，无法缓存预检');
     }
 
+    const bCtx = resolveBLegOrderContextFromOrder(order);
     const gateSize = Number(order?.gateSize ?? qty);
     const cacheOpts = {
       reservationManager: this.reservationManager,
@@ -483,6 +497,7 @@ export class OrderExecutor {
       maxPosition: maxPositionQty,
       estimatedPrice: quote.aPriceNominal,
       reduceOnly,
+      legRole: 'A',
       ...cacheOpts
     });
     const gateCheck = checkOrderPreconditionsFromCache(this.accountCache, {
@@ -493,7 +508,9 @@ export class OrderExecutor {
       gateAmount: gateSize,
       maxPosition: maxPositionQty,
       estimatedPrice: quote.bPriceNominal,
-      quantoMultiplier: Number(order?.gateQuantoMultiplier) || null,
+      quantoMultiplier: bCtx.quantoMultiplier,
+      quantityUnit: bCtx.quantityUnit,
+      legRole: 'B',
       reduceOnly,
       ...cacheOpts
     });

@@ -37,6 +37,14 @@ export class AsterAdapter extends BaseAdapter {
     this._balanceCache = null;
     this._positionCache = new Map();
     this._lastNonce = 0n;
+    this.listenKey = null;
+    this.privateWs = null;
+    this.privateWsConnected = false;
+    this.listenKeyKeepaliveMin = Number(config.listenKeyKeepaliveMin) || 30;
+    this._listenKeyTimer = null;
+    this._privateWsReconnecting = false;
+    this._privateWsReconnectAt = 0;
+    this._privateWsGen = 0;
   }
 
   toCompactSymbol(symbol) {
@@ -75,6 +83,7 @@ export class AsterAdapter extends BaseAdapter {
 
   async disconnect() {
     this._shuttingDown = true;
+    await this.stopPrivateAccountStream();
     this.#stopFeedWatchdog();
     if (this.ws) {
       this.ws.removeAllListeners();
@@ -200,8 +209,8 @@ export class AsterAdapter extends BaseAdapter {
     }
   }
 
-  #emitBookTicker(ticker, { viaRest = false, restReason = null } = {}) {
-    const localTs = Date.now();
+  #emitBookTicker(ticker, { viaRest = false, restReason = null, receiveLocalTs = null } = {}) {
+    const localTs = receiveLocalTs ?? Date.now();
     const sym = this.normalizeSymbol(ticker.symbol);
     this._lastSymbolMessageAt.set(sym, localTs);
     this.emit(EventTypes.TICKER, {
@@ -282,7 +291,7 @@ export class AsterAdapter extends BaseAdapter {
         serverTimestamp: rawEventTs,
         wsDelayMs
       };
-      this.#emitBookTicker(ticker);
+      this.#emitBookTicker(ticker, { receiveLocalTs: localTs });
     } catch {
       // ignore
     }
@@ -398,6 +407,7 @@ export class AsterAdapter extends BaseAdapter {
 
   async checkOrderPreconditions(params) {
     return runCheckOrderPreconditions(this, {
+      legRole: 'B',
       ...params,
       futuresMode: true
     });
@@ -650,6 +660,208 @@ export class AsterAdapter extends BaseAdapter {
       throw new Error('Order amount must be greater than 0');
     }
     return true;
+  }
+
+  async #createListenKey() {
+    const data = await this.#signedRequest('POST', '/fapi/v3/listenKey', {});
+    const key = data?.listenKey;
+    if (!key) throw new Error('Aster listenKey missing in response');
+    return key;
+  }
+
+  async #keepaliveListenKey() {
+    if (!this.listenKey || !this.privateWsConnected || this._privateWsReconnecting) return;
+    await this.#signedRequest('PUT', '/fapi/v3/listenKey', {});
+  }
+
+  async #deleteListenKeySafely({ expectMissing = false } = {}) {
+    if (!this.listenKey) return;
+    const key = this.listenKey;
+    this.listenKey = null;
+    try {
+      await this.#signedRequest('DELETE', '/fapi/v3/listenKey', {});
+    } catch (err) {
+      if (!expectMissing) {
+        console.warn('[Aster] delete listenKey failed:', err.message);
+      }
+    }
+  }
+
+  #stopPrivateWsTimers() {
+    if (this._listenKeyTimer) {
+      clearInterval(this._listenKeyTimer);
+      this._listenKeyTimer = null;
+    }
+  }
+
+  #startListenKeyTimer() {
+    this.#stopPrivateWsTimers();
+    const ms = Math.max(1, this.listenKeyKeepaliveMin) * 60 * 1000;
+    this.#keepaliveListenKey().catch((err) => {
+      console.warn('[Aster] listenKey keepalive failed (immediate):', err.message);
+    });
+    this._listenKeyTimer = setInterval(() => {
+      this.#keepaliveListenKey().catch((err) => {
+        console.warn('[Aster] listenKey keepalive failed:', err.message);
+      });
+    }, ms);
+    if (typeof this._listenKeyTimer.unref === 'function') {
+      this._listenKeyTimer.unref();
+    }
+  }
+
+  #scheduleBalanceRestSync() {
+    this.getBalance({ silent: true }).catch((err) => {
+      console.warn('[Aster] balance REST sync after ACCOUNT_UPDATE failed:', err.message);
+    });
+  }
+
+  #handlePrivateMessage(raw) {
+    try {
+      const msg = JSON.parse(raw.toString());
+      if (msg.e === 'listenKeyExpired') {
+        console.warn('[Aster] listenKey expired, reconnecting private WS...');
+        this.listenKey = null;
+        this.#schedulePrivateWsReconnect('listenKeyExpired');
+        return;
+      }
+      if (msg.e !== 'ACCOUNT_UPDATE' || !msg.a) return;
+
+      const eventReason = String(msg.a.m || '');
+
+      if ((msg.a.B || []).length > 0) {
+        this.#scheduleBalanceRestSync();
+      }
+
+      // Aster 平仓后 pa=0 的 symbol 不会出现在 P 里，ORDER 事件需 REST 全量刷新持仓
+      if (eventReason === 'ORDER' || (msg.a.P || []).length > 0) {
+        this.getPositions({ silent: true }).catch((err) => {
+          console.warn('[Aster] position REST sync after ACCOUNT_UPDATE failed:', err.message);
+        });
+        return;
+      }
+    } catch {
+      // ignore parse errors
+    }
+  }
+
+  #schedulePrivateWsReconnect(reason = 'unknown') {
+    if (this._shuttingDown) return;
+    const now = Date.now();
+    if (this._privateWsReconnecting) return;
+    if (now - this._privateWsReconnectAt < 5000) return;
+    this._privateWsReconnectAt = now;
+    this.#reconnectPrivateWs(reason).catch((err) => {
+      console.warn(`[Aster] private WS reconnect (${reason}) failed:`, err.message);
+    });
+  }
+
+  async #reconnectPrivateWs(reason = 'unknown') {
+    if (this._privateWsReconnecting || this._shuttingDown) return;
+    this._privateWsReconnecting = true;
+    try {
+      console.log(`[Aster] Reconnecting private WS (${reason})...`);
+      this.#stopPrivateWsTimers();
+      if (this.privateWs) {
+        this.privateWs.removeAllListeners();
+        this.privateWs.terminate();
+        this.privateWs = null;
+      }
+      this.privateWsConnected = false;
+      this._privateWsGen += 1;
+      const expectMissing = reason === 'listenKeyExpired' || reason === 'keepalive';
+      await this.#deleteListenKeySafely({ expectMissing });
+      await new Promise((r) => setTimeout(r, 500));
+      await this.#connectPrivateWs();
+      console.log(`[Aster] private WS reconnected (${reason})`);
+    } finally {
+      this._privateWsReconnecting = false;
+    }
+  }
+
+  async #teardownPrivateWs({ deleteListenKey = true } = {}) {
+    this.#stopPrivateWsTimers();
+    if (this.privateWs) {
+      this.privateWs.removeAllListeners();
+      this.privateWs.close();
+      this.privateWs = null;
+    }
+    this.privateWsConnected = false;
+    this._privateWsGen += 1;
+    if (deleteListenKey) {
+      await this.#deleteListenKeySafely();
+    } else {
+      this.listenKey = null;
+    }
+    this.emit('PRIVATE_WS_DISCONNECTED', { exchange: 'aster' });
+  }
+
+  async #connectPrivateWs() {
+    this.listenKey = await this.#createListenKey();
+    const url = `${this.config.wsUrl}/${this.listenKey}`;
+    const gen = this._privateWsGen;
+
+    await new Promise((resolve, reject) => {
+      const ws = new WebSocket(url);
+      this.privateWs = ws;
+
+      ws.on('open', async () => {
+        if (gen !== this._privateWsGen || this.privateWs !== ws) return;
+        this.privateWsConnected = true;
+        try {
+          await this.syncAccountSnapshot({ silent: true });
+          if (gen !== this._privateWsGen || this.privateWs !== ws) return;
+          this.emit('PRIVATE_WS_CONNECTED', { exchange: 'aster', positionsReady: true });
+          console.log('[Aster] private WS connected, account snapshot synced');
+          this.#startListenKeyTimer();
+          resolve();
+        } catch (err) {
+          console.error('[Aster] private WS onOpen sync failed:', err.message);
+          this.privateWsConnected = false;
+          this.#stopPrivateWsTimers();
+          this.emit('PRIVATE_WS_DISCONNECTED', { exchange: 'aster' });
+          this._privateWsGen += 1;
+          ws.removeAllListeners();
+          ws.terminate();
+          if (this.privateWs === ws) this.privateWs = null;
+          setTimeout(() => {
+            this.#schedulePrivateWsReconnect('sync-failed');
+          }, 2000);
+          reject(err);
+        }
+      });
+      ws.on('ping', (data) => {
+        if (gen !== this._privateWsGen || this.privateWs !== ws) return;
+        if (ws.readyState === WebSocket.OPEN) ws.pong(data);
+      });
+      ws.on('message', (raw) => this.#handlePrivateMessage(raw));
+      ws.on('close', () => {
+        if (gen !== this._privateWsGen || this.privateWs !== ws) return;
+        this.privateWsConnected = false;
+        this.#stopPrivateWsTimers();
+        this.emit('PRIVATE_WS_DISCONNECTED', { exchange: 'aster' });
+        if (this._shuttingDown || this._privateWsReconnecting) return;
+        setTimeout(() => {
+          this.#schedulePrivateWsReconnect('close');
+        }, 2000);
+      });
+      ws.on('error', (err) => {
+        if (gen !== this._privateWsGen || this.privateWs !== ws) return;
+        console.error('[Aster] private WS error:', err.message);
+        if (ws.readyState === WebSocket.CONNECTING) reject(err);
+      });
+    });
+  }
+
+  async startPrivateAccountStream() {
+    if (!this.authenticated) return;
+    if (this._privateWsReconnecting) return;
+    await this.#teardownPrivateWs({ deleteListenKey: false });
+    await this.#connectPrivateWs();
+  }
+
+  async stopPrivateAccountStream() {
+    await this.#teardownPrivateWs({ deleteListenKey: true });
   }
 
   async syncAccountSnapshot(options = {}) {

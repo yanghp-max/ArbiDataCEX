@@ -26,7 +26,13 @@ export function isBinanceGatePair(pair) {
   return pair.providerA === 'binance' && pair.providerB === 'gate';
 }
 
+/** A 腿 Binance 时走 market worker 子进程（对齐 main：WS 与主线程信号计算隔离） */
+export function shouldUseBinanceMarketWorker(pair) {
+  return pair?.providerA === 'binance';
+}
+
 export default {
   resolveAdapterPair,
-  isBinanceGatePair
+  isBinanceGatePair,
+  shouldUseBinanceMarketWorker
 };

@@ -5,10 +5,12 @@
  * - reduceOnly：校验方向与持仓量足够
  */
 
+import { resolvePrecheckQtyContext } from './leg-order-context.js';
+
 const BALANCE_BUFFER = 1.01;
 const MARGIN_RATE_ESTIMATE = 0.10;
-/** Gate 开空验资：按名义价值 1x 估算（更接近实盘 INSUFFICIENT_AVAILABLE） */
-const GATE_FUTURES_MARGIN_RATE = 1.0;
+/** USDT 永续 B 腿 / Gate：按名义价值 1x 估算保证金 */
+const FUTURES_STRICT_MARGIN_RATE = 1.0;
 
 function compactSymbol(symbol) {
   return String(symbol).replace(/[-_]/g, '').toUpperCase();
@@ -30,34 +32,17 @@ function signedPositionQty(pos) {
   return Number(pos.size) || 0;
 }
 
-function resolveLegQty({ exchange, side, amount, gateAmount, quantoMultiplier }) {
-  const isGate = String(exchange).toLowerCase() === 'gate';
-  const gateContracts = Number(isGate && gateAmount != null ? gateAmount : amount);
-  const mult = Number(quantoMultiplier);
-  const baseQty = (
-    isGate
-    && Number.isFinite(mult)
-    && mult > 0
-    && Number.isFinite(gateContracts)
-    && gateContracts > 0
-  )
-    ? gateContracts * mult
-    : Number(isGate && gateAmount != null ? gateAmount : amount);
-  return { isGate, gateContracts, qty: baseQty };
-}
-
 function calcRequiredBalance({
-  exchange,
-  symbol,
   side,
   qty,
-  gateAmount,
-  gateContracts,
+  orderQty,
+  quantityUnit,
+  contracts,
   estimatedPrice,
-  futuresMode = true
+  futuresMode = true,
+  strictFuturesMargin = false
 }) {
   const sideNorm = String(side || '').toLowerCase();
-  const isGate = String(exchange).toLowerCase() === 'gate';
   const priceForCalc = Number(estimatedPrice) > 0 ? Number(estimatedPrice) : 0;
 
   let requiredCurrency = 'USDT';
@@ -67,17 +52,19 @@ function calcRequiredBalance({
     if (!priceForCalc) {
       return { ok: false, reason: '买入检查缺少 estimatedPrice' };
     }
-    const marginRate = isGate && futuresMode ? GATE_FUTURES_MARGIN_RATE : 1;
+    const marginRate = strictFuturesMargin && futuresMode
+      ? FUTURES_STRICT_MARGIN_RATE
+      : 1;
     requiredAmount = qty * priceForCalc * marginRate * BALANCE_BUFFER;
   } else if (futuresMode) {
     if (!priceForCalc) {
       return { ok: false, reason: '卖出/开空检查缺少 estimatedPrice' };
     }
-    const marginRate = isGate ? GATE_FUTURES_MARGIN_RATE : MARGIN_RATE_ESTIMATE;
+    const marginRate = strictFuturesMargin
+      ? FUTURES_STRICT_MARGIN_RATE
+      : MARGIN_RATE_ESTIMATE;
     requiredAmount = qty * priceForCalc * marginRate * BALANCE_BUFFER;
   } else {
-    const base = compactSymbol(symbol).replace(/USDT$/, '');
-    requiredCurrency = base || compactSymbol(symbol);
     requiredAmount = qty;
   }
 
@@ -85,8 +72,9 @@ function calcRequiredBalance({
     currency: requiredCurrency,
     required: requiredAmount
   };
-  if (isGate && gateAmount != null) {
-    details.gateContracts = gateContracts;
+  if (quantityUnit === 'contract' && orderQty != null) {
+    details.orderQty = orderQty;
+    details.contracts = contracts;
     details.baseQty = qty;
   }
   return { ok: true, requiredCurrency, requiredAmount, details };
@@ -94,7 +82,6 @@ function calcRequiredBalance({
 
 function evaluateOrderPreconditions({
   exchangeName,
-  exchange,
   symbol,
   side,
   amount,
@@ -102,21 +89,27 @@ function evaluateOrderPreconditions({
   maxPosition,
   estimatedPrice,
   quantoMultiplier,
+  quantityUnit,
+  legRole,
   reduceOnly = false,
   futuresMode = true,
   availableBalance = null,
   currentPosition = 0,
   trustReservation = false,
-  cacheReliable = true
+  cacheReliable = true,
+  exchange
 }) {
   const sideNorm = String(side || '').toLowerCase();
-  const { isGate, gateContracts, qty } = resolveLegQty({
+  const precheck = resolvePrecheckQtyContext({
     exchange,
-    side,
     amount,
     gateAmount,
-    quantoMultiplier
+    quantoMultiplier,
+    quantityUnit,
+    legRole
   });
+  const qty = precheck.baseQty;
+  const { orderQty, contracts } = precheck;
 
   const result = {
     balanceCheck: { passed: false, details: {}, reason: '' },
@@ -144,14 +137,14 @@ function evaluateOrderPreconditions({
     }
   } else {
     const req = calcRequiredBalance({
-      exchange,
-      symbol,
       side,
       qty,
-      gateAmount,
-      gateContracts,
+      orderQty,
+      quantityUnit: precheck.quantityUnit,
+      contracts,
       estimatedPrice,
-      futuresMode
+      futuresMode,
+      strictFuturesMargin: precheck.strictFuturesMargin
     });
     if (!req.ok) {
       result.balanceCheck.reason = req.reason;
@@ -250,6 +243,8 @@ function evaluateOrderPreconditions({
  * @param {import('../../arbitrage/cache/account-cache.js').AccountCache} accountCache
  * @param {object} params
  * @param {boolean} [params.trustReservation] - tryReserve 后跳过余额复检，仅校验缓存就绪与仓位
+ * @param {'A'|'B'} [params.legRole] - B 腿使用 Gate 式 USDT 永续保证金估算
+ * @param {'contract'|'base'} [params.quantityUnit] - B 腿下单单位
  */
 export function checkOrderPreconditionsFromCache(accountCache, params = {}) {
   const {
@@ -294,16 +289,17 @@ export function checkOrderPreconditionsFromCache(accountCache, params = {}) {
 }
 
 /**
- * @param {object} adapter - Binance/Gate 适配器（需 getBalance / getPositions）
+ * @param {object} adapter - Binance/Gate/Aster 适配器（需 getBalance / getPositions）
  * @param {object} params
  * @param {string} params.symbol - 如 WLDUSDT
  * @param {string} params.side - buy | sell
- * @param {number} params.amount - 基础币数量（Binance qty）
- * @param {number} [params.gateAmount] - Gate 下单 size（张数）
+ * @param {number} params.amount - A 腿或 B 腿基础币数量
+ * @param {number} [params.gateAmount] - B 腿实际下单量（张数或基础币，见 quantityUnit）
  * @param {number} [params.maxPosition] - 最大持仓（基础币）
  * @param {number} [params.estimatedPrice] - 名义价（买用 ask，卖用 bid）
- * @param {boolean} [params.decimalSize] - Gate 小数下单
- * @param {number} [params.quantoMultiplier] - Gate 合约乘数
+ * @param {number} [params.quantoMultiplier] - B 腿合约乘数
+ * @param {'contract'|'base'} [params.quantityUnit]
+ * @param {'A'|'B'} [params.legRole]
  * @param {boolean} [params.reduceOnly]
  * @param {boolean} [params.futuresMode=true]
  */
@@ -316,6 +312,8 @@ export async function checkOrderPreconditions(adapter, params = {}) {
     maxPosition,
     estimatedPrice,
     quantoMultiplier,
+    quantityUnit,
+    legRole,
     reduceOnly = false,
     futuresMode = true
   } = params;
@@ -329,23 +327,24 @@ export async function checkOrderPreconditions(adapter, params = {}) {
     const pos = findPosition(positions, symbol);
     const currentPosition = signedPositionQty(pos);
 
-    let requiredCurrency = 'USDT';
-    const { qty, gateContracts } = resolveLegQty({
+    const precheck = resolvePrecheckQtyContext({
       exchange,
       side,
       amount,
       gateAmount,
-      quantoMultiplier
+      quantoMultiplier,
+      quantityUnit,
+      legRole
     });
     const req = calcRequiredBalance({
-      exchange,
-      symbol,
       side,
-      qty,
-      gateAmount,
-      gateContracts,
+      qty: precheck.baseQty,
+      orderQty: precheck.orderQty,
+      quantityUnit: precheck.quantityUnit,
+      contracts: precheck.contracts,
       estimatedPrice,
-      futuresMode
+      futuresMode,
+      strictFuturesMargin: precheck.strictFuturesMargin
     });
     if (!req.ok) {
       return {
@@ -356,8 +355,7 @@ export async function checkOrderPreconditions(adapter, params = {}) {
         exchange: exchangeName
       };
     }
-    requiredCurrency = req.requiredCurrency;
-    const balance = (balances || []).find((b) => String(b.currency).toUpperCase() === requiredCurrency);
+    const balance = (balances || []).find((b) => String(b.currency).toUpperCase() === req.requiredCurrency);
     const available = Number(balance?.available ?? 0);
 
     return evaluateOrderPreconditions({
@@ -370,6 +368,8 @@ export async function checkOrderPreconditions(adapter, params = {}) {
       maxPosition,
       estimatedPrice,
       quantoMultiplier,
+      quantityUnit,
+      legRole,
       reduceOnly,
       futuresMode,
       availableBalance: available,

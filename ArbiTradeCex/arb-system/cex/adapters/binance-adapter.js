@@ -551,8 +551,8 @@ export class BinanceAdapter extends BaseAdapter {
     };
   }
 
-  #emitBookTicker(ticker, { viaRest = false, restReason = null } = {}) {
-    const localTs = Date.now();
+  #emitBookTicker(ticker, { viaRest = false, restReason = null, receiveLocalTs = null } = {}) {
+    const localTs = receiveLocalTs ?? Date.now();
     this._lastPublicMessageAt = localTs;
     const sym = this.normalizeSymbol(ticker.symbol);
     this._lastSymbolMessageAt.set(sym, localTs);
@@ -663,7 +663,7 @@ export class BinanceAdapter extends BaseAdapter {
         serverTimestamp: rawEventTs,
         wsDelayMs
       };
-      this.#emitBookTicker(ticker);
+      this.#emitBookTicker(ticker, { receiveLocalTs: localTs });
     } catch {
       // ignore
     }
@@ -844,6 +844,7 @@ export class BinanceAdapter extends BaseAdapter {
   /** 发单前余额/持仓检查（对齐 ArbiTrade-1） */
   async checkOrderPreconditions(params) {
     return runCheckOrderPreconditions(this, {
+      legRole: 'A',
       ...params,
       futuresMode: true
     });

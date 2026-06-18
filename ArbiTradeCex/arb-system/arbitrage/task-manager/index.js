@@ -117,7 +117,8 @@ export class TaskManager {
 
     console.log(
       `[TaskManager] started symbols=${strat.symbols.join(',')} trading=${this.tradingEnabled}`
-      + ` priceMode=ws-driven(${priceUpdateMode}) market=${this.sharedResources.cexMarketWorkerClient ? 'worker(binance+gate)' : 'adapter'}`
+      + ` priceMode=ws-driven(${priceUpdateMode}) market=${this.sharedResources.useCexMarketWorker ? 'worker' : 'adapter'}`
+      + `${this.sharedResources.cexMarketWorkerClient && this.adapterPair.providerB !== 'gate' ? '+mainB' : ''}`
       + ` pair=${this.adapterPair.providerA}/${this.adapterPair.providerB}`
       + ` windowSeconds=${strat.windowSeconds}`
       + ` minDataPoints=${strat.minDataPoints} enforceLatency=${this.sharedResources.enforceLatency}`

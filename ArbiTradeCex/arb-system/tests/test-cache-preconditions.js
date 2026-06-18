@@ -8,6 +8,7 @@ import { checkOrderPreconditionsFromCache } from '../cex/utils/check-order-preco
 
 const cache = new AccountCache();
 cache.seedMock({ balanceUsdt: 500 });
+cache.setBalance('aster', { total: 500, available: 500, updatedAtMs: Date.now() });
 cache.setPosition('binance', 'SIRENUSDT', -10);
 cache.setPosition('gate', 'SIRENUSDT', 10);
 
@@ -64,5 +65,36 @@ const openCheck = checkOrderPreconditionsFromCache(cache, {
   trustReservation: false
 });
 assert.equal(openCheck.overall, true, 'gate margin from cache without REST');
+
+const asterOpen = checkOrderPreconditionsFromCache(cache, {
+  exchange: 'aster',
+  symbol: 'BTCUSDT',
+  side: 'sell',
+  amount: 0.001,
+  gateAmount: 0.001,
+  quantoMultiplier: 1,
+  quantityUnit: 'base',
+  legRole: 'B',
+  estimatedPrice: 100,
+  reservationManager: rm,
+  trustReservation: false
+});
+assert.equal(asterOpen.overall, true, 'aster B leg base qty uses strict futures margin');
+
+const asterReject = checkOrderPreconditionsFromCache(cache, {
+  exchange: 'aster',
+  symbol: 'BTCUSDT',
+  side: 'sell',
+  amount: 10,
+  gateAmount: 10,
+  quantoMultiplier: 1,
+  quantityUnit: 'base',
+  legRole: 'B',
+  estimatedPrice: 90000,
+  reservationManager: rm,
+  trustReservation: false
+});
+assert.equal(asterReject.overall, false, 'aster B leg strict margin rejects insufficient balance');
+assert.match(asterReject.balanceCheck.reason, /余额不足/);
 
 console.log('test-cache-preconditions: OK');

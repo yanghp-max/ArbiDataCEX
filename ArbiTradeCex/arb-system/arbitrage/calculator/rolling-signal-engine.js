@@ -16,21 +16,56 @@ export class RollingSignalEngine {
     /** 避免同一秒内多次 full sort（stable 侧 worker 合并后 tick 频率更低） */
     this._entries = null;
     this._statsCache = null;
+    /** 窗口边界：prune 只从 minKey 递增删，避免每次扫全表 O(windowSeconds) */
+    this._minBucketKey = null;
+    this._maxBucketKey = null;
   }
 
   #bucketKey(ts) {
     return Math.floor(ts / 1000);
   }
 
+  #syncMinMaxOnInsert(key) {
+    if (this._minBucketKey == null || key < this._minBucketKey) {
+      this._minBucketKey = key;
+    }
+    if (this._maxBucketKey == null || key > this._maxBucketKey) {
+      this._maxBucketKey = key;
+    }
+  }
+
+  /** 从 minKey 向前删过期桶；空档秒直接跳过 */
+  #pruneOldBuckets(cutoffTime) {
+    if (this._minBucketKey == null) return false;
+    let pruned = false;
+    while (this._minBucketKey != null && this._minBucketKey < cutoffTime) {
+      if (this.buckets.has(this._minBucketKey)) {
+        this.buckets.delete(this._minBucketKey);
+        pruned = true;
+      }
+      this._minBucketKey += 1;
+    }
+    if (this.buckets.size === 0) {
+      this._minBucketKey = null;
+      this._maxBucketKey = null;
+      return pruned;
+    }
+    while (this._minBucketKey != null && !this.buckets.has(this._minBucketKey)) {
+      this._minBucketKey += 1;
+    }
+    if (this._minBucketKey != null && this._maxBucketKey != null && this._minBucketKey > this._maxBucketKey) {
+      this._minBucketKey = null;
+      this._maxBucketKey = null;
+    }
+    return pruned;
+  }
+
   #computeWindowMetrics() {
-    const bucketKeys = [...this.buckets.keys()];
-    const samples = bucketKeys.length;
-    if (samples === 0) {
+    const samples = this.buckets.size;
+    if (samples === 0 || this._minBucketKey == null || this._maxBucketKey == null) {
       return { samples: 0, timeSpanSeconds: 0, timeSpanMs: 0 };
     }
-    const minBk = Math.min(...bucketKeys);
-    const maxBk = Math.max(...bucketKeys);
-    const timeSpanSeconds = maxBk - minBk + 1;
+    const timeSpanSeconds = this._maxBucketKey - this._minBucketKey + 1;
     return { samples, timeSpanSeconds, timeSpanMs: timeSpanSeconds * 1000 };
   }
 
@@ -73,19 +108,16 @@ export class RollingSignalEngine {
     };
     const hadBucket = this.buckets.has(currentSecond);
     this.buckets.set(currentSecond, row);
+    this.#syncMinMaxOnInsert(currentSecond);
 
     const cutoffTime = currentSecond - this.windowSeconds;
-    let pruned = false;
-    for (const k of this.buckets.keys()) {
-      if (k < cutoffTime) {
-        this.buckets.delete(k);
-        pruned = true;
-      }
-    }
+    const pruned = this.#pruneOldBuckets(cutoffTime);
 
     const structureChanged = pruned || !hadBucket || !this._entries?.length;
-    if (structureChanged) {
+    if (pruned || !this._entries?.length) {
       this._entries = [...this.buckets.values()].sort((a, b) => a.ts - b.ts);
+    } else if (!hadBucket) {
+      this._entries.push(row);
     } else {
       this._entries[this._entries.length - 1] = row;
     }

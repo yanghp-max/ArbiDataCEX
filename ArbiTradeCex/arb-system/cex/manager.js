@@ -163,6 +163,7 @@ export class CexManager {
   static async createDefault(strategyConfig = {}, options = {}) {
     const mgr = new CexManager();
     const enablePublicStream = options.enablePublicStream !== false;
+    const publicStreamByProvider = options.publicStreamByProvider || null;
     const enablePrivateAccountStream = options.enablePrivateAccountStream
       ?? (enablePublicStream === false);
     const configured = Array.isArray(options.providers)
@@ -177,14 +178,22 @@ export class CexManager {
       throw new Error('No providers configured for CexManager');
     }
 
+    const resolvePublicStream = (provider) => {
+      if (publicStreamByProvider && publicStreamByProvider[provider] != null) {
+        return publicStreamByProvider[provider] !== false;
+      }
+      return enablePublicStream;
+    };
+
     const adapters = [];
     for (const provider of providers) {
+      const providerPublicStream = resolvePublicStream(provider);
       if (provider === 'binance') {
         adapters.push({
           name: provider,
           adapter: new BinanceAdapter({
             listenKeyKeepaliveMin: strategyConfig.listenKeyKeepaliveMin ?? 30,
-            enablePublicStream
+            enablePublicStream: providerPublicStream
           })
         });
         continue;
@@ -194,7 +203,7 @@ export class CexManager {
           name: provider,
           adapter: new GateAdapter({
             accountMode: strategyConfig.gateAccountMode,
-            enablePublicStream,
+            enablePublicStream: providerPublicStream,
             enablePrivateAccountStream
           })
         });
@@ -204,7 +213,8 @@ export class CexManager {
         adapters.push({
           name: provider,
           adapter: new AsterAdapter({
-            enablePublicStream
+            enablePublicStream: providerPublicStream,
+            listenKeyKeepaliveMin: strategyConfig.listenKeyKeepaliveMin ?? 30
           })
         });
         continue;

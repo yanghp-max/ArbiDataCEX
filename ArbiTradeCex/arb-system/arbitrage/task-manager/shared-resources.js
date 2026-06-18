@@ -12,7 +12,7 @@ import { CexPriceHub } from './cex-price-hub.js';
 import eventBus from '../event-bus/index.js';
 import { DashboardBridge } from '../dashboard/dashboard-bridge.js';
 import { resolveEnforceLatency, getRootDir } from '../../config/global-config.js';
-import { resolveAdapterPair, isBinanceGatePair } from '../../cex/adapter-pair.js';
+import { resolveAdapterPair, shouldUseBinanceMarketWorker } from '../../cex/adapter-pair.js';
 
 function isCexMarketWorkerEnabled(strat) {
   if (strat.cexMarketWorkerEnabled === false) return false;
@@ -71,8 +71,9 @@ export class SharedResources {
       this.dashboardBridge?.recordExecutionStatus(payload);
     });
 
-    const isLegacyWorkerPair = isBinanceGatePair(this.adapterPair);
-    this.useCexMarketWorker = isLegacyWorkerPair && isCexMarketWorkerEnabled(strat);
+    const useBinanceWorker = shouldUseBinanceMarketWorker(this.adapterPair) && isCexMarketWorkerEnabled(strat);
+    const workerIncludesGate = this.adapterPair.providerB === 'gate';
+    this.useCexMarketWorker = useBinanceWorker;
     const staleMs = buildWorkerStaleMs(strat);
 
     if (this.useCexMarketWorker) {
@@ -83,15 +84,21 @@ export class SharedResources {
             listenKeyKeepaliveMin: strat.listenKeyKeepaliveMin ?? 30,
             symbolStaleMs: staleMs
           },
-          gate: {
-            accountMode: strat.gateAccountMode,
-            symbolStaleMs: staleMs
-          }
+          enableGate: workerIncludesGate,
+          gate: workerIncludesGate
+            ? {
+              accountMode: strat.gateAccountMode,
+              symbolStaleMs: staleMs
+            }
+            : null
         })
       });
       try {
         await this.cexMarketWorkerClient.initialize();
-        console.log('[SharedResources] CEX market worker ready');
+        const workerMode = workerIncludesGate ? 'binance+gate' : 'binance-only';
+        console.log(
+          `[SharedResources] CEX market worker ready (${workerMode} public WS in child process)`
+        );
       } catch (error) {
         console.warn(`[SharedResources] CEX market worker failed, fallback to main adapter WS: ${error.message}`);
         await this.cexMarketWorkerClient.cleanup().catch(() => {});
@@ -100,8 +107,17 @@ export class SharedResources {
     }
 
     const useWorker = Boolean(this.cexMarketWorkerClient);
+    const publicStreamByProvider = {};
+    for (const provider of this.adapterPair.providers) {
+      if (useWorker && provider === this.adapterPair.providerA) {
+        publicStreamByProvider[provider] = false;
+      } else {
+        publicStreamByProvider[provider] = true;
+      }
+    }
     this.cexManager = await CexManager.createDefault(strat, {
       enablePublicStream: !useWorker,
+      publicStreamByProvider: useWorker ? publicStreamByProvider : undefined,
       providers: this.adapterPair.providers
     });
 

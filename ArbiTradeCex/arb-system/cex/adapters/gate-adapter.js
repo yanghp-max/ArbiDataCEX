@@ -510,8 +510,8 @@ export class GateAdapter extends BaseAdapter {
     });
   }
 
-  #emitBookTicker(ticker, { viaRest = false, restReason = null } = {}) {
-    const localTs = Date.now();
+  #emitBookTicker(ticker, { viaRest = false, restReason = null, receiveLocalTs = null } = {}) {
+    const localTs = receiveLocalTs ?? Date.now();
     const sym = this.normalizeSymbol(ticker.symbol);
     this._lastSymbolMessageAt.set(sym, localTs);
     this.emit(EventTypes.TICKER, {
@@ -686,7 +686,7 @@ export class GateAdapter extends BaseAdapter {
         timestamp,
         serverTimestamp,
         wsDelayMs
-      });
+      }, { receiveLocalTs: localTs });
     } catch {
       // ignore
     }
@@ -946,6 +946,7 @@ export class GateAdapter extends BaseAdapter {
   /** 发单前余额/持仓检查（对齐 ArbiTrade-1） */
   async checkOrderPreconditions(params) {
     return runCheckOrderPreconditions(this, {
+      legRole: 'B',
       ...params,
       futuresMode: true
     });

@@ -72,21 +72,30 @@ export class CexPriceHub extends EventEmitter {
       this.marketWorker.on(WORKER_EXIT, this._workerExitHandler);
       this.marketWorker.on(EventTypes.DISCONNECTED, this._workerDisconnectHandler);
       await this.marketWorker.subscribe(adapterSymbols);
-      this._started = true;
-      console.log(`[CexPriceHub] started mode=worker symbols=${adapterSymbols.length}`);
-      return;
     }
 
-    await Promise.all(this.providers.map(async ({ provider, adapter }) => {
-      this._setupProvider(provider, adapter);
-      adapter?.on('PUBLIC_WS_RECONNECTED', this._reconnectHandler);
-      adapter?.on(EventTypes.RECONNECTED, this._reconnectHandler);
-      const channels = provider === 'gate' ? ['book_ticker'] : ['bookTicker'];
-      await adapter.subscribe(adapterSymbols, channels);
-    }));
+    const mainProviders = this.providers.filter(
+      ({ adapter }) => adapter?.enablePublicStream !== false
+    );
+    if (mainProviders.length > 0) {
+      await Promise.all(mainProviders.map(async ({ provider, adapter }) => {
+        this._setupProvider(provider, adapter);
+        adapter?.on('PUBLIC_WS_RECONNECTED', this._reconnectHandler);
+        adapter?.on(EventTypes.RECONNECTED, this._reconnectHandler);
+        const channels = provider === 'gate' ? ['book_ticker'] : ['bookTicker'];
+        await adapter.subscribe(adapterSymbols, channels);
+      }));
+    }
 
     this._started = true;
-    console.log(`[CexPriceHub] started mode=fallback symbols=${adapterSymbols.length}`);
+    const mode = this._useWorker
+      ? (mainProviders.length > 0 ? 'hybrid' : 'worker')
+      : 'fallback';
+    const mainLegs = mainProviders.map((p) => p.provider).join('+') || '-';
+    console.log(
+      `[CexPriceHub] started mode=${mode} worker=${this._useWorker ? 'yes' : 'no'} `
+      + `mainLegs=${mainLegs} symbols=${adapterSymbols.length}`
+    );
   }
 
   _setupProvider(provider, adapter) {
