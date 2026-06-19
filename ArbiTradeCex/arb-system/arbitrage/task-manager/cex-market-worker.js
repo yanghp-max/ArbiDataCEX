@@ -1,8 +1,9 @@
 /**
- * CEX 公共行情子进程：Binance + Gate bookTicker，单次 IPC flush（上百 symbol 对称扩展）
+ * CEX 公共行情子进程：按 provider 隔离公共 bookTicker WS，单次 IPC flush。
  */
 import { BinanceAdapter } from '../../cex/adapters/binance-adapter.js';
 import { GateAdapter } from '../../cex/adapters/gate-adapter.js';
+import { AsterAdapter } from '../../cex/adapters/aster-adapter.js';
 import { EventTypes } from '../../cex/types.js';
 
 const MSG_READY = 'ready';
@@ -22,10 +23,55 @@ function flushKey(source, symbol) {
   return `${source}:${symbol}`;
 }
 
+function normalizeProvider(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function channelForProvider(provider) {
+  return provider === 'gate' ? 'book_ticker' : 'bookTicker';
+}
+
+function createAdapter(provider, config = {}) {
+  if (provider === 'binance') {
+    return new BinanceAdapter({
+      ...config,
+      enablePublicStream: true
+    });
+  }
+  if (provider === 'gate') {
+    return new GateAdapter({
+      ...config,
+      enablePublicStream: true
+    });
+  }
+  if (provider === 'aster') {
+    return new AsterAdapter({
+      ...config,
+      enablePublicStream: true
+    });
+  }
+  throw new Error(`Unsupported market worker provider: ${provider}`);
+}
+
+function resolveProviders(config = {}) {
+  const explicit = Array.isArray(config.providers)
+    ? config.providers.map(normalizeProvider).filter(Boolean)
+    : [];
+  if (explicit.length > 0) return [...new Set(explicit)];
+
+  const providers = ['binance'];
+  if (config.enableGate !== false && config.gate != null) {
+    providers.push('gate');
+  }
+  if (config.enableAster !== false && config.aster != null) {
+    providers.push('aster');
+  }
+  return providers;
+}
+
 class CexMarketWorkerRuntime {
   constructor() {
-    this.binance = null;
-    this.gate = null;
+    this.adapters = new Map();
     this.ready = false;
     this.subscribedSymbols = new Set();
     this.latestTickerByKey = new Map();
@@ -39,8 +85,7 @@ class CexMarketWorkerRuntime {
       flushCount: 0,
       maxFlushSize: 0,
       lastFlushSentAt: 0,
-      binanceTicks: 0,
-      gateTicks: 0
+      providerTicks: {}
     };
     this._diagInterval = null;
   }
@@ -52,32 +97,20 @@ class CexMarketWorkerRuntime {
   }
 
   async _initializeInternal(config = {}) {
-    const binanceCfg = config.binance || {};
-    const gateCfg = config.gate || {};
-    const enableGate = config.enableGate !== false && gateCfg != null;
-
-    this.binance = new BinanceAdapter({
-      ...binanceCfg,
-      enablePublicStream: true
-    });
-    this.gate = enableGate
-      ? new GateAdapter({
-        ...gateCfg,
-        enablePublicStream: true
-      })
-      : null;
-
-    this.binance.on(EventTypes.TICKER, (ticker) => this._onTicker('binance', ticker));
-    if (this.gate) {
-      this.gate.on(EventTypes.TICKER, (ticker) => this._onTicker('gate', ticker));
+    const providers = resolveProviders(config);
+    if (providers.length === 0) {
+      throw new Error('CEX market worker requires at least one provider');
     }
 
-    for (const [source, adapter] of [['binance', this.binance], ['gate', this.gate]]) {
-      if (!adapter) continue;
+    for (const provider of providers) {
+      const adapter = createAdapter(provider, config[provider] || {});
+      this.adapters.set(provider, adapter);
+      this.diag.providerTicks[provider] = 0;
+      adapter.on(EventTypes.TICKER, (ticker) => this._onTicker(provider, ticker));
       adapter.on('PUBLIC_WS_RECONNECTED', (payload) => {
         this._send({
           type: MSG_WS_RECONNECTED,
-          payload: { exchange: source, ...payload }
+          payload: { exchange: provider, provider, ...payload }
         });
       });
       adapter.on(EventTypes.ERROR, (error) => {
@@ -85,39 +118,49 @@ class CexMarketWorkerRuntime {
           type: MSG_DIAG,
           payload: {
             kind: 'adapter_error',
-            exchange: source,
+            exchange: provider,
+            provider,
             error: error?.message || String(error || 'UNKNOWN')
           }
         });
       });
     }
 
-    await Promise.all([
-      this.binance.connect(),
-      this.gate ? this.gate.connect() : Promise.resolve()
-    ]);
+    await Promise.all([...this.adapters.values()].map((adapter) => adapter.connect()));
     this.ready = true;
     this._startDiagTimer();
     this._send({
       type: MSG_READY,
-      payload: {
-        binanceConnected: this.binance.publicConnected === true,
-        gateConnected: this.gate?.publicConnected === true,
-        gateEnabled: enableGate
-      }
+      payload: this.#connectionPayload()
     });
+  }
+
+  #connectionPayload() {
+    const providers = [...this.adapters.keys()];
+    const connected = {};
+    for (const [provider, adapter] of this.adapters) {
+      connected[provider] = adapter.publicConnected === true;
+    }
+    return {
+      providers,
+      connected,
+      binanceConnected: connected.binance === true,
+      gateConnected: connected.gate === true,
+      asterConnected: connected.aster === true,
+      gateEnabled: this.adapters.has('gate')
+    };
   }
 
   async subscribe(symbols = []) {
     if (this.stopped || !symbols.length) return;
-    const list = symbols.map((s) => this.binance.normalizeSymbol(s));
+    const normalizer = this.adapters.values().next().value;
+    const list = symbols.map((s) => normalizer.normalizeSymbol(s));
     const newSymbols = list.filter((s) => !this.subscribedSymbols.has(s));
     if (newSymbols.length === 0) return;
 
-    await this.binance.subscribe(newSymbols, ['bookTicker']);
-    if (this.gate) {
-      await this.gate.subscribe(newSymbols, ['book_ticker']);
-    }
+    await Promise.all([...this.adapters].map(([provider, adapter]) => (
+      adapter.subscribe(newSymbols, [channelForProvider(provider)])
+    )));
     for (const symbol of newSymbols) {
       this.subscribedSymbols.add(symbol);
     }
@@ -126,40 +169,38 @@ class CexMarketWorkerRuntime {
   async unsubscribe(symbols = []) {
     if (!symbols.length) return;
     for (const symbol of symbols) {
-      const normalized = this.binance.normalizeSymbol(symbol);
+      const normalizer = this.adapters.values().next().value;
+      const normalized = normalizer.normalizeSymbol(symbol);
       try {
-        await this.binance.unsubscribe(normalized, ['bookTicker']);
-        if (this.gate) {
-          await this.gate.unsubscribe(normalized, ['book_ticker']);
-        }
+        await Promise.all([...this.adapters].map(([provider, adapter]) => (
+          adapter.unsubscribe(normalized, [channelForProvider(provider)])
+        )));
       } finally {
         this.subscribedSymbols.delete(normalized);
-        this.latestTickerByKey.delete(flushKey('binance', normalized));
-        this.latestTickerByKey.delete(flushKey('gate', normalized));
-        this.pendingFlushKeys.delete(flushKey('binance', normalized));
-        this.pendingFlushKeys.delete(flushKey('gate', normalized));
+        for (const provider of this.adapters.keys()) {
+          this.latestTickerByKey.delete(flushKey(provider, normalized));
+          this.pendingFlushKeys.delete(flushKey(provider, normalized));
+        }
       }
     }
   }
 
   async reconnect(provider = 'all') {
-    if (provider === 'binance' || provider === 'all') {
-      await this.binance?.reconnectWebSocket();
+    if (provider === 'all') {
+      await Promise.all([...this.adapters.values()].map((adapter) => adapter.reconnectWebSocket()));
+      return;
     }
-    if (this.gate && (provider === 'gate' || provider === 'all')) {
-      await this.gate?.reconnectWebSocket();
+    const adapter = this.adapters.get(normalizeProvider(provider));
+    if (adapter) {
+      await adapter.reconnectWebSocket();
     }
   }
 
   async shutdown() {
     this.stopped = true;
     this._stopDiagTimer();
-    await Promise.all([
-      this.binance?.disconnect().catch(() => {}),
-      this.gate?.disconnect().catch(() => {})
-    ]);
-    this.binance = null;
-    this.gate = null;
+    await Promise.all([...this.adapters.values()].map((adapter) => adapter.disconnect().catch(() => {})));
+    this.adapters.clear();
   }
 
   _onTicker(source, ticker) {
@@ -183,8 +224,7 @@ class CexMarketWorkerRuntime {
     };
 
     this.diag.tickCount += 1;
-    if (source === 'binance') this.diag.binanceTicks += 1;
-    if (source === 'gate') this.diag.gateTicks += 1;
+    this.diag.providerTicks[source] = (this.diag.providerTicks[source] || 0) + 1;
     this.latestTickerByKey.set(key, latest);
     this.pendingFlushKeys.add(key);
 
@@ -225,8 +265,7 @@ class CexMarketWorkerRuntime {
 
   getStateSnapshot() {
     return {
-      binanceConnected: this.binance?.publicConnected === true,
-      gateConnected: this.gate?.publicConnected === true,
+      ...this.#connectionPayload(),
       subscribedSymbols: Array.from(this.subscribedSymbols),
       latestTickerCount: this.latestTickerByKey.size,
       flushSeq: this.flushSeq,
@@ -241,8 +280,7 @@ class CexMarketWorkerRuntime {
         type: MSG_DIAG,
         payload: {
           kind: 'worker_stats',
-          binanceConnected: this.binance?.publicConnected === true,
-          gateConnected: this.gate?.publicConnected === true,
+          ...this.#connectionPayload(),
           subscribedSymbols: this.subscribedSymbols.size,
           latestTickerCount: this.latestTickerByKey.size,
           ...this.diag

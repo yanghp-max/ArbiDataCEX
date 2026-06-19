@@ -12,7 +12,7 @@
     "cooldownMs": 1000,
     "maxPriceAgeMs": 1000,
     "maxLegSkewMs": 2000,
-    "maxWsLatencyMs": 400,
+    "maxWsLatencyMs": 50,
     "priceUpdateMode": "any",
     "restRefreshBeforeOrder": false,
     "signalMaxAgeMs": 100,
@@ -51,7 +51,7 @@
     "processHealthIntervalMs": 30000,
     "minQtyJson": "config/min-order-qty.json",
     "windowSeconds": 600,
-    "enforceLatency": false,
+    "enforceLatency": true,
     "useMockAccount": true
   },
   "dashboard": {

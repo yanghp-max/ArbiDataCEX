@@ -1,5 +1,5 @@
 /**
- * CEX 公共行情子进程客户端（Binance + Gate 对称，单次 tickerFlush IPC）
+ * CEX 公共行情子进程客户端（多 provider 公共 WS，单次 tickerFlush IPC）
  */
 import { EventEmitter } from 'events';
 import { fork } from 'child_process';
@@ -40,6 +40,8 @@ export class CexMarketWorkerClient extends EventEmitter {
     this.initialized = false;
     this.binanceConnected = false;
     this.gateConnected = false;
+    this.asterConnected = false;
+    this.connectedByProvider = {};
     this.latestTickerByKey = new Map();
     this._lastFlushSeq = 0;
     this._spawnPromise = null;
@@ -72,6 +74,8 @@ export class CexMarketWorkerClient extends EventEmitter {
       this.initialized = false;
       this.binanceConnected = false;
       this.gateConnected = false;
+      this.asterConnected = false;
+      this.connectedByProvider = {};
       this.child = null;
       this._lastFlushSeq = 0;
       if (this.debug) {
@@ -161,6 +165,8 @@ export class CexMarketWorkerClient extends EventEmitter {
     this.initialized = false;
     this.binanceConnected = false;
     this.gateConnected = false;
+    this.asterConnected = false;
+    this.connectedByProvider = {};
     this.latestTickerByKey.clear();
     this._subscribedSymbols.clear();
     this.removeAllListeners();
@@ -178,27 +184,18 @@ export class CexMarketWorkerClient extends EventEmitter {
     switch (message.type) {
       case MSG_READY:
         this.ready = true;
-        this.binanceConnected = Boolean(message.payload?.binanceConnected);
-        this.gateConnected = Boolean(message.payload?.gateConnected);
+        this._mergeProviderConnections(message.payload);
         this.emit(MSG_READY, message.payload || {});
         break;
       case MSG_TICKER_FLUSH:
         this._handleTickerFlush(message.payload || {});
         break;
       case MSG_WS_DISCONNECTED:
-        if (message.payload?.exchange === 'gate') {
-          this.gateConnected = false;
-        } else {
-          this.binanceConnected = false;
-        }
+        this._setProviderConnected(message.payload?.exchange || message.payload?.provider, false);
         this.emit(EventTypes.DISCONNECTED, message.payload || {});
         break;
       case MSG_WS_RECONNECTED:
-        if (message.payload?.exchange === 'gate') {
-          this.gateConnected = true;
-        } else {
-          this.binanceConnected = true;
-        }
+        this._setProviderConnected(message.payload?.exchange || message.payload?.provider, true);
         this.emit(EventTypes.RECONNECTED, message.payload || {});
         this.emit('PUBLIC_WS_RECONNECTED', message.payload || {});
         break;
@@ -210,6 +207,29 @@ export class CexMarketWorkerClient extends EventEmitter {
     }
   }
 
+  _mergeProviderConnections(payload = {}) {
+    if (payload.connected && typeof payload.connected === 'object') {
+      for (const [provider, connected] of Object.entries(payload.connected)) {
+        this._setProviderConnected(provider, Boolean(connected));
+      }
+      return;
+    }
+    this._setProviderConnected('binance', Boolean(payload.binanceConnected));
+    this._setProviderConnected('gate', Boolean(payload.gateConnected));
+    if (payload.asterConnected != null) {
+      this._setProviderConnected('aster', Boolean(payload.asterConnected));
+    }
+  }
+
+  _setProviderConnected(provider, connected) {
+    const key = String(provider || '').trim().toLowerCase();
+    if (!key) return;
+    this.connectedByProvider[key] = Boolean(connected);
+    if (key === 'binance') this.binanceConnected = Boolean(connected);
+    if (key === 'gate') this.gateConnected = Boolean(connected);
+    if (key === 'aster') this.asterConnected = Boolean(connected);
+  }
+
   _handleTickerFlush(payload) {
     const seq = Number(payload.seq || 0);
     if (seq <= this._lastFlushSeq) return;
@@ -219,12 +239,11 @@ export class CexMarketWorkerClient extends EventEmitter {
     const tickers = [];
 
     for (const item of updates) {
-      const source = item.source === 'gate' ? 'gate' : 'binance';
+      const source = String(item.source || '').trim().toLowerCase();
       const symbol = item.symbol;
-      if (!symbol) continue;
+      if (!source || !symbol) continue;
 
-      if (source === 'binance') this.binanceConnected = true;
-      if (source === 'gate') this.gateConnected = true;
+      this._setProviderConnected(source, true);
 
       const receiveMs = item.receiveTs || now;
       const ticker = {

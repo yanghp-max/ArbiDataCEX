@@ -34,6 +34,24 @@ export class AsterAdapter extends BaseAdapter {
     this._restRefreshPending = false;
     this._shuttingDown = false;
     this._symbolStaleMs = Number(config.symbolStaleMs) || 900;
+    this._publicWsReconnectAt = 0;
+    this._reconnectingPublicWs = false;
+    this._publicWsGen = 0;
+    this._publicWsOpenedAt = 0;
+    this._publicWsEverOpened = false;
+    this._lastPongTime = 0;
+    this._lastWsRawMessageAt = 0;
+    this._pongCheckTimer = null;
+    this._wsIdleCheckTimer = null;
+    this._publicWs24hTimer = null;
+    this._wsIdleReconnectMs = Number(config.wsIdleReconnectMs) || (5 * 60 * 1000);
+    this.pongTimeout = Number(config.pongTimeoutMs) || (10 * 60 * 1000);
+    this._wsDelayReconnectMs = Number(config.wsDelayReconnectMs ?? config.maxWsLatencyMs) || 400;
+    this._wsDelayReconnectHits = Number(config.wsDelayReconnectHits) || 3;
+    this._wsDelayReconnectWindowMs = Number(config.wsDelayReconnectWindowMs) || 30_000;
+    this._wsDelayHighSamples = [];
+    /** 23h50m 主动重连，降低长连接老化造成的延迟抖升 */
+    this._WS_PROACTIVE_RECONNECT_MS = (23 * 60 + 50) * 60 * 1000;
     this._balanceCache = null;
     this._positionCache = new Map();
     this._lastNonce = 0n;
@@ -67,7 +85,7 @@ export class AsterAdapter extends BaseAdapter {
 
   async reconnectWebSocket() {
     if (!this.enablePublicStream || this._shuttingDown) return;
-    await this.connectWebSocket();
+    await this.#forcePublicWsReconnect('manual');
   }
 
   async connect() {
@@ -84,7 +102,7 @@ export class AsterAdapter extends BaseAdapter {
   async disconnect() {
     this._shuttingDown = true;
     await this.stopPrivateAccountStream();
-    this.#stopFeedWatchdog();
+    this.#stopPublicWsTimers();
     if (this.ws) {
       this.ws.removeAllListeners();
       this.ws.close();
@@ -125,32 +143,60 @@ export class AsterAdapter extends BaseAdapter {
       this.ws.terminate();
       this.ws = null;
     }
+    const gen = ++this._publicWsGen;
     await new Promise((resolve, reject) => {
       const ws = new WebSocket(this.config.wsUrl);
       this.ws = ws;
       ws.on('open', async () => {
+        if (gen !== this._publicWsGen || this.ws !== ws) return;
         this.connected = true;
+        this._publicWsOpenedAt = Date.now();
+        this._lastPongTime = this._publicWsOpenedAt;
+        this._lastWsRawMessageAt = this._publicWsOpenedAt;
+        this._wsDelayHighSamples = [];
         if (this.subscribedSymbols.length > 0) {
           await this.#flushSubscriptions({ forceResubscribe: true });
         }
+        // flushSubscriptions 期间连接可能已被替换，避免旧连接继续启动定时器
+        if (gen !== this._publicWsGen || this.ws !== ws) return;
         this.#startFeedWatchdog();
+        this.#startPublicHeartbeat();
+        this.#startWsIdleMonitor();
+        this.#startPublicWs24hTimer();
+        const clearCache = this._publicWsEverOpened;
+        this._publicWsEverOpened = true;
         this.emit('PUBLIC_WS_RECONNECTED', {
           exchange: 'aster',
           reason: 'public-ws-open',
-          clearCache: false
+          clearCache
         });
         resolve();
       });
-      ws.on('message', (raw) => this.handleMessage(raw));
+      ws.on('ping', (data) => {
+        if (gen !== this._publicWsGen || this.ws !== ws) return;
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.pong(data);
+          this._lastPongTime = Date.now();
+        }
+      });
+      ws.on('pong', () => {
+        if (gen !== this._publicWsGen || this.ws !== ws) return;
+        this._lastPongTime = Date.now();
+      });
+      ws.on('message', (raw) => {
+        if (gen !== this._publicWsGen || this.ws !== ws) return;
+        this._lastWsRawMessageAt = Date.now();
+        this.handleMessage(raw);
+      });
       ws.on('close', () => {
+        if (gen !== this._publicWsGen || this.ws !== ws) return;
         this.connected = false;
-        this.#stopFeedWatchdog();
+        this.#stopPublicWsTimers();
         if (this._shuttingDown) return;
-        setTimeout(() => {
-          this.connectWebSocket().catch(() => {});
-        }, 1000);
+        this.#schedulePublicWsReconnect('close');
       });
       ws.on('error', (err) => {
+        if (gen !== this._publicWsGen || this.ws !== ws) return;
         if (ws.readyState === WebSocket.CONNECTING) {
           reject(err);
         }
@@ -266,6 +312,131 @@ export class AsterAdapter extends BaseAdapter {
     }
   }
 
+  #startPublicHeartbeat() {
+    this.#stopPublicHeartbeat();
+    this._lastPongTime = Date.now();
+    this._pongCheckTimer = setInterval(() => {
+      if (this._shuttingDown || this._reconnectingPublicWs) return;
+      if (Date.now() - this._lastPongTime > this.pongTimeout) {
+        console.warn('[Aster] public WS pong timeout, reconnecting...');
+        this.#schedulePublicWsReconnect('pong-timeout');
+        return;
+      }
+      if (this.ws?.readyState === WebSocket.OPEN) {
+        this.ws.pong();
+      }
+    }, 30_000);
+    if (typeof this._pongCheckTimer.unref === 'function') {
+      this._pongCheckTimer.unref();
+    }
+  }
+
+  #stopPublicHeartbeat() {
+    if (this._pongCheckTimer) {
+      clearInterval(this._pongCheckTimer);
+      this._pongCheckTimer = null;
+    }
+  }
+
+  #startWsIdleMonitor() {
+    this.#stopWsIdleMonitor();
+    this._wsIdleCheckTimer = setInterval(() => {
+      if (this._shuttingDown || this._reconnectingPublicWs || !this.ws) return;
+      const last = Math.max(this._lastWsRawMessageAt || 0, this._lastPongTime || 0);
+      if (last > 0 && Date.now() - last > this._wsIdleReconnectMs) {
+        console.warn(`[Aster] public WS idle ${((Date.now() - last) / 1000).toFixed(0)}s, reconnecting...`);
+        this.#schedulePublicWsReconnect('ws-idle');
+      }
+    }, 30_000);
+    if (typeof this._wsIdleCheckTimer.unref === 'function') {
+      this._wsIdleCheckTimer.unref();
+    }
+  }
+
+  #stopWsIdleMonitor() {
+    if (this._wsIdleCheckTimer) {
+      clearInterval(this._wsIdleCheckTimer);
+      this._wsIdleCheckTimer = null;
+    }
+  }
+
+  #startPublicWs24hTimer() {
+    this.#stopPublicWs24hTimer();
+    this._publicWs24hTimer = setTimeout(() => {
+      if (this._shuttingDown || this._reconnectingPublicWs) return;
+      console.log('[Aster] public WS approaching 24h limit, proactive reconnect...');
+      this.#schedulePublicWsReconnect('24h-limit');
+    }, this._WS_PROACTIVE_RECONNECT_MS);
+    if (typeof this._publicWs24hTimer.unref === 'function') {
+      this._publicWs24hTimer.unref();
+    }
+  }
+
+  #stopPublicWs24hTimer() {
+    if (this._publicWs24hTimer) {
+      clearTimeout(this._publicWs24hTimer);
+      this._publicWs24hTimer = null;
+    }
+  }
+
+  #stopPublicWsTimers() {
+    this.#stopFeedWatchdog();
+    this.#stopPublicHeartbeat();
+    this.#stopWsIdleMonitor();
+    this.#stopPublicWs24hTimer();
+  }
+
+  #schedulePublicWsReconnect(reason = 'unknown') {
+    if (this._shuttingDown) return;
+    if (this._reconnectingPublicWs) return;
+    const now = Date.now();
+    if (now - this._publicWsReconnectAt < 1000) return;
+    this._publicWsReconnectAt = now;
+    setTimeout(() => {
+      this.#forcePublicWsReconnect(reason).catch((err) => {
+        console.warn(`[Aster] public WS reconnect (${reason}) failed:`, err.message);
+      });
+    }, 1000);
+  }
+
+  async #forcePublicWsReconnect(reason = 'unknown') {
+    if (this._reconnectingPublicWs || this._shuttingDown) return;
+    this._reconnectingPublicWs = true;
+    try {
+      this._wsDelayHighSamples = [];
+      this.#stopPublicWsTimers();
+      if (this.ws) {
+        this.ws.removeAllListeners();
+        this.ws.terminate();
+        this.ws = null;
+      }
+      await this.connectWebSocket();
+      console.log(`[Aster] public WS reconnected (${reason})`);
+    } finally {
+      this._reconnectingPublicWs = false;
+    }
+  }
+
+  #recordWsDelaySample(wsDelayMs, localTs) {
+    if (!Number.isFinite(wsDelayMs) || !Number.isFinite(this._wsDelayReconnectMs)) return;
+    if (this._wsDelayReconnectMs <= 0 || wsDelayMs <= this._wsDelayReconnectMs) return;
+    if (this._reconnectingPublicWs || this._shuttingDown) return;
+
+    const cutoff = localTs - this._wsDelayReconnectWindowMs;
+    this._wsDelayHighSamples = this._wsDelayHighSamples
+      .filter((ts) => ts >= cutoff)
+      .concat(localTs);
+
+    if (this._wsDelayHighSamples.length >= this._wsDelayReconnectHits) {
+      console.warn(
+        `[Aster] public WS delay ${Math.round(wsDelayMs)}ms > ${this._wsDelayReconnectMs}ms `
+        + `(${this._wsDelayHighSamples.length}/${this._wsDelayReconnectHits}), reconnecting...`
+      );
+      this._wsDelayHighSamples = [];
+      this.#schedulePublicWsReconnect('ws-delay');
+    }
+  }
+
   handleMessage(raw) {
     try {
       const msg = JSON.parse(raw.toString());
@@ -282,12 +453,20 @@ export class AsterAdapter extends BaseAdapter {
       const exchangeMsRaw = rawEventTs != null && Number.isFinite(Number(rawEventTs))
         ? (Number(rawEventTs) > 1e12 ? Number(rawEventTs) : Number(rawEventTs) * 1000)
         : null;
-      const wsDelayMs = exchangeMsRaw != null ? Math.max(0, localTs - exchangeMsRaw) : null;
+      let wsDelayMs = exchangeMsRaw != null ? Math.max(0, localTs - exchangeMsRaw) : null;
+      let exchangeMs = exchangeMsRaw ?? localTs;
+      // 交易所时间字段偶发异常时不触发误判重连：降级为本地时间并忽略该样本延迟
+      const MAX_SANE_WS_DELAY_MS = 30_000;
+      if (exchangeMsRaw != null && wsDelayMs > MAX_SANE_WS_DELAY_MS) {
+        exchangeMs = localTs;
+        wsDelayMs = null;
+      }
+      this.#recordWsDelaySample(wsDelayMs, localTs);
       const ticker = {
         symbol: this.normalizeSymbol(payload.s),
         bid,
         ask,
-        timestamp: exchangeMsRaw ?? localTs,
+        timestamp: exchangeMs,
         serverTimestamp: rawEventTs,
         wsDelayMs
       };

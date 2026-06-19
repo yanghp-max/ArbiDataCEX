@@ -26,6 +26,32 @@ function buildWorkerStaleMs(strat) {
   return strat.maxPriceAgeMs != null ? Math.max(900, strat.maxPriceAgeMs - 100) : 900;
 }
 
+function buildWorkerProviderConfig(provider, strat, staleMs) {
+  if (provider === 'binance') {
+    return {
+      listenKeyKeepaliveMin: strat.listenKeyKeepaliveMin ?? 30,
+      symbolStaleMs: staleMs
+    };
+  }
+  if (provider === 'gate') {
+    return {
+      accountMode: strat.gateAccountMode,
+      symbolStaleMs: staleMs
+    };
+  }
+  if (provider === 'aster') {
+    return {
+      listenKeyKeepaliveMin: strat.listenKeyKeepaliveMin ?? 30,
+      symbolStaleMs: staleMs,
+      maxWsLatencyMs: strat.maxWsLatencyMs,
+      wsDelayReconnectMs: strat.asterWsDelayReconnectMs ?? strat.maxWsLatencyMs,
+      wsDelayReconnectHits: strat.asterWsDelayReconnectHits,
+      wsDelayReconnectWindowMs: strat.asterWsDelayReconnectWindowMs
+    };
+  }
+  return {};
+}
+
 export class SharedResources {
   constructor(config, options = {}) {
     this.config = config;
@@ -72,30 +98,24 @@ export class SharedResources {
     });
 
     const useBinanceWorker = shouldUseBinanceMarketWorker(this.adapterPair) && isCexMarketWorkerEnabled(strat);
-    const workerIncludesGate = this.adapterPair.providerB === 'gate';
     this.useCexMarketWorker = useBinanceWorker;
     const staleMs = buildWorkerStaleMs(strat);
+    const workerProviders = this.adapterPair.providers;
 
     if (this.useCexMarketWorker) {
       this.cexMarketWorkerClient = new CexMarketWorkerClient({
         debug: Boolean(strat.debugCexMarketWorker ?? strat.debugBinanceMarketWorker),
-        configProvider: () => ({
-          binance: {
-            listenKeyKeepaliveMin: strat.listenKeyKeepaliveMin ?? 30,
-            symbolStaleMs: staleMs
-          },
-          enableGate: workerIncludesGate,
-          gate: workerIncludesGate
-            ? {
-              accountMode: strat.gateAccountMode,
-              symbolStaleMs: staleMs
-            }
-            : null
-        })
+        configProvider: () => Object.fromEntries([
+          ['providers', workerProviders],
+          ...workerProviders.map((provider) => [
+            provider,
+            buildWorkerProviderConfig(provider, strat, staleMs)
+          ])
+        ])
       });
       try {
         await this.cexMarketWorkerClient.initialize();
-        const workerMode = workerIncludesGate ? 'binance+gate' : 'binance-only';
+        const workerMode = workerProviders.join('+');
         console.log(
           `[SharedResources] CEX market worker ready (${workerMode} public WS in child process)`
         );
@@ -109,7 +129,7 @@ export class SharedResources {
     const useWorker = Boolean(this.cexMarketWorkerClient);
     const publicStreamByProvider = {};
     for (const provider of this.adapterPair.providers) {
-      if (useWorker && provider === this.adapterPair.providerA) {
+      if (useWorker && workerProviders.includes(provider)) {
         publicStreamByProvider[provider] = false;
       } else {
         publicStreamByProvider[provider] = true;
