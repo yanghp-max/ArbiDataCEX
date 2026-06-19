@@ -113,6 +113,12 @@ class CexMarketWorkerRuntime {
           payload: { exchange: provider, provider, ...payload }
         });
       });
+      adapter.on(EventTypes.DISCONNECTED, (payload) => {
+        this._send({
+          type: MSG_WS_DISCONNECTED,
+          payload: { exchange: provider, provider, ...(payload || {}) }
+        });
+      });
       adapter.on(EventTypes.ERROR, (error) => {
         this._send({
           type: MSG_DIAG,
