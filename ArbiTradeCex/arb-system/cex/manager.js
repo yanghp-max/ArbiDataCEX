@@ -1,9 +1,10 @@
 import { BinanceAdapter } from './adapters/binance-adapter.js';
 import { GateAdapter } from './adapters/gate-adapter.js';
 import { AsterAdapter } from './adapters/aster-adapter.js';
+import { OkxAdapter } from './adapters/okx-adapter.js';
 import { applyDefaultLeverage } from './leverage-bootstrap.js';
 
-export { BinanceAdapter, GateAdapter, AsterAdapter };
+export { BinanceAdapter, GateAdapter, AsterAdapter, OkxAdapter };
 export { BaseAdapter } from './adapters/base-adapter.js';
 
 export class CexManager {
@@ -215,6 +216,15 @@ export class CexManager {
           adapter: new AsterAdapter({
             enablePublicStream: providerPublicStream,
             listenKeyKeepaliveMin: strategyConfig.listenKeyKeepaliveMin ?? 30
+          })
+        });
+        continue;
+      }
+      if (provider === 'okx') {
+        adapters.push({
+          name: provider,
+          adapter: new OkxAdapter({
+            enablePublicStream: providerPublicStream
           })
         });
         continue;

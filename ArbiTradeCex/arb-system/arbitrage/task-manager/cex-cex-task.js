@@ -82,6 +82,17 @@ function resolveForceCloseExecDirection(aQty, bQty, lockedDirection) {
   return '-a+b';
 }
 
+function resolveBLegLimitsFromMinQtyCfg(cfg = {}, providerB = 'gate') {
+  const provider = String(providerB || '').trim().toLowerCase();
+  if (cfg?.legs?.B?.provider === provider && cfg?.legs?.B?.limits) {
+    return cfg.legs.B.limits;
+  }
+  if (cfg?.providers?.[provider]) {
+    return cfg.providers[provider];
+  }
+  return cfg?.gate || {};
+}
+
 export class CexCexTask {
   constructor(sharedResources, strategyConfig, precisionChecker) {
     this.sr = sharedResources;
@@ -334,7 +345,7 @@ export class CexCexTask {
     try {
       const cfg = this.precision?.minQtyBySymbol?.[sym] || {};
       const binanceStepSize = Number(cfg?.binance?.stepSize) || undefined;
-      const gateCfg = cfg?.gate || {};
+      const gateCfg = resolveBLegLimitsFromMinQtyCfg(cfg, this.providerB);
       const gateMult = Number(gateCfg?.quantoMultiplier);
       const gateDecimalSize = Boolean(gateCfg?.enableDecimal || gateCfg?.quantityUnit === 'base');
       const gateBaseQty = Math.abs(beforeB);

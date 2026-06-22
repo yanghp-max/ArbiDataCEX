@@ -31,7 +31,8 @@ import { fetchGateContractsDecimal, mapWithConcurrency } from '../common/utils/f
 const DEFAULT_URLS = {
   binance: process.env.BINANCE_REST_URL || 'https://fapi.binance.com',
   gate: process.env.GATE_REST_URL || 'https://api.gateio.ws/api/v4',
-  aster: process.env.ASTER_REST_URL || 'https://fapi.asterdex.com'
+  aster: process.env.ASTER_REST_URL || 'https://fapi.asterdex.com',
+  okx: process.env.OKX_REST_URL || 'https://www.okx.com'
 };
 
 function isBinanceLikeProvider(provider) {
@@ -114,8 +115,8 @@ function parseArgs(argv) {
   if (!isBinanceLikeProvider(args.providerA)) {
     throw new Error(`providerA=${args.providerA} not supported yet (supported: binance, aster)`);
   }
-  if (!(args.providerB === 'gate' || isBinanceLikeProvider(args.providerB))) {
-    throw new Error(`providerB=${args.providerB} not supported yet (supported: gate, binance, aster)`);
+  if (!(args.providerB === 'gate' || args.providerB === 'okx' || isBinanceLikeProvider(args.providerB))) {
+    throw new Error(`providerB=${args.providerB} not supported yet (supported: gate, okx, binance, aster)`);
   }
   return args;
 }
@@ -149,6 +150,18 @@ function buildPerpSetGate(contracts) {
   return out;
 }
 
+function buildPerpSetOkx(instruments) {
+  const out = new Set();
+  for (const i of instruments || []) {
+    const instId = String(i.instId || '');
+    if (!instId.endsWith('-SWAP')) continue;
+    if (String(i.settleCcy || '').toUpperCase() !== 'USDT') continue;
+    if (String(i.state || '').toLowerCase() !== 'live') continue;
+    out.add(instId);
+  }
+  return out;
+}
+
 function buildInfoMap(items, keySelector) {
   const map = new Map();
   for (const item of items || []) {
@@ -173,6 +186,22 @@ function buildQvMapGate(rows) {
     if (!c) continue;
     const v = Number(i.volume_24h_quote ?? i.volume_24h_usd ?? i.volume_24h ?? i.volume ?? 0) || 0;
     out.set(c, v);
+  }
+  return out;
+}
+
+function buildQvMapOkx(rows) {
+  const out = new Map();
+  for (const i of rows || []) {
+    const instId = String(i.instId || '');
+    if (!instId) continue;
+    const last = Number(i.last || 0);
+    const volCcy24h = Number(i.volCcy24h || 0);
+    const vol24h = Number(i.vol24h || 0);
+    const quoteVol = Number.isFinite(volCcy24h) && volCcy24h > 0
+      ? volCcy24h * (Number.isFinite(last) && last > 0 ? last : 1)
+      : vol24h;
+    out.set(instId, Number.isFinite(quoteVol) ? quoteVol : 0);
   }
   return out;
 }
@@ -211,13 +240,59 @@ function buildBookTickerMapGate(rows) {
   return map;
 }
 
+function buildBookTickerMapOkx(rows) {
+  const map = new Map();
+  for (const t of rows || []) {
+    const instId = String(t.instId || '');
+    if (!instId) continue;
+    const bid = Number(t.bidPx);
+    const ask = Number(t.askPx);
+    const last = Number(t.last);
+    map.set(instId, {
+      bid: Number.isFinite(bid) ? bid : null,
+      ask: Number.isFinite(ask) ? ask : null,
+      last: Number.isFinite(last) ? last : null,
+      mid: Number.isFinite(bid) && Number.isFinite(ask) ? (bid + ask) / 2 : null
+    });
+  }
+  return map;
+}
+
 function buildProviderBSymbolMap(providerBSet, providerB) {
   const map = new Map();
   for (const raw of providerBSet) {
-    const key = providerB === 'gate' ? compactSymbol(raw) : String(raw);
+    const key = (providerB === 'gate' || providerB === 'okx') ? compactSymbol(raw) : String(raw);
     map.set(key, String(raw));
   }
   return map;
+}
+
+function resolveOkxOrderLimits(inst, { binanceMinQty = 0 } = {}) {
+  const ctVal = Number(inst?.ctVal);
+  const minSz = Number(inst?.minSz);
+  const lotSz = Number(inst?.lotSz);
+  const m = Number.isFinite(ctVal) && ctVal > 0 ? ctVal : 1;
+  const minContracts = Number.isFinite(minSz) && minSz > 0 ? minSz : 1;
+  const contractStep = Number.isFinite(lotSz) && lotSz > 0 ? lotSz : 1;
+  const minBaseQty = minContracts * m;
+  const baseStep = contractStep * m;
+  let hedgeMinBaseQty = minBaseQty;
+  if (baseStep > 0 && Number.isFinite(binanceMinQty) && binanceMinQty > 0) {
+    const k = Math.ceil(binanceMinQty / baseStep);
+    hedgeMinBaseQty = Math.max(hedgeMinBaseQty, k * baseStep);
+  }
+  return {
+    minQty: minBaseQty,
+    stepSize: baseStep > 0 ? baseStep : minBaseQty,
+    quantityUnit: 'contract',
+    enableDecimal: true,
+    quantoMultiplier: m,
+    minBaseQty,
+    gateOrderSizeMin: minContracts,
+    gateOrderSizeRound: contractStep,
+    hedgeMinBaseQty,
+    hedgeMinQtyByBinanceStep: hedgeMinBaseQty
+  };
 }
 
 function buildCommonRows(setA, setB, qvA, qvB, providerB) {
@@ -315,6 +390,19 @@ async function buildMinQtyEntry({
       binanceStepSize: limitsA.stepSize,
       gateSymbol: bSymbol
     });
+  } else if (providerB === 'okx') {
+    const resolved = resolveOkxOrderLimits(infoB, { binanceMinQty: limitsA.minQty });
+    limitsB = {
+      symbol: bSymbol,
+      ...resolved,
+      priceRef: {
+        collectedAt: priceCollectedAt,
+        bid: tickerB?.bid ?? null,
+        ask: tickerB?.ask ?? null,
+        mid: tickerB?.mid ?? null,
+        last: tickerB?.last ?? null
+      }
+    };
   } else {
     const refB = refPriceFromTicker(tickerB);
     const { symbolInfo: resolvedBInfo } = await resolveBinanceLikeSymbolInfoForBuild(
@@ -447,6 +535,21 @@ async function main() {
     qvB = buildQvMapGate(tickers);
     infoMapB = buildInfoMap(contracts, (c) => c.name || c.contract);
     tickerMapB = buildBookTickerMapGate(tickers);
+  } else if (args.providerB === 'okx') {
+    const [instruments, tickers] = await Promise.all([
+      axios.get(`${restB}/api/v5/public/instruments`, {
+        params: { instType: 'SWAP' },
+        timeout: 30000
+      }).then((r) => r.data?.data || []),
+      axios.get(`${restB}/api/v5/market/tickers`, {
+        params: { instType: 'SWAP' },
+        timeout: 30000
+      }).then((r) => r.data?.data || [])
+    ]);
+    setB = buildPerpSetOkx(instruments);
+    qvB = buildQvMapOkx(tickers);
+    infoMapB = buildInfoMap(instruments, (i) => i.instId);
+    tickerMapB = buildBookTickerMapOkx(tickers);
   } else {
     const bundleB = await fetchBinanceLikeBundle(restB, args.providerB);
     setB = buildPerpSetBinanceLike(bundleB.exchangeInfo);
@@ -533,12 +636,18 @@ async function main() {
       a24h: `${restA}${binanceLikePath(args.providerA, '/ticker/24hr')}`,
       bExchangeInfo: args.providerB === 'gate'
         ? `${restB}/futures/usdt/contracts (X-Gate-Size-Decimal: 1)`
+        : args.providerB === 'okx'
+          ? `${restB}/api/v5/public/instruments?instType=SWAP`
         : `${restB}${binanceLikePath(args.providerB, '/exchangeInfo')}`,
       bBookTicker: args.providerB === 'gate'
         ? `${restB}/futures/usdt/tickers`
+        : args.providerB === 'okx'
+          ? `${restB}/api/v5/market/tickers?instType=SWAP`
         : `${restB}${binanceLikePath(args.providerB, '/ticker/bookTicker')}`,
       b24h: args.providerB === 'gate'
         ? `${restB}/futures/usdt/tickers`
+        : args.providerB === 'okx'
+          ? `${restB}/api/v5/market/tickers?instType=SWAP`
         : `${restB}${binanceLikePath(args.providerB, '/ticker/24hr')}`
     },
     symbols: minQtySymbols

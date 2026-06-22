@@ -4,6 +4,7 @@
 import { BinanceAdapter } from '../../cex/adapters/binance-adapter.js';
 import { GateAdapter } from '../../cex/adapters/gate-adapter.js';
 import { AsterAdapter } from '../../cex/adapters/aster-adapter.js';
+import { OkxAdapter } from '../../cex/adapters/okx-adapter.js';
 import { EventTypes } from '../../cex/types.js';
 
 const MSG_READY = 'ready';
@@ -50,6 +51,12 @@ function createAdapter(provider, config = {}) {
       enablePublicStream: true
     });
   }
+  if (provider === 'okx') {
+    return new OkxAdapter({
+      ...config,
+      enablePublicStream: true
+    });
+  }
   throw new Error(`Unsupported market worker provider: ${provider}`);
 }
 
@@ -65,6 +72,9 @@ function resolveProviders(config = {}) {
   }
   if (config.enableAster !== false && config.aster != null) {
     providers.push('aster');
+  }
+  if (config.enableOkx !== false && config.okx != null) {
+    providers.push('okx');
   }
   return providers;
 }

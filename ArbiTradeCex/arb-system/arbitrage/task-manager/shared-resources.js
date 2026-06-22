@@ -49,6 +49,11 @@ function buildWorkerProviderConfig(provider, strat, staleMs) {
       wsDelayReconnectWindowMs: strat.asterWsDelayReconnectWindowMs
     };
   }
+  if (provider === 'okx') {
+    return {
+      symbolStaleMs: staleMs
+    };
+  }
   return {};
 }
 
