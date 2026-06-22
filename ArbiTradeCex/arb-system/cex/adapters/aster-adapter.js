@@ -11,6 +11,7 @@ import { cryptoUtils } from '../utils.js';
 import {
   checkOrderPreconditions as runCheckOrderPreconditions
 } from '../utils/check-order-preconditions.js';
+import { describeAsterApiError } from '../utils/aster-api-error.js';
 
 export class AsterAdapter extends BaseAdapter {
   constructor(config = {}) {
@@ -566,10 +567,14 @@ export class AsterAdapter extends BaseAdapter {
       requestConfig.url = url;
       requestConfig.data = signedBody;
     }
-    const { data } = await axios({
-      ...requestConfig
-    });
-    return data;
+    try {
+      const { data } = await axios({
+        ...requestConfig
+      });
+      return data;
+    } catch (err) {
+      throw new Error(describeAsterApiError(err));
+    }
   }
 
   #mapOrderStatus(status) {
@@ -730,7 +735,15 @@ export class AsterAdapter extends BaseAdapter {
     if (orderData.reduceOnly) {
       params.reduceOnly = 'true';
     }
-    const response = await this.#signedRequest('POST', '/fapi/v3/order', params);
+    let response;
+    try {
+      response = await this.#signedRequest('POST', '/fapi/v3/order', params);
+    } catch (err) {
+      throw new Error(
+        `${err.message} | order(symbol=${params.symbol}, side=${side}, type=${type}, qty=${params.quantity}`
+        + `, reduceOnly=${Boolean(orderData.reduceOnly)})`
+      );
+    }
     return new Order({
       orderId: String(response.orderId),
       clientOrderId: response.clientOrderId,

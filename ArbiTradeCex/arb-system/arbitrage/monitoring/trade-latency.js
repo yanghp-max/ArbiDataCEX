@@ -282,8 +282,10 @@ export function formatLatencyLogLines(trace) {
   if (submitStage?.ms > 0 || submitMs) {
     const parallel = roundMs(submitStage?.ms ?? submitMs?.parallel);
     let submitLine = `发单提交(placeOrder) 并行${parallel}ms`;
-    if (submitMs?.binance != null && submitMs?.gate != null) {
-      submitLine += ` [Binance ${roundMs(submitMs.binance)}ms Gate ${roundMs(submitMs.gate)}ms]`;
+    const aMs = trace?.aOrderSendMs ?? submitMs?.a;
+    const bMs = trace?.bOrderSendMs ?? submitMs?.b;
+    if (aMs != null && bMs != null) {
+      submitLine += ` [A ${roundMs(aMs)}ms B ${roundMs(bMs)}ms]`;
     }
     parts.push(submitLine);
   }
@@ -394,6 +396,8 @@ export function latencyCsvFields(trace) {
     lat_stage_precheck_ms: byLabel['预检'] ?? '',
     lat_stage_presend_ms: byLabel['待发'] ?? '',
     lat_stage_order_send_ms: byLabel['发单提交'] ?? '',
+    lat_a_order_send_ms: trace?.aOrderSendMs ?? '',
+    lat_b_order_send_ms: trace?.bOrderSendMs ?? '',
     lat_decision_to_submit_done_ms: latDecisionToSubmitDoneMs(trace) ?? '',
     ...priceStagesCsvFields(trace)
   };

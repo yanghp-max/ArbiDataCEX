@@ -193,9 +193,17 @@ export class OrderExecutor {
     const parallelMs = Math.max(0, (latencyTrace?.marks?.order_send_done ?? 0)
       - (latencyTrace?.marks?.order_send_start ?? 0));
     if (latencyTrace) {
+      latencyTrace.aOrderSendMs = submitMs[this.providerA];
+      latencyTrace.bOrderSendMs = submitMs[this.providerB];
       latencyTrace.orderSubmitMs = { ...submitMs, parallel: parallelMs };
     }
-    this.#logPlaceOrderSubmit(tick.symbol, submitMs, parallelMs, aResult, bResult);
+    this.#logPlaceOrderSubmit(tick.symbol, submitMs, parallelMs, aResult, bResult, {
+      reduceOnly,
+      aSide: binanceSide,
+      bSide: gateSide,
+      qty,
+      gateSize
+    });
 
     if (aResult.status === 'rejected' && bResult.status === 'rejected') {
       throw new Error(
@@ -523,20 +531,24 @@ export class OrderExecutor {
     }
   }
 
-  #logPlaceOrderSubmit(symbol, submitMs, parallelMs, aResult, bResult) {
+  #logPlaceOrderSubmit(symbol, submitMs, parallelMs, aResult, bResult, req = {}) {
     if (!this.tradingEnabled) return;
-    const fmtLeg = (name, ms, result) => {
+    const { reduceOnly = false, aSide, bSide, qty, gateSize } = req;
+    const fmtLeg = (name, ms, result, side, legQty) => {
       if (ms == null) return `${name} -`;
+      const reqTag = side && legQty != null
+        ? ` ${side} qty=${legQty}${reduceOnly ? ' RO' : ''}`
+        : '';
       if (result.status === 'fulfilled') {
-        return `${name} ${ms}ms id=${result.value?.orderId ?? '?'}`;
+        return `${name} ${ms}ms id=${result.value?.orderId ?? '?'}${reqTag}`;
       }
       const msg = result.reason?.message || 'unknown';
-      return `${name} FAIL ${ms}ms (${msg})`;
+      return `${name} FAIL ${ms}ms${reqTag} (${msg})`;
     };
     console.log(
       `[发单·提交] ${symbol}`
-      + ` ${fmtLeg(this.providerA, submitMs[this.providerA], aResult)}`
-      + ` | ${fmtLeg(this.providerB, submitMs[this.providerB], bResult)}`
+      + ` ${fmtLeg(this.providerA, submitMs[this.providerA], aResult, aSide, qty)}`
+      + ` | ${fmtLeg(this.providerB, submitMs[this.providerB], bResult, bSide, gateSize)}`
       + ` | 并行 ${parallelMs}ms（placeOrder 返回，不含等成交）`
     );
   }

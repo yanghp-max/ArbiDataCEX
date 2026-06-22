@@ -888,7 +888,8 @@ export class CexCexTask {
       openZ: tradePlan.openZ,
       closeZ: tradePlan.closeZ,
       reservations,
-      latencyTrace
+      latencyTrace,
+      posBefore
     }).catch((err) => console.error(`[CexCexTask] execute error ${symbol}:`, err.message));
   }
 
@@ -950,6 +951,93 @@ export class CexCexTask {
     }
     for (const line of formatLatencyLogLines(trace)) {
       console.warn(line);
+    }
+  }
+
+  async #logLegExposureDetail(symbol, {
+    action,
+    execDirection,
+    lockedDirection,
+    fill,
+    order,
+    posBefore,
+    latencyTrace
+  }) {
+    if (!this.sr.tradingEnabled || !fill?.legExposure) return;
+
+    const posAfterCache = {
+      a: this.#getPositionA(symbol),
+      b: this.#getPositionB(symbol)
+    };
+    const quote = fill.quote ?? {};
+    const aNotional = fill.aFilledQty > 0 && (fill.aFillPrice ?? quote.aPriceNominal)
+      ? fill.aFilledQty * Number(fill.aFillPrice ?? quote.aPriceNominal)
+      : null;
+    const bNotionalEst = order?.qty && quote.bPriceNominal
+      ? order.qty * Number(quote.bPriceNominal)
+      : null;
+
+    let restPosLine = 'REST持仓 未查询';
+    if (!this.sr.useMockAccount) {
+      try {
+        const key = String(symbol).replace(/[-_]/g, '');
+        const findPos = (rows) => (rows || []).find(
+          (p) => String(p.symbol).replace(/[-_]/g, '') === key
+        );
+        const [aRows, bRows] = await Promise.all([
+          this.sr.cexManager.getPositions(this.providerA, { silent: true }),
+          this.sr.cexManager.getPositions(this.providerB, { silent: true })
+        ]);
+        const aRaw = findPos(aRows);
+        const bRaw = findPos(bRows);
+        restPosLine = `REST持仓 ${this.providerA}=${aRaw?.qty ?? '无'}`
+          + ` ${this.providerB}=${bRaw?.qty ?? '无'}`;
+        if (bRaw && fill.failedLeg === this.providerB) {
+          restPosLine += ` (${this.providerB} contracts=${bRaw.contracts ?? '?'})`;
+        }
+      } catch (err) {
+        restPosLine = `REST持仓查询失败: ${err?.message || err}`;
+      }
+    }
+
+    const reduceOnly = action === 'close';
+    const lines = [
+      `[实盘·单腿] ${symbol} ${action} ${execDirection}`
+        + ` lock=${lockedDirection ?? '-'} 失败腿=${fill.failedLeg}`
+        + ` 原因=${fill.failReason || '成交量为0'}`,
+      `[实盘·单腿] ${symbol} [发单]`
+        + ` A ${fill.aSide} qty=${order?.qty ?? '?'}`
+        + ` | B ${fill.bSide} gateSize=${order?.gateSize ?? '?'}`
+        + ` reduceOnly=${reduceOnly}`
+        + (bNotionalEst != null ? ` B估算名义=${bNotionalEst.toFixed(4)}U` : ''),
+      `[实盘·单腿] ${symbol} [成交]`
+        + ` A=${fill.aFilledQty}${fill.aFillPrice ? `@${Number(fill.aFillPrice).toFixed(8)}` : ''}`
+        + ` B=${fill.bFilledQty}${fill.bFillPrice ? `@${Number(fill.bFillPrice).toFixed(8)}` : ''}`
+        + (aNotional != null ? ` A名义=${aNotional.toFixed(4)}U` : ''),
+      `[实盘·单腿] ${symbol} [持仓]`
+        + ` 发单前 A=${posBefore?.a ?? '?'} B=${posBefore?.b ?? '?'}`
+        + ` | 缓存后 A=${posAfterCache.a} B=${posAfterCache.b}`
+        + ` | ${restPosLine}`
+    ];
+    if (fill.rollbackApplied) {
+      lines.push(`[实盘·单腿] ${symbol} [回滚] 已尝试自动回滚`);
+    } else if (action === 'close') {
+      lines.push(`[实盘·单腿] ${symbol} [提示] 平仓单腿未自动回滚，请人工核对并补平`);
+    }
+
+    for (const line of formatPriceStageLines(latencyTrace)) {
+      lines.push(`[实盘·单腿] ${symbol} ${line}`);
+    }
+    for (const line of formatLatencyLogLines(latencyTrace)) {
+      lines.push(`[实盘·单腿] ${symbol} ${line}`);
+    }
+
+    for (const line of lines) {
+      appendTextLog(line, { level: 'error', mirrorConsole: false });
+    }
+    console.warn(lines[0]);
+    for (let i = 1; i < lines.length; i += 1) {
+      console.warn(lines[i]);
     }
   }
 
@@ -1102,7 +1190,8 @@ export class CexCexTask {
       order,
       adjSpread,
       reservations,
-      latencyTrace
+      latencyTrace,
+      posBefore
     } = ctx;
     const tradeId = reservations?.tradeId;
     try {
@@ -1227,6 +1316,18 @@ export class CexCexTask {
           );
         }
         await this.#auditPostTradeHedge(symbol, fill);
+      }
+
+      if (fill.legExposure) {
+        await this.#logLegExposureDetail(symbol, {
+          action,
+          execDirection,
+          lockedDirection,
+          fill,
+          order,
+          posBefore,
+          latencyTrace
+        });
       }
 
       const netPnl = calcTradePnl(fill);

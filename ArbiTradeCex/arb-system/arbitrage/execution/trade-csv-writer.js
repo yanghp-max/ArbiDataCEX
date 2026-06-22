@@ -63,6 +63,8 @@ const CSV_COLUMNS = [
   'lat_stage_precheck_ms',
   'lat_stage_presend_ms',
   'lat_stage_order_send_ms',
+  'lat_a_order_send_ms',
+  'lat_b_order_send_ms',
   'lat_decision_to_submit_done_ms',
   'lat_local_old_to_order_ms',
   'lat_local_new_to_order_ms',
@@ -84,7 +86,7 @@ function rowToLine(row) {
 }
 
 /** 列顺序变更时递增，用于检测旧版 CSV 表头（曾用 gross_pnl/fee_cost 紧接 b_order_id，无 leg usdt 列） */
-export const TRADE_CSV_SCHEMA_VERSION = 4;
+export const TRADE_CSV_SCHEMA_VERSION = 5;
 
 export class TradeCsvWriter {
   constructor({ filePath, rootDir }) {
