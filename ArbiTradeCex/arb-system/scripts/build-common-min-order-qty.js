@@ -129,6 +129,11 @@ function compactSymbol(symbol) {
   return String(symbol || '').replace(/[-_]/g, '').toUpperCase();
 }
 
+/** OKX instId e.g. BTC-USDT-SWAP → BTCUSDT (align okx-adapter compactSymbol) */
+function okxInstIdToSymbolId(instId) {
+  return String(instId || '').replace(/[-_]/g, '').replace(/SWAP$/i, '').toUpperCase();
+}
+
 function buildPerpSetBinanceLike(exchangeInfo) {
   const out = new Set();
   for (const s of exchangeInfo.symbols || []) {
@@ -258,10 +263,16 @@ function buildBookTickerMapOkx(rows) {
   return map;
 }
 
+function providerBSymbolKey(raw, providerB) {
+  if (providerB === 'okx') return okxInstIdToSymbolId(raw);
+  if (providerB === 'gate') return compactSymbol(raw);
+  return String(raw);
+}
+
 function buildProviderBSymbolMap(providerBSet, providerB) {
   const map = new Map();
   for (const raw of providerBSet) {
-    const key = (providerB === 'gate' || providerB === 'okx') ? compactSymbol(raw) : String(raw);
+    const key = providerBSymbolKey(raw, providerB);
     map.set(key, String(raw));
   }
   return map;
