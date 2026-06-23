@@ -1,6 +1,6 @@
 /**
  * OKX USDT-SWAP adapter.
- * Public market data: WS tickers + REST fallback.
+ * Public market data: WS bbo-tbt (10ms BBO) + REST fallback.
  * Trading/account: REST (private WS not required by current strategy flow).
  */
 import crypto from 'node:crypto';
@@ -22,6 +22,45 @@ function compactSymbol(symbol) {
 
 function isFinitePositive(n) {
   return Number.isFinite(Number(n)) && Number(n) > 0;
+}
+
+/** OKX public WS channel for best bid/offer (tick-by-tick, ~10ms). */
+const OKX_BBO_WS_CHANNEL = 'bbo-tbt';
+const MAX_SANE_WS_DELAY_MS = 30_000;
+
+function parseOkxWsBookPayload(msg) {
+  if (!Array.isArray(msg?.data) || msg.data.length === 0) return null;
+  const payload = msg.data[0];
+  const instId = String(payload?.instId || msg?.arg?.instId || '');
+  if (!instId) return null;
+
+  let bid = null;
+  let ask = null;
+  let bidQty = null;
+  let askQty = null;
+
+  if (payload.bidPx != null && payload.askPx != null) {
+    bid = Number(payload.bidPx);
+    ask = Number(payload.askPx);
+  } else if (Array.isArray(payload.bids) && Array.isArray(payload.asks)) {
+    bid = Number(payload.bids[0]?.[0]);
+    ask = Number(payload.asks[0]?.[0]);
+    bidQty = Number(payload.bids[0]?.[1]);
+    askQty = Number(payload.asks[0]?.[1]);
+  }
+
+  if (!isFinitePositive(bid) || !isFinitePositive(ask)) return null;
+
+  const exchangeMs = Number(payload.ts);
+  const serverTs = Number.isFinite(exchangeMs) ? exchangeMs : null;
+  return {
+    instId,
+    bid,
+    ask,
+    bidQty: Number.isFinite(bidQty) ? bidQty : null,
+    askQty: Number.isFinite(askQty) ? askQty : null,
+    serverTs
+  };
 }
 
 export class OkxAdapter extends BaseAdapter {
@@ -271,7 +310,7 @@ export class OkxAdapter extends BaseAdapter {
       for (const ch of channels) {
         if (ch !== 'bookTicker') continue;
         this.subscriptionQueue.push(JSON.stringify({
-          channel: 'tickers',
+          channel: OKX_BBO_WS_CHANNEL,
           instId: this.toExchangeSymbol(symbol)
         }));
       }
@@ -286,7 +325,7 @@ export class OkxAdapter extends BaseAdapter {
         for (const ch of this.subscribedChannels) {
           if (ch !== 'bookTicker') continue;
           streams.add(JSON.stringify({
-            channel: 'tickers',
+            channel: OKX_BBO_WS_CHANNEL,
             instId: this.toExchangeSymbol(symbol)
           }));
         }
@@ -373,23 +412,31 @@ export class OkxAdapter extends BaseAdapter {
   handleMessage(raw) {
     try {
       const msg = JSON.parse(raw.toString());
-      if (!Array.isArray(msg?.data) || msg.data.length === 0) return;
-      const payload = msg.data[0];
-      const instId = String(payload.instId || msg?.arg?.instId || '');
-      const bid = Number(payload.bidPx);
-      const ask = Number(payload.askPx);
-      if (!instId || !isFinitePositive(bid) || !isFinitePositive(ask)) return;
+      if (msg?.event === 'subscribe' || msg?.event === 'unsubscribe' || msg?.event === 'error') {
+        if (msg?.event === 'error') {
+          console.warn('[OKX] public WS error:', msg.msg || msg.code || raw.toString());
+        }
+        return;
+      }
+      const parsed = parseOkxWsBookPayload(msg);
+      if (!parsed) return;
 
       const localTs = Date.now();
-      const exchangeMs = Number(payload.ts);
-      const serverTs = Number.isFinite(exchangeMs) ? exchangeMs : null;
-      const wsDelayMs = serverTs != null ? Math.max(0, localTs - serverTs) : null;
+      let wsDelayMs = parsed.serverTs != null ? Math.max(0, localTs - parsed.serverTs) : null;
+      let exchangeMs = parsed.serverTs ?? localTs;
+      if (parsed.serverTs != null && wsDelayMs > MAX_SANE_WS_DELAY_MS) {
+        exchangeMs = localTs;
+        wsDelayMs = null;
+      }
+
       const ticker = {
-        symbol: this.normalizeSymbol(instId),
-        bid,
-        ask,
-        timestamp: serverTs ?? localTs,
-        serverTimestamp: serverTs,
+        symbol: this.normalizeSymbol(parsed.instId),
+        bid: parsed.bid,
+        ask: parsed.ask,
+        bidQty: parsed.bidQty,
+        askQty: parsed.askQty,
+        timestamp: exchangeMs,
+        serverTimestamp: parsed.serverTs,
         wsDelayMs
       };
       this.#emitBookTicker(ticker, { receiveLocalTs: localTs });
@@ -757,3 +804,4 @@ export class OkxAdapter extends BaseAdapter {
 }
 
 export default OkxAdapter;
+export { parseOkxWsBookPayload, OKX_BBO_WS_CHANNEL };
