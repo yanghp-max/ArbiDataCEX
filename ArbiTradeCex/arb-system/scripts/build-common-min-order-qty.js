@@ -32,8 +32,15 @@ const DEFAULT_URLS = {
   binance: process.env.BINANCE_REST_URL || 'https://fapi.binance.com',
   gate: process.env.GATE_REST_URL || 'https://api.gateio.ws/api/v4',
   aster: process.env.ASTER_REST_URL || 'https://fapi.asterdex.com',
-  okx: process.env.OKX_REST_URL || 'https://www.okx.com'
+  okx: process.env.OKX_REST_URL || 'https://www.okx.com',
+  bybit: process.env.BYBIT_REST_URL || 'https://api.bybit.com',
+  bitget: process.env.BITGET_REST_URL || 'https://api.bitget.com',
+  hyperliquid: process.env.HYPERLIQUID_REST_URL || 'https://api.hyperliquid.xyz'
 };
+
+const BASE_QTY_PROVIDERS = new Set(['binance', 'aster', 'bybit', 'bitget', 'hyperliquid']);
+const CONTRACT_QTY_PROVIDERS = new Set(['gate', 'okx']);
+const ALL_PROVIDERS = new Set([...BASE_QTY_PROVIDERS, ...CONTRACT_QTY_PROVIDERS]);
 
 function isBinanceLikeProvider(provider) {
   return provider === 'binance' || provider === 'aster';
@@ -112,11 +119,11 @@ function parseArgs(argv) {
   if (args.top != null && (!Number.isFinite(args.top) || args.top < 0)) {
     throw new Error('--top must be a non-negative number (0 = all common symbols)');
   }
-  if (!isBinanceLikeProvider(args.providerA)) {
-    throw new Error(`providerA=${args.providerA} not supported yet (supported: binance, aster)`);
+  if (!isBinanceLikeProvider(args.providerA) && !BASE_QTY_PROVIDERS.has(args.providerA)) {
+    throw new Error(`providerA=${args.providerA} not supported (supported: binance, aster, bybit, bitget, hyperliquid)`);
   }
-  if (!(args.providerB === 'gate' || args.providerB === 'okx' || isBinanceLikeProvider(args.providerB))) {
-    throw new Error(`providerB=${args.providerB} not supported yet (supported: gate, okx, binance, aster)`);
+  if (!ALL_PROVIDERS.has(args.providerB)) {
+    throw new Error(`providerB=${args.providerB} not supported (supported: ${[...ALL_PROVIDERS].join(', ')})`);
   }
   return args;
 }
@@ -167,6 +174,36 @@ function buildPerpSetOkx(instruments) {
   return out;
 }
 
+function buildPerpSetBybit(instruments) {
+  const out = new Set();
+  for (const row of instruments || []) {
+    if (String(row.status || '').toLowerCase() !== 'trading') continue;
+    if (String(row.quoteCoin || '').toUpperCase() !== 'USDT') continue;
+    const sym = String(row.symbol || '').toUpperCase();
+    if (sym) out.add(sym);
+  }
+  return out;
+}
+
+function buildPerpSetBitget(contracts) {
+  const out = new Set();
+  for (const row of contracts || []) {
+    if (String(row.symbolStatus || row.status || '').toLowerCase() !== 'normal') continue;
+    const sym = String(row.symbol || '').toUpperCase();
+    if (sym) out.add(sym);
+  }
+  return out;
+}
+
+function buildPerpSetHyperliquid(universe) {
+  const out = new Set();
+  for (const row of universe || []) {
+    const coin = String(row.name || '').toUpperCase();
+    if (coin) out.add(coin);
+  }
+  return out;
+}
+
 function buildInfoMap(items, keySelector) {
   const map = new Map();
   for (const item of items || []) {
@@ -208,6 +245,38 @@ function buildQvMapOkx(rows) {
       : vol24h;
     out.set(instId, Number.isFinite(quoteVol) ? quoteVol : 0);
   }
+  return out;
+}
+
+function buildQvMapBybit(rows) {
+  const out = new Map();
+  for (const row of rows || []) {
+    const sym = String(row.symbol || '').toUpperCase();
+    if (!sym) continue;
+    out.set(sym, Number(row.turnover24h || row.volume24h || 0));
+  }
+  return out;
+}
+
+function buildQvMapBitget(rows) {
+  const out = new Map();
+  for (const row of rows || []) {
+    const sym = String(row.symbol || '').toUpperCase();
+    if (!sym) continue;
+    out.set(sym, Number(row.usdtVolume || row.quoteVolume || row.baseVolume || 0));
+  }
+  return out;
+}
+
+function buildQvMapHyperliquid(universe, ctxs) {
+  const out = new Map();
+  (universe || []).forEach((row, idx) => {
+    const coin = String(row.name || '').toUpperCase();
+    if (!coin) return;
+    const ctx = Array.isArray(ctxs) ? ctxs[idx] : null;
+    const dayNtl = Number(ctx?.dayNtlVlm || 0);
+    out.set(coin, dayNtl);
+  });
   return out;
 }
 
@@ -263,9 +332,68 @@ function buildBookTickerMapOkx(rows) {
   return map;
 }
 
+function buildBookTickerMapBybit(rows) {
+  const map = new Map();
+  for (const t of rows || []) {
+    const sym = String(t.symbol || '').toUpperCase();
+    if (!sym) continue;
+    const bid = Number(t.bid1Price);
+    const ask = Number(t.ask1Price);
+    const last = Number(t.lastPrice);
+    map.set(sym, {
+      bid: Number.isFinite(bid) ? bid : null,
+      ask: Number.isFinite(ask) ? ask : null,
+      last: Number.isFinite(last) ? last : null,
+      mid: Number.isFinite(bid) && Number.isFinite(ask) ? (bid + ask) / 2 : null
+    });
+  }
+  return map;
+}
+
+function buildBookTickerMapBitget(rows) {
+  const map = new Map();
+  for (const t of rows || []) {
+    const sym = String(t.symbol || '').toUpperCase();
+    if (!sym) continue;
+    const bid = Number(t.bidPr ?? t.bestBid);
+    const ask = Number(t.askPr ?? t.bestAsk);
+    const last = Number(t.lastPr);
+    map.set(sym, {
+      bid: Number.isFinite(bid) ? bid : null,
+      ask: Number.isFinite(ask) ? ask : null,
+      last: Number.isFinite(last) ? last : null,
+      mid: Number.isFinite(bid) && Number.isFinite(ask) ? (bid + ask) / 2 : null
+    });
+  }
+  return map;
+}
+
+function buildBookTickerMapHyperliquid(universe, ctxs) {
+  const map = new Map();
+  (universe || []).forEach((row, idx) => {
+    const coin = String(row.name || '').toUpperCase();
+    if (!coin) return;
+    const ctx = Array.isArray(ctxs) ? ctxs[idx] : null;
+    const bid = Number(ctx?.impactPxs?.[0]);
+    const ask = Number(ctx?.impactPxs?.[1]);
+    const last = Number(ctx?.markPx);
+    map.set(coin, {
+      bid: Number.isFinite(bid) ? bid : null,
+      ask: Number.isFinite(ask) ? ask : null,
+      last: Number.isFinite(last) ? last : null,
+      mid: Number.isFinite(bid) && Number.isFinite(ask) ? (bid + ask) / 2 : null
+    });
+  });
+  return map;
+}
+
 function providerBSymbolKey(raw, providerB) {
   if (providerB === 'okx') return okxInstIdToSymbolId(raw);
   if (providerB === 'gate') return compactSymbol(raw);
+  if (providerB === 'hyperliquid') {
+    const s = compactSymbol(raw);
+    return s.endsWith('USDT') ? s : `${s}USDT`;
+  }
   return String(raw);
 }
 
@@ -303,6 +431,83 @@ function resolveOkxOrderLimits(inst, { binanceMinQty = 0 } = {}) {
     gateOrderSizeRound: contractStep,
     hedgeMinBaseQty,
     hedgeMinQtyByBinanceStep: hedgeMinBaseQty
+  };
+}
+
+function resolveBybitOrderLimits(row, { refPrice = null, binanceMinQty = 0 } = {}) {
+  const lot = row?.lotSizeFilter || {};
+  const minQty = Number(lot.minOrderQty || lot.minTradingQty || 0);
+  const stepSize = Number(lot.qtyStep || lot.basePrecision || minQty || 0.001);
+  const resolvedMin = minQty > 0 ? minQty : stepSize;
+  const resolvedStep = stepSize > 0 ? stepSize : resolvedMin;
+  let hedgeMinBaseQty = resolvedMin;
+  if (resolvedStep > 0 && Number.isFinite(binanceMinQty) && binanceMinQty > 0) {
+    const k = Math.ceil(binanceMinQty / resolvedStep);
+    hedgeMinBaseQty = Math.max(hedgeMinBaseQty, k * resolvedStep);
+  }
+  void refPrice;
+  return {
+    minQty: resolvedMin,
+    stepSize: resolvedStep,
+    quantityUnit: 'base',
+    enableDecimal: true,
+    quantoMultiplier: 1,
+    minBaseQty: resolvedMin,
+    gateOrderSizeMin: null,
+    gateOrderSizeRound: null,
+    hedgeMinBaseQty,
+    hedgeMinQtyByBinanceStep: hedgeMinBaseQty,
+    minNotional: Number(lot.minNotionalValue || 0),
+    lotMinQty: resolvedMin
+  };
+}
+
+function resolveBitgetOrderLimits(row, { binanceMinQty = 0 } = {}) {
+  const minQty = Number(row.minTradeNum || row.minTradeAmount || 0.001);
+  const stepSize = Number(row.volumePlace || row.sizeMultiplier || minQty);
+  let hedgeMinBaseQty = minQty;
+  if (stepSize > 0 && Number.isFinite(binanceMinQty) && binanceMinQty > 0) {
+    const k = Math.ceil(binanceMinQty / stepSize);
+    hedgeMinBaseQty = Math.max(hedgeMinBaseQty, k * stepSize);
+  }
+  return {
+    minQty,
+    stepSize: stepSize > 0 ? stepSize : minQty,
+    quantityUnit: 'base',
+    enableDecimal: true,
+    quantoMultiplier: 1,
+    minBaseQty: minQty,
+    gateOrderSizeMin: null,
+    gateOrderSizeRound: null,
+    hedgeMinBaseQty,
+    hedgeMinQtyByBinanceStep: hedgeMinBaseQty,
+    minNotional: Number(row.minTradeUSDT || 0),
+    lotMinQty: minQty
+  };
+}
+
+function resolveHyperliquidOrderLimits(row, { binanceMinQty = 0 } = {}) {
+  const decimals = Number(row.szDecimals ?? 0);
+  const stepSize = decimals >= 0 ? 10 ** (-decimals) : 0.001;
+  const minQty = stepSize;
+  let hedgeMinBaseQty = minQty;
+  if (stepSize > 0 && Number.isFinite(binanceMinQty) && binanceMinQty > 0) {
+    const k = Math.ceil(binanceMinQty / stepSize);
+    hedgeMinBaseQty = Math.max(hedgeMinBaseQty, k * stepSize);
+  }
+  return {
+    minQty,
+    stepSize,
+    quantityUnit: 'base',
+    enableDecimal: true,
+    quantoMultiplier: 1,
+    minBaseQty: minQty,
+    gateOrderSizeMin: null,
+    gateOrderSizeRound: null,
+    hedgeMinBaseQty,
+    hedgeMinQtyByBinanceStep: hedgeMinBaseQty,
+    minNotional: 10,
+    lotMinQty: minQty
   };
 }
 
@@ -385,14 +590,21 @@ async function buildMinQtyEntry({
   priceCollectedAt
 }) {
   const refA = refPriceFromTicker(tickerA);
-  const { symbolInfo: resolvedAInfo, refreshed } = await resolveBinanceLikeSymbolInfoForBuild(
-    restA,
-    providerA,
-    symbolId,
-    infoA,
-    refA
-  );
-  const limitsA = resolveBinanceOrderLimits(resolvedAInfo, { refPrice: refA });
+  let limitsA;
+  let refreshed = false;
+  if (isBinanceLikeProvider(providerA)) {
+    const resolved = await resolveBinanceLikeSymbolInfoForBuild(restA, providerA, symbolId, infoA, refA);
+    refreshed = resolved.refreshed;
+    limitsA = resolveBinanceOrderLimits(resolved.symbolInfo, { refPrice: refA });
+  } else if (providerA === 'bybit') {
+    limitsA = resolveBybitOrderLimits(infoA, { refPrice: refA });
+  } else if (providerA === 'bitget') {
+    limitsA = resolveBitgetOrderLimits(infoA);
+  } else if (providerA === 'hyperliquid') {
+    limitsA = resolveHyperliquidOrderLimits(infoA);
+  } else {
+    throw new Error(`unsupported providerA limits: ${providerA}`);
+  }
 
   let limitsB;
   if (providerB === 'gate') {
@@ -414,7 +626,16 @@ async function buildMinQtyEntry({
         last: tickerB?.last ?? null
       }
     };
-  } else {
+  } else if (providerB === 'bybit') {
+    const resolved = resolveBybitOrderLimits(infoB, { refPrice: refPriceFromTicker(tickerB), binanceMinQty: limitsA.minQty });
+    limitsB = toBinanceLikeGateEntry(bSymbol, resolved, tickerB, priceCollectedAt);
+  } else if (providerB === 'bitget') {
+    const resolved = resolveBitgetOrderLimits(infoB, { binanceMinQty: limitsA.minQty });
+    limitsB = toBinanceLikeGateEntry(bSymbol, resolved, tickerB, priceCollectedAt);
+  } else if (providerB === 'hyperliquid') {
+    const resolved = resolveHyperliquidOrderLimits(infoB, { binanceMinQty: limitsA.minQty });
+    limitsB = toBinanceLikeGateEntry(bSymbol, resolved, tickerB, priceCollectedAt);
+  } else if (isBinanceLikeProvider(providerB)) {
     const refB = refPriceFromTicker(tickerB);
     const { symbolInfo: resolvedBInfo } = await resolveBinanceLikeSymbolInfoForBuild(
       restB,
@@ -425,11 +646,13 @@ async function buildMinQtyEntry({
     );
     const resolvedBLimits = resolveBinanceOrderLimits(resolvedBInfo, { refPrice: refB });
     limitsB = toBinanceLikeGateEntry(bSymbol, resolvedBLimits, tickerB, priceCollectedAt);
+  } else {
+    throw new Error(`unsupported providerB limits: ${providerB}`);
   }
 
   const limitsAEntry = {
     symbol: symbolId,
-    lotMinQty: limitsA.lotMinQty,
+    lotMinQty: limitsA.lotMinQty ?? limitsA.minQty,
     minNotional: limitsA.minNotional,
     minQty: limitsA.minQty,
     stepSize: limitsA.stepSize,
@@ -438,7 +661,8 @@ async function buildMinQtyEntry({
       collectedAt: priceCollectedAt,
       bid: tickerA?.bid ?? null,
       ask: tickerA?.ask ?? null,
-      mid: tickerA?.mid ?? null
+      mid: tickerA?.mid ?? null,
+      last: tickerA?.last ?? null
     }
   };
   const limitsBEntry = providerB === 'gate'
@@ -522,52 +746,163 @@ async function resolveBinanceLikeSymbolInfoForBuild(restUrl, provider, symbol, s
   return { symbolInfo: info, refreshed };
 }
 
+async function fetchBybitBundle(restUrl) {
+  const [instruments, tickers] = await Promise.all([
+    axios.get(`${restUrl}/v5/market/instruments-info`, {
+      params: { category: 'linear', limit: 1000 },
+      timeout: 30000
+    }).then((r) => r.data?.result?.list || []),
+    axios.get(`${restUrl}/v5/market/tickers`, {
+      params: { category: 'linear' },
+      timeout: 30000
+    }).then((r) => r.data?.result?.list || [])
+  ]);
+  return { instruments, tickers };
+}
+
+async function fetchBitgetBundle(restUrl) {
+  const [contracts, tickers] = await Promise.all([
+    axios.get(`${restUrl}/api/v2/mix/market/contracts`, {
+      params: { productType: 'USDT-FUTURES' },
+      timeout: 30000
+    }).then((r) => r.data?.data || []),
+    axios.get(`${restUrl}/api/v2/mix/market/tickers`, {
+      params: { productType: 'USDT-FUTURES' },
+      timeout: 30000
+    }).then((r) => r.data?.data || [])
+  ]);
+  return { contracts, tickers };
+}
+
+async function fetchHyperliquidBundle(restUrl) {
+  const ctxPayload = await axios.post(`${restUrl}/info`, { type: 'metaAndAssetCtxs' }, { timeout: 30000 })
+    .then((r) => r.data);
+  const universe = ctxPayload?.[0]?.universe || [];
+  const ctxs = ctxPayload?.[1] || [];
+  return { universe, ctxs };
+}
+
+async function fetchProviderBundle(restUrl, provider) {
+  if (isBinanceLikeProvider(provider)) return fetchBinanceLikeBundle(restUrl, provider);
+  if (provider === 'bybit') return fetchBybitBundle(restUrl);
+  if (provider === 'bitget') return fetchBitgetBundle(restUrl);
+  if (provider === 'hyperliquid') return fetchHyperliquidBundle(restUrl);
+  throw new Error(`unsupported provider bundle: ${provider}`);
+}
+
+function parseProviderMarketData(provider, bundle) {
+  if (isBinanceLikeProvider(provider)) {
+    return {
+      set: buildPerpSetBinanceLike(bundle.exchangeInfo),
+      qv: buildQvMapBinanceLike(bundle.ticker24h),
+      infoMap: buildInfoMap(bundle.exchangeInfo.symbols || [], (s) => s.symbol),
+      tickerMap: buildBookTickerMapBinanceLike(bundle.bookTickers)
+    };
+  }
+  if (provider === 'bybit') {
+    return {
+      set: buildPerpSetBybit(bundle.instruments),
+      qv: buildQvMapBybit(bundle.tickers),
+      infoMap: buildInfoMap(bundle.instruments, (row) => row.symbol),
+      tickerMap: buildBookTickerMapBybit(bundle.tickers)
+    };
+  }
+  if (provider === 'bitget') {
+    return {
+      set: buildPerpSetBitget(bundle.contracts),
+      qv: buildQvMapBitget(bundle.tickers),
+      infoMap: buildInfoMap(bundle.contracts, (row) => row.symbol),
+      tickerMap: buildBookTickerMapBitget(bundle.tickers)
+    };
+  }
+  if (provider === 'hyperliquid') {
+    const universe = bundle.universe || [];
+    const ctxs = bundle.ctxs || [];
+    const coinSet = buildPerpSetHyperliquid(universe);
+    const symbolSet = new Set([...coinSet].map((coin) => `${coin}USDT`));
+    const qv = new Map();
+    const infoMap = new Map();
+    const tickerMap = new Map();
+    universe.forEach((row, idx) => {
+      const coin = String(row.name || '').toUpperCase();
+      if (!coin) return;
+      const symbolId = `${coin}USDT`;
+      const ctx = Array.isArray(ctxs) ? ctxs[idx] : null;
+      qv.set(symbolId, Number(ctx?.dayNtlVlm || 0));
+      infoMap.set(symbolId, row);
+      const bid = Number(ctx?.impactPxs?.[0]);
+      const ask = Number(ctx?.impactPxs?.[1]);
+      const last = Number(ctx?.markPx);
+      tickerMap.set(symbolId, {
+        bid: Number.isFinite(bid) ? bid : null,
+        ask: Number.isFinite(ask) ? ask : null,
+        last: Number.isFinite(last) ? last : null,
+        mid: Number.isFinite(bid) && Number.isFinite(ask) ? (bid + ask) / 2 : null
+      });
+    });
+    return { set: symbolSet, qv, infoMap, tickerMap };
+  }
+  if (provider === 'gate') {
+    return {
+      set: buildPerpSetGate(bundle.contracts),
+      qv: buildQvMapGate(bundle.tickers),
+      infoMap: buildInfoMap(bundle.contracts, (c) => c.name || c.contract),
+      tickerMap: buildBookTickerMapGate(bundle.tickers)
+    };
+  }
+  if (provider === 'okx') {
+    return {
+      set: buildPerpSetOkx(bundle.instruments),
+      qv: buildQvMapOkx(bundle.tickers),
+      infoMap: buildInfoMap(bundle.instruments, (i) => i.instId),
+      tickerMap: buildBookTickerMapOkx(bundle.tickers)
+    };
+  }
+  throw new Error(`unsupported provider market data: ${provider}`);
+}
+
+async function fetchProviderBMarketBundle(restUrl, provider) {
+  if (provider === 'gate') {
+    const [contracts, tickers] = await Promise.all([
+      fetchGateContractsDecimal(),
+      axios.get(`${restUrl}/futures/usdt/tickers`, { timeout: 30000 }).then((r) => r.data)
+    ]);
+    return parseProviderMarketData('gate', { contracts, tickers });
+  }
+  if (provider === 'okx') {
+    const [instruments, tickers] = await Promise.all([
+      axios.get(`${restUrl}/api/v5/public/instruments`, {
+        params: { instType: 'SWAP' },
+        timeout: 30000
+      }).then((r) => r.data?.data || []),
+      axios.get(`${restUrl}/api/v5/market/tickers`, {
+        params: { instType: 'SWAP' },
+        timeout: 30000
+      }).then((r) => r.data?.data || [])
+    ]);
+    return parseProviderMarketData('okx', { instruments, tickers });
+  }
+  const bundle = await fetchProviderBundle(restUrl, provider);
+  return parseProviderMarketData(provider, bundle);
+}
+
 async function main() {
   const args = parseArgs(process.argv);
   const restA = DEFAULT_URLS[args.providerA];
   const restB = DEFAULT_URLS[args.providerB];
 
-  const bundleA = await fetchBinanceLikeBundle(restA, args.providerA);
-  const setA = buildPerpSetBinanceLike(bundleA.exchangeInfo);
-  const qvA = buildQvMapBinanceLike(bundleA.ticker24h);
-  const infoMapA = buildInfoMap(bundleA.exchangeInfo.symbols || [], (s) => s.symbol);
-  const tickerMapA = buildBookTickerMapBinanceLike(bundleA.bookTickers);
+  const bundleA = await fetchProviderBundle(restA, args.providerA);
+  const parsedA = parseProviderMarketData(args.providerA, bundleA);
+  const setA = parsedA.set;
+  const qvA = parsedA.qv;
+  const infoMapA = parsedA.infoMap;
+  const tickerMapA = parsedA.tickerMap;
 
-  let setB;
-  let qvB;
-  let infoMapB;
-  let tickerMapB;
-  if (args.providerB === 'gate') {
-    const [contracts, tickers] = await Promise.all([
-      fetchGateContractsDecimal(),
-      axios.get(`${restB}/futures/usdt/tickers`, { timeout: 30000 }).then((r) => r.data)
-    ]);
-    setB = buildPerpSetGate(contracts);
-    qvB = buildQvMapGate(tickers);
-    infoMapB = buildInfoMap(contracts, (c) => c.name || c.contract);
-    tickerMapB = buildBookTickerMapGate(tickers);
-  } else if (args.providerB === 'okx') {
-    const [instruments, tickers] = await Promise.all([
-      axios.get(`${restB}/api/v5/public/instruments`, {
-        params: { instType: 'SWAP' },
-        timeout: 30000
-      }).then((r) => r.data?.data || []),
-      axios.get(`${restB}/api/v5/market/tickers`, {
-        params: { instType: 'SWAP' },
-        timeout: 30000
-      }).then((r) => r.data?.data || [])
-    ]);
-    setB = buildPerpSetOkx(instruments);
-    qvB = buildQvMapOkx(tickers);
-    infoMapB = buildInfoMap(instruments, (i) => i.instId);
-    tickerMapB = buildBookTickerMapOkx(tickers);
-  } else {
-    const bundleB = await fetchBinanceLikeBundle(restB, args.providerB);
-    setB = buildPerpSetBinanceLike(bundleB.exchangeInfo);
-    qvB = buildQvMapBinanceLike(bundleB.ticker24h);
-    infoMapB = buildInfoMap(bundleB.exchangeInfo.symbols || [], (s) => s.symbol);
-    tickerMapB = buildBookTickerMapBinanceLike(bundleB.bookTickers);
-  }
+  const parsedB = await fetchProviderBMarketBundle(restB, args.providerB);
+  const setB = parsedB.set;
+  const qvB = parsedB.qv;
+  const infoMapB = parsedB.infoMap;
+  const tickerMapB = parsedB.tickerMap;
 
   const allRows = withLiquidityShares(buildCommonRows(setA, setB, qvA, qvB, args.providerB));
   const topN = args.top == null ? allRows.length : args.top;

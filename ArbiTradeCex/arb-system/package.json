@@ -13,9 +13,13 @@
     "fetch:min-qty": "node scripts/fetch-min-order-qty.js",
     "build:symbols-min-qty": "node scripts/build-common-min-order-qty.js",
     "build:symbols-min-qty:pair": "node scripts/build-common-min-order-qty.js --provider-a binance --provider-b gate",
-    "build:symbols-min-qty:binance-aster": "node scripts/build-common-min-order-qty.js --provider-a binance --provider-b aster"
+    "build:symbols-min-qty:binance-aster": "node scripts/build-common-min-order-qty.js --provider-a binance --provider-b aster",
+    "build:symbols-min-qty:binance-bybit": "node scripts/build-common-min-order-qty.js --provider-a binance --provider-b bybit",
+    "build:symbols-min-qty:binance-bitget": "node scripts/build-common-min-order-qty.js --provider-a binance --provider-b bitget",
+    "build:symbols-min-qty:binance-hyperliquid": "node scripts/build-common-min-order-qty.js --provider-a binance --provider-b hyperliquid"
   },
   "dependencies": {
+    "@msgpack/msgpack": "^3.1.2",
     "async-mutex": "^0.5.0",
     "axios": "^1.7.9",
     "big.js": "^6.2.2",

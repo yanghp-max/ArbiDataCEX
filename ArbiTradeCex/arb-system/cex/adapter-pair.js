@@ -26,8 +26,9 @@ export function isBinanceGatePair(pair) {
   return pair.providerA === 'binance' && pair.providerB === 'gate';
 }
 
-/** A 腿 Binance 时走 market worker 子进程（对齐 main：WS 与主线程信号计算隔离） */
+/** A 腿为 binance 时走 market worker；也可显式 ARB_CEX_MARKET_WORKER_ENABLED=1 强制启用 */
 export function shouldUseBinanceMarketWorker(pair) {
+  if (process.env.ARB_CEX_MARKET_WORKER_ENABLED === '1') return true;
   return pair?.providerA === 'binance';
 }
 

@@ -2,9 +2,20 @@ import { BinanceAdapter } from './adapters/binance-adapter.js';
 import { GateAdapter } from './adapters/gate-adapter.js';
 import { AsterAdapter } from './adapters/aster-adapter.js';
 import { OkxAdapter } from './adapters/okx-adapter.js';
+import { BybitAdapter } from './adapters/bybit-adapter.js';
+import { BitgetAdapter } from './adapters/bitget-adapter.js';
+import { HyperliquidAdapter } from './adapters/hyperliquid-adapter.js';
 import { applyDefaultLeverage } from './leverage-bootstrap.js';
 
-export { BinanceAdapter, GateAdapter, AsterAdapter, OkxAdapter };
+export {
+  BinanceAdapter,
+  GateAdapter,
+  AsterAdapter,
+  OkxAdapter,
+  BybitAdapter,
+  BitgetAdapter,
+  HyperliquidAdapter
+};
 export { BaseAdapter } from './adapters/base-adapter.js';
 
 export class CexManager {
@@ -224,6 +235,33 @@ export class CexManager {
         adapters.push({
           name: provider,
           adapter: new OkxAdapter({
+            enablePublicStream: providerPublicStream
+          })
+        });
+        continue;
+      }
+      if (provider === 'bybit') {
+        adapters.push({
+          name: provider,
+          adapter: new BybitAdapter({
+            enablePublicStream: providerPublicStream
+          })
+        });
+        continue;
+      }
+      if (provider === 'bitget') {
+        adapters.push({
+          name: provider,
+          adapter: new BitgetAdapter({
+            enablePublicStream: providerPublicStream
+          })
+        });
+        continue;
+      }
+      if (provider === 'hyperliquid') {
+        adapters.push({
+          name: provider,
+          adapter: new HyperliquidAdapter({
             enablePublicStream: providerPublicStream
           })
         });

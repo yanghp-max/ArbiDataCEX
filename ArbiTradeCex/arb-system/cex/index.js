@@ -3,6 +3,9 @@ export { BinanceAdapter } from './adapters/binance-adapter.js';
 export { GateAdapter } from './adapters/gate-adapter.js';
 export { AsterAdapter } from './adapters/aster-adapter.js';
 export { OkxAdapter } from './adapters/okx-adapter.js';
+export { BybitAdapter } from './adapters/bybit-adapter.js';
+export { BitgetAdapter } from './adapters/bitget-adapter.js';
+export { HyperliquidAdapter } from './adapters/hyperliquid-adapter.js';
 export { CexManager } from './manager.js';
 export {
   Ticker,

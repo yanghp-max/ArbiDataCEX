@@ -5,6 +5,9 @@ import { BinanceAdapter } from '../../cex/adapters/binance-adapter.js';
 import { GateAdapter } from '../../cex/adapters/gate-adapter.js';
 import { AsterAdapter } from '../../cex/adapters/aster-adapter.js';
 import { OkxAdapter } from '../../cex/adapters/okx-adapter.js';
+import { BybitAdapter } from '../../cex/adapters/bybit-adapter.js';
+import { BitgetAdapter } from '../../cex/adapters/bitget-adapter.js';
+import { HyperliquidAdapter } from '../../cex/adapters/hyperliquid-adapter.js';
 import { EventTypes } from '../../cex/types.js';
 
 const MSG_READY = 'ready';
@@ -53,6 +56,24 @@ function createAdapter(provider, config = {}) {
   }
   if (provider === 'okx') {
     return new OkxAdapter({
+      ...config,
+      enablePublicStream: true
+    });
+  }
+  if (provider === 'bybit') {
+    return new BybitAdapter({
+      ...config,
+      enablePublicStream: true
+    });
+  }
+  if (provider === 'bitget') {
+    return new BitgetAdapter({
+      ...config,
+      enablePublicStream: true
+    });
+  }
+  if (provider === 'hyperliquid') {
+    return new HyperliquidAdapter({
       ...config,
       enablePublicStream: true
     });

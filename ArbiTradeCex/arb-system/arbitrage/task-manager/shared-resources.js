@@ -54,6 +54,11 @@ function buildWorkerProviderConfig(provider, strat, staleMs) {
       symbolStaleMs: staleMs
     };
   }
+  if (provider === 'bybit' || provider === 'bitget' || provider === 'hyperliquid') {
+    return {
+      symbolStaleMs: staleMs
+    };
+  }
   return {};
 }
 

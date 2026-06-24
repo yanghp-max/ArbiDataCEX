@@ -85,6 +85,7 @@ export function inferPrecheckQuantityUnit({
     return 'contract';
   }
   if (ex === 'gate' && hasOrderAmt) return 'contract';
+  if (ex === 'okx' && hasOrderAmt) return 'contract';
   return 'base';
 }
 
