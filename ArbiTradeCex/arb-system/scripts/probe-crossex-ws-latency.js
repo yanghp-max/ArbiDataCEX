@@ -6,6 +6,7 @@
  *   node scripts/probe-crossex-ws-latency.js --min-qty
  *   node scripts/probe-crossex-ws-latency.js --min-qty config/min-order-qty.json --compare --duration 60
  *   node scripts/probe-crossex-ws-latency.js --symbols BTCUSDT,ETHUSDT --duration 30
+ *   node scripts/probe-crossex-ws-latency.js --min-qty --compare --log logs/probe-crossex-ws.log
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -13,7 +14,9 @@ import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DEFAULT_MIN_QTY = path.join(__dirname, '..', 'config', 'min-order-qty.json');
+const ROOT_DIR = path.join(__dirname, '..');
+const DEFAULT_LOG_DIR = path.join(ROOT_DIR, 'logs');
+const DEFAULT_MIN_QTY = path.join(ROOT_DIR, 'config', 'min-order-qty.json');
 
 const CROSSEX_WS = process.env.CROSSEX_WS_URL || 'wss://api.gateio.ws/ws/crossex/public';
 const BINANCE_WS = process.env.BINANCE_WS_URL || 'wss://fstream.binance.com';
@@ -25,7 +28,9 @@ function parseArgs(argv) {
     symbols: null,
     minQtyPath: null,
     compare: false,
-    channel: 'ticker'
+    channel: 'ticker',
+    logPath: null,
+    noLog: false
   };
   for (let i = 2; i < argv.length; i += 1) {
     const t = argv[i];
@@ -48,9 +53,38 @@ function parseArgs(argv) {
     } else if (t === '--channel' && argv[i + 1]) {
       args.channel = String(argv[i + 1]).trim();
       i += 1;
+    } else if (t === '--log' && argv[i + 1]) {
+      args.logPath = path.resolve(argv[i + 1]);
+      i += 1;
+    } else if (t === '--no-log') {
+      args.noLog = true;
     }
   }
   return args;
+}
+
+function defaultLogPath() {
+  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  return path.join(DEFAULT_LOG_DIR, `probe-crossex-ws-${ts}.log`);
+}
+
+function createReportWriter(logPath) {
+  fs.mkdirSync(path.dirname(logPath), { recursive: true });
+  const lines = [];
+  return {
+    path: logPath,
+    line(msg = '') {
+      console.log(msg);
+      lines.push(msg);
+    },
+    warn(msg = '') {
+      console.warn(msg);
+      lines.push(msg);
+    },
+    flush() {
+      fs.writeFileSync(logPath, `${lines.join('\n')}\n`, 'utf8');
+    }
+  };
 }
 
 function loadSelectedSymbols(minQtyPath) {
@@ -149,33 +183,40 @@ function fmtMs(v) {
   return v == null || !Number.isFinite(v) ? '—' : `${v.toFixed(1)} ms`;
 }
 
-function printSummary(rows) {
-  console.log('\n=== WS 延迟汇总 (wsDelay = 本机收到 − exchangeTs) ===\n');
+function printSummary(rows, out) {
+  out.line('\n=== WS 延迟汇总 (wsDelay = 本机收到 − exchangeTs) ===\n');
   for (const s of rows) {
-    console.log(`[${s.label}] 消息 ${s.messages}  有效 wsDelay 样本 ${s.wsDelay.n}`);
-    console.log(`  wsDelay  avg ${fmtMs(s.wsDelay.avg)}  p50 ${fmtMs(s.wsDelay.p50)}  p95 ${fmtMs(s.wsDelay.p95)}  max ${fmtMs(s.wsDelay.max)}`);
+    out.line(`[${s.label}] 消息 ${s.messages}  有效 wsDelay 样本 ${s.wsDelay.n}`);
+    out.line(`  wsDelay  avg ${fmtMs(s.wsDelay.avg)}  p50 ${fmtMs(s.wsDelay.p50)}  p95 ${fmtMs(s.wsDelay.p95)}  max ${fmtMs(s.wsDelay.max)}`);
     if (s.gateExtra.n > 0) {
-      console.log(`  Gate层额外 (time_ms − ts)  avg ${fmtMs(s.gateExtra.avg)}  p50 ${fmtMs(s.gateExtra.p50)}  p95 ${fmtMs(s.gateExtra.p95)}`);
+      out.line(`  Gate层额外 (time_ms − ts)  avg ${fmtMs(s.gateExtra.avg)}  p50 ${fmtMs(s.gateExtra.p50)}  p95 ${fmtMs(s.gateExtra.p95)}`);
     }
-    console.log(`  推送间隔     avg ${fmtMs(s.interArrival.avg)}  p50 ${fmtMs(s.interArrival.p50)}`);
-    console.log('');
+    out.line(`  推送间隔     avg ${fmtMs(s.interArrival.avg)}  p50 ${fmtMs(s.interArrival.p50)}`);
+    out.line('');
   }
 }
 
-function printCompactTable(rows) {
-  console.log('=== 一览 (按 wsDelay p50 降序) ===\n');
-  console.log('label'.padEnd(36), 'n'.padStart(5), 'p50'.padStart(8), 'p95'.padStart(8), '间隔p50'.padStart(10));
+function printCompactTable(rows, out) {
+  out.line('=== 一览 (按 wsDelay p50 降序) ===\n');
+  const header = [
+    'label'.padEnd(36),
+    'n'.padStart(5),
+    'p50'.padStart(8),
+    'p95'.padStart(8),
+    '间隔p50'.padStart(10)
+  ].join('');
+  out.line(header);
   const sorted = [...rows].sort((a, b) => (b.wsDelay.p50 ?? -1) - (a.wsDelay.p50 ?? -1));
   for (const s of sorted) {
-    console.log(
+    out.line([
       s.label.padEnd(36),
       String(s.wsDelay.n).padStart(5),
       fmtMs(s.wsDelay.p50).padStart(8),
       fmtMs(s.wsDelay.p95).padStart(8),
       fmtMs(s.interArrival.p50).padStart(10)
-    );
+    ].join(''));
   }
-  console.log('');
+  out.line('');
 }
 
 function aggregateVenue(rows, prefix) {
@@ -203,7 +244,7 @@ function aggregateVenue(rows, prefix) {
   };
 }
 
-function connectCrossEx({ symbols, channel, statsByKey }) {
+function connectCrossEx({ symbols, channel, statsByKey, out }) {
   const ws = new WebSocket(CROSSEX_WS);
   const payload = [];
   for (const sym of symbols) {
@@ -218,8 +259,8 @@ function connectCrossEx({ symbols, channel, statsByKey }) {
       channel,
       payload
     }));
-    console.log(`[CrossEx] connected ${CROSSEX_WS}`);
-    console.log(`[CrossEx] subscribe ${channel} x ${payload.length} (${symbols.length} 币种 × 2 所)`);
+    out.line(`[CrossEx] connected ${CROSSEX_WS}`);
+    out.line(`[CrossEx] subscribe ${channel} x ${payload.length} (${symbols.length} 币种 × 2 所)`);
   });
 
   ws.on('message', (raw) => {
@@ -227,7 +268,7 @@ function connectCrossEx({ symbols, channel, statsByKey }) {
       const msg = JSON.parse(raw.toString());
       if (msg?.event === 'subscribe') return;
       if (msg?.error) {
-        console.warn('[CrossEx] error:', JSON.stringify(msg.error));
+        out.warn(`[CrossEx] error: ${JSON.stringify(msg.error)}`);
         return;
       }
       const r = msg?.result;
@@ -248,15 +289,15 @@ function connectCrossEx({ symbols, channel, statsByKey }) {
     }
   });
 
-  ws.on('error', (err) => console.warn('[CrossEx]', err.message));
+  ws.on('error', (err) => out.warn(`[CrossEx] ${err.message}`));
   return ws;
 }
 
-function connectBinanceCombined(symbols, statsBySymbol) {
+function connectBinanceCombined(symbols, statsBySymbol, out) {
   const streams = symbols.map((s) => encodeURIComponent(toBinanceStream(s))).join('/');
   const url = `${BINANCE_WS.replace(/\/$/, '')}/stream?streams=${streams}`;
   const ws = new WebSocket(url);
-  ws.on('open', () => console.log(`[Binance direct] combined ${symbols.length} streams`));
+  ws.on('open', () => out.line(`[Binance direct] combined ${symbols.length} streams`));
   ws.on('message', (raw) => {
     try {
       const wrap = JSON.parse(raw.toString());
@@ -270,18 +311,18 @@ function connectBinanceCombined(symbols, statsBySymbol) {
       statsBySymbol.get(label).record({ wsDelayMs: Date.now() - exchangeTs });
     } catch { /* ignore */ }
   });
-  ws.on('error', (e) => console.warn('[Binance direct]', e.message));
+  ws.on('error', (e) => out.warn(`[Binance direct] ${e.message}`));
   return ws;
 }
 
-function connectOkxCombined(symbols, statsBySymbol) {
+function connectOkxCombined(symbols, statsBySymbol, out) {
   const ws = new WebSocket(OKX_WS);
   ws.on('open', () => {
     const args = symbols.map((sym) => ({ channel: 'bbo-tbt', instId: toOkxInstId(sym) }));
     for (let i = 0; i < args.length; i += 50) {
       ws.send(JSON.stringify({ op: 'subscribe', args: args.slice(i, i + 50) }));
     }
-    console.log(`[OKX direct] bbo-tbt x ${symbols.length}`);
+    out.line(`[OKX direct] bbo-tbt x ${symbols.length}`);
   });
   ws.on('message', (raw) => {
     try {
@@ -296,7 +337,7 @@ function connectOkxCombined(symbols, statsBySymbol) {
       statsBySymbol.get(label).record({ wsDelayMs: Date.now() - exchangeTs });
     } catch { /* ignore */ }
   });
-  ws.on('error', (e) => console.warn('[OKX direct]', e.message));
+  ws.on('error', (e) => out.warn(`[OKX direct] ${e.message}`));
   return ws;
 }
 
@@ -314,23 +355,34 @@ async function main() {
     args.symbols = ['BTCUSDT'];
   }
 
-  console.log(`探测 ${args.durationSec}s  compare=${args.compare}  channel=${args.channel}`);
+  const logPath = args.noLog ? null : (args.logPath || defaultLogPath());
+  const out = logPath
+    ? createReportWriter(logPath)
+    : {
+      path: null,
+      line: (msg = '') => console.log(msg),
+      warn: (msg = '') => console.warn(msg),
+      flush: () => {}
+    };
+
+  out.line(`探测 ${args.durationSec}s  compare=${args.compare}  channel=${args.channel}`);
+  if (logPath) out.line(`日志 ${logPath}`);
   if (meta) {
-    console.log(`来源 ${meta.path}`);
-    console.log(`pair ${meta.pair ? `${meta.pair.providerA}/${meta.pair.providerB}` : '—'}  selected=${meta.count}`);
+    out.line(`来源 ${meta.path}`);
+    out.line(`pair ${meta.pair ? `${meta.pair.providerA}/${meta.pair.providerB}` : '—'}  selected=${meta.count}`);
   }
-  console.log(`币种: ${args.symbols.join(', ')}`);
+  out.line(`币种: ${args.symbols.join(', ')}`);
 
   const crossStats = new Map();
   const directBinance = new Map();
   const directOkx = new Map();
 
   const sockets = [
-    connectCrossEx({ symbols: args.symbols, channel: args.channel, statsByKey: crossStats })
+    connectCrossEx({ symbols: args.symbols, channel: args.channel, statsByKey: crossStats, out })
   ];
   if (args.compare) {
-    sockets.push(connectBinanceCombined(args.symbols, directBinance));
-    sockets.push(connectOkxCombined(args.symbols, directOkx));
+    sockets.push(connectBinanceCombined(args.symbols, directBinance, out));
+    sockets.push(connectOkxCombined(args.symbols, directOkx, out));
   }
 
   await new Promise((r) => setTimeout(r, args.durationSec * 1000));
@@ -349,23 +401,28 @@ async function main() {
   for (const [, st] of crossStats) summaries.push(st.summary());
   summaries.sort((a, b) => a.label.localeCompare(b.label));
 
-  printSummary(summaries);
-  printCompactTable(summaries);
+  printSummary(summaries, out);
+  printCompactTable(summaries, out);
 
   const cxBin = aggregateVenue(summaries, 'BINANCE_FUTURE_');
   const cxOkx = aggregateVenue(summaries, 'OKX_FUTURE_');
   if (cxBin || cxOkx) {
-    console.log('=== CrossEx venue 粗均 (各币 p50 平均) ===');
-    if (cxOkx) console.log(`  ${cxOkx.label}: wsDelay p50 avg ${fmtMs(cxOkx.wsDelay.p50)}  间隔 p50 ${fmtMs(cxOkx.interArrival.p50)}`);
-    if (cxBin) console.log(`  ${cxBin.label}: wsDelay p50 avg ${fmtMs(cxBin.wsDelay.p50)}  间隔 p50 ${fmtMs(cxBin.interArrival.p50)}`);
-    console.log('');
+    out.line('=== CrossEx venue 粗均 (各币 p50 平均) ===');
+    if (cxOkx) out.line(`  ${cxOkx.label}: wsDelay p50 avg ${fmtMs(cxOkx.wsDelay.p50)}  间隔 p50 ${fmtMs(cxOkx.interArrival.p50)}`);
+    if (cxBin) out.line(`  ${cxBin.label}: wsDelay p50 avg ${fmtMs(cxBin.wsDelay.p50)}  间隔 p50 ${fmtMs(cxBin.interArrival.p50)}`);
+    out.line('');
   }
 
   const noMsg = summaries.filter((s) => s.wsDelay.n === 0).map((s) => s.label);
   if (noMsg.length) {
-    console.log('⚠️ 无有效样本 (CrossEx 可能不支持或符号错误):');
-    noMsg.forEach((l) => console.log(`   ${l}`));
-    console.log('');
+    out.line('⚠️ 无有效样本 (CrossEx 可能不支持或符号错误):');
+    noMsg.forEach((l) => out.line(`   ${l}`));
+    out.line('');
+  }
+
+  if (logPath) {
+    out.flush();
+    console.log(`\n已写入 ${logPath}`);
   }
 
   process.exit(0);
