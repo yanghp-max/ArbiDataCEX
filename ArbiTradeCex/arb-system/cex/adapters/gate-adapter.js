@@ -12,6 +12,8 @@ import { cryptoUtils } from '../utils.js';
 import {
   checkOrderPreconditions as runCheckOrderPreconditions
 } from '../utils/check-order-preconditions.js';
+import { axiosKeepAliveOptions, withKeepAlive } from '../utils/http-agents.js';
+import { tuneWebSocket } from '../utils/ws-tune.js';
 
 export class GateAdapter extends BaseAdapter {
   constructor(config = {}) {
@@ -90,7 +92,9 @@ export class GateAdapter extends BaseAdapter {
 
   async #refreshContractMultipliers() {
     try {
-      const { data } = await axios.get(`${this.config.restUrl}/futures/usdt/contracts`, {
+      const url = `${this.config.restUrl}/futures/usdt/contracts`;
+      const { data } = await axios.get(url, {
+        ...axiosKeepAliveOptions(url),
         timeout: this.config.timeout
       });
       for (const c of data || []) {
@@ -334,7 +338,7 @@ export class GateAdapter extends BaseAdapter {
     };
     if (bodyObj) config.data = bodyObj;
     try {
-      const { data } = await axios(config);
+      const { data } = await axios(withKeepAlive(config));
       return data;
     } catch (err) {
       throw new Error(this.#formatApiError(err));
@@ -342,7 +346,9 @@ export class GateAdapter extends BaseAdapter {
   }
 
   async loadSymbols() {
-    const response = await axios.get(`${this.config.restUrl}/futures/usdt/contracts`, {
+    const url = `${this.config.restUrl}/futures/usdt/contracts`;
+    const response = await axios.get(url, {
+      ...axiosKeepAliveOptions(url),
       timeout: this.config.timeout
     });
     const set = new Set();
@@ -371,6 +377,7 @@ export class GateAdapter extends BaseAdapter {
       const ws = new WebSocket(this.config.wsUrl);
       this.ws = ws;
       ws.on('open', async () => {
+        tuneWebSocket(ws);
         this.connected = true;
         this._publicReconnectAttempts = 0;
         if (this.subscribed.length > 0) {
@@ -448,6 +455,7 @@ export class GateAdapter extends BaseAdapter {
       this.accountWs = ws;
 
       ws.on('open', async () => {
+        tuneWebSocket(ws);
         this._accountWsReconnectAttempts = 0;
         try {
           const resubscribe = this.privateBalancesSubscribed || this.privatePositionsSubscribed;
@@ -711,7 +719,9 @@ export class GateAdapter extends BaseAdapter {
 
   async getFundingRate(symbol) {
     const contract = this.toGateContract(symbol);
-    const { data } = await axios.get(`${this.config.restUrl}/futures/usdt/funding_rate`, {
+    const url = `${this.config.restUrl}/futures/usdt/funding_rate`;
+    const { data } = await axios.get(url, {
+      ...axiosKeepAliveOptions(url),
       params: { contract, limit: 1 },
       timeout: this.config.timeout
     });
@@ -1292,6 +1302,7 @@ export class GateAdapter extends BaseAdapter {
     await new Promise((resolve, reject) => {
       this.unifiedWs = new WebSocket(this.unifiedWsUrl);
       this.unifiedWs.on('open', () => {
+        tuneWebSocket(this.unifiedWs);
         const time = Math.floor(Date.now() / 1000);
         const channel = 'unified.asset_detail';
         const event = 'subscribe';
@@ -1433,7 +1444,9 @@ export class GateAdapter extends BaseAdapter {
     const contract = this.toGateContract(symbol);
     const depthLimit = Math.min(Math.max(Number(limit) || 20, 5), 50);
     const timeout = Number(options.timeoutMs) || 5000;
-    const { data } = await axios.get(`${this.config.restUrl}/futures/usdt/order_book`, {
+    const url = `${this.config.restUrl}/futures/usdt/order_book`;
+    const { data } = await axios.get(url, {
+      ...axiosKeepAliveOptions(url),
       params: { contract, limit: depthLimit, with_id: false },
       timeout
     });

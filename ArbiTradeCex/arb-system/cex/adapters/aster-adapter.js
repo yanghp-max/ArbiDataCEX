@@ -10,6 +10,8 @@ import { cryptoUtils } from '../utils.js';
 import {
   checkOrderPreconditions as runCheckOrderPreconditions
 } from '../utils/check-order-preconditions.js';
+import { axiosKeepAliveOptions, withKeepAlive } from '../utils/http-agents.js';
+import { tuneWebSocket } from '../utils/ws-tune.js';
 
 export class AsterAdapter extends BaseAdapter {
   constructor(config = {}) {
@@ -87,7 +89,9 @@ export class AsterAdapter extends BaseAdapter {
   }
 
   async loadSymbols() {
-    const response = await axios.get(`${this.config.restUrl}/fapi/v1/exchangeInfo`, {
+    const url = `${this.config.restUrl}/fapi/v1/exchangeInfo`;
+    const response = await axios.get(url, {
+      ...axiosKeepAliveOptions(url),
       timeout: this.config.timeout
     });
     const set = new Set();
@@ -115,6 +119,7 @@ export class AsterAdapter extends BaseAdapter {
       const ws = new WebSocket(this.config.wsUrl);
       this.ws = ws;
       ws.on('open', async () => {
+        tuneWebSocket(ws);
         this.connected = true;
         if (this.subscribedSymbols.length > 0) {
           await this.#flushSubscriptions({ forceResubscribe: true });
@@ -278,7 +283,9 @@ export class AsterAdapter extends BaseAdapter {
   }
 
   async getFundingRate(symbol) {
-    const { data } = await axios.get(`${this.config.restUrl}/fapi/v1/premiumIndex`, {
+    const url = `${this.config.restUrl}/fapi/v1/premiumIndex`;
+    const { data } = await axios.get(url, {
+      ...axiosKeepAliveOptions(url),
       params: { symbol: this.toExchangeSymbol(symbol) },
       timeout: this.config.timeout
     });
@@ -294,12 +301,12 @@ export class AsterAdapter extends BaseAdapter {
   async #signedRequest(method, path, params = {}) {
     const query = this.#signQuery(params);
     const url = `${this.config.restUrl}${path}?${query}`;
-    const { data } = await axios({
+    const { data } = await axios(withKeepAlive({
       method,
       url,
       headers: { 'X-MBX-APIKEY': process.env.ASTER_API_KEY || '' },
       timeout: 15000
-    });
+    }));
     return data;
   }
 
@@ -325,7 +332,9 @@ export class AsterAdapter extends BaseAdapter {
   async getBookTicker(symbol, options = {}) {
     const exSymbol = this.toExchangeSymbol(symbol);
     const timeout = Number(options.timeoutMs) || this.config.timeout || 5000;
-    const { data } = await axios.get(`${this.config.restUrl}/fapi/v1/ticker/bookTicker`, {
+    const url = `${this.config.restUrl}/fapi/v1/ticker/bookTicker`;
+    const { data } = await axios.get(url, {
+      ...axiosKeepAliveOptions(url),
       params: { symbol: exSymbol },
       timeout
     });
@@ -349,7 +358,9 @@ export class AsterAdapter extends BaseAdapter {
     const sym = this.toExchangeSymbol(symbol);
     const depthLimit = Math.min(Math.max(Number(limit) || 20, 5), 1000);
     const timeout = Number(options.timeoutMs) || 5000;
-    const { data } = await axios.get(`${this.config.restUrl}/fapi/v1/depth`, {
+    const url = `${this.config.restUrl}/fapi/v1/depth`;
+    const { data } = await axios.get(url, {
+      ...axiosKeepAliveOptions(url),
       params: { symbol: sym, limit: depthLimit },
       timeout
     });

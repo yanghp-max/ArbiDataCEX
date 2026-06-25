@@ -11,6 +11,8 @@ import { describeBinanceApiError } from '../utils/binance-api-error.js';
 import {
   checkOrderPreconditions as runCheckOrderPreconditions
 } from '../utils/check-order-preconditions.js';
+import { axiosKeepAliveOptions, withKeepAlive } from '../utils/http-agents.js';
+import { tuneWebSocket } from '../utils/ws-tune.js';
 
 export class BinanceAdapter extends BaseAdapter {
   constructor(config = {}) {
@@ -145,7 +147,9 @@ export class BinanceAdapter extends BaseAdapter {
   }
 
   async loadSymbols() {
-    const response = await axios.get(`${this.config.restUrl}/fapi/v1/exchangeInfo`, {
+    const url = `${this.config.restUrl}/fapi/v1/exchangeInfo`;
+    const response = await axios.get(url, {
+      ...axiosKeepAliveOptions(url),
       timeout: this.config.timeout
     });
     const set = new Set();
@@ -174,6 +178,7 @@ export class BinanceAdapter extends BaseAdapter {
       const ws = new WebSocket(this.config.wsUrl);
       this.ws = ws;
       ws.on('open', async () => {
+        tuneWebSocket(ws);
         if (gen !== this._publicWsGen || this.ws !== ws) return;
         this.connected = true;
         this._publicWsOpenedAt = Date.now();
@@ -531,7 +536,9 @@ export class BinanceAdapter extends BaseAdapter {
   async getBookTicker(symbol, options = {}) {
     const exSymbol = this.toExchangeSymbol(symbol);
     const timeout = Number(options.timeoutMs) || this.config.timeout || 5000;
-    const { data } = await axios.get(`${this.config.restUrl}/fapi/v1/ticker/bookTicker`, {
+    const url = `${this.config.restUrl}/fapi/v1/ticker/bookTicker`;
+    const { data } = await axios.get(url, {
+      ...axiosKeepAliveOptions(url),
       params: { symbol: exSymbol },
       timeout
     });
@@ -670,7 +677,9 @@ export class BinanceAdapter extends BaseAdapter {
   }
 
   async getFundingRate(symbol) {
-    const { data } = await axios.get(`${this.config.restUrl}/fapi/v1/premiumIndex`, {
+    const url = `${this.config.restUrl}/fapi/v1/premiumIndex`;
+    const { data } = await axios.get(url, {
+      ...axiosKeepAliveOptions(url),
       params: { symbol: this.toExchangeSymbol(symbol) },
       timeout: this.config.timeout
     });
@@ -701,12 +710,12 @@ export class BinanceAdapter extends BaseAdapter {
     const query = this.#signQuery(params);
     const url = `${this.config.papiRestUrl}${path}?${query}`;
     try {
-      const { data } = await axios({
+      const { data } = await axios(withKeepAlive({
         method,
         url,
         headers: { 'X-MBX-APIKEY': process.env.BINANCE_API_KEY },
         timeout: 15000
-      });
+      }));
       return data;
     } catch (err) {
       throw new Error(describeBinanceApiError(err));
@@ -1215,6 +1224,7 @@ export class BinanceAdapter extends BaseAdapter {
       this.privateWs = ws;
 
       ws.on('open', async () => {
+        tuneWebSocket(ws);
         if (gen !== this._privateWsGen || this.privateWs !== ws) return;
         this.privateWsConnected = true;
         this._privateWsOpenedAt = Date.now();
@@ -1282,7 +1292,9 @@ export class BinanceAdapter extends BaseAdapter {
     const sym = this.toExchangeSymbol(symbol);
     const depthLimit = Math.min(Math.max(Number(limit) || 20, 5), 1000);
     const timeout = Number(options.timeoutMs) || 5000;
-    const { data } = await axios.get(`${this.config.restUrl}/fapi/v1/depth`, {
+    const url = `${this.config.restUrl}/fapi/v1/depth`;
+    const { data } = await axios.get(url, {
+      ...axiosKeepAliveOptions(url),
       params: { symbol: sym, limit: depthLimit },
       timeout
     });

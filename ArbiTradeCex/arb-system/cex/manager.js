@@ -170,22 +170,41 @@ export class CexManager {
     const enablePublicStream = options.enablePublicStream !== false;
     const enablePrivateAccountStream = options.enablePrivateAccountStream
       ?? (enablePublicStream === false);
-    const binance = new BinanceAdapter({
-      listenKeyKeepaliveMin: strategyConfig.listenKeyKeepaliveMin ?? 30,
-      enablePublicStream
-    });
-    const gate = new GateAdapter({
-      accountMode: strategyConfig.gateAccountMode,
-      enablePublicStream,
-      enablePrivateAccountStream
-    });
-    const aster = new AsterAdapter({
-      enablePublicStream
-    });
-    await Promise.all([binance.connect(), gate.connect(), aster.connect()]);
-    mgr.register('binance', binance);
-    mgr.register('gate', gate);
-    mgr.register('aster', aster);
+    const configured = Array.isArray(options.providers)
+      ? options.providers
+      : ['binance', 'gate', 'aster'];
+    const providers = [...new Set(
+      configured
+        .map((name) => String(name || '').trim().toLowerCase())
+        .filter(Boolean)
+    )];
+    if (providers.length === 0) {
+      throw new Error('No providers configured for CexManager');
+    }
+
+    const tasks = [];
+    if (providers.includes('binance')) {
+      const binance = new BinanceAdapter({
+        listenKeyKeepaliveMin: strategyConfig.listenKeyKeepaliveMin ?? 30,
+        enablePublicStream
+      });
+      tasks.push(binance.connect().then(() => mgr.register('binance', binance)));
+    }
+    if (providers.includes('gate')) {
+      const gate = new GateAdapter({
+        accountMode: strategyConfig.gateAccountMode,
+        enablePublicStream,
+        enablePrivateAccountStream
+      });
+      tasks.push(gate.connect().then(() => mgr.register('gate', gate)));
+    }
+    if (providers.includes('aster')) {
+      const aster = new AsterAdapter({
+        enablePublicStream
+      });
+      tasks.push(aster.connect().then(() => mgr.register('aster', aster)));
+    }
+    await Promise.all(tasks);
     return mgr;
   }
 }
