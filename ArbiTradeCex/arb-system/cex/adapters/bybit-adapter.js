@@ -7,6 +7,8 @@ import axios from 'axios';
 import { BaseAdapter } from './base-adapter.js';
 import { Balance, Order, Position, OrderStatus, EventTypes } from '../types.js';
 import { checkOrderPreconditions as runCheckOrderPreconditions } from '../utils/check-order-preconditions.js';
+import { withKeepAlive } from '../utils/http-agents.js';
+import { tuneWebSocket } from '../utils/ws-tune.js';
 
 const MAX_SANE_WS_DELAY_MS = 30_000;
 const CATEGORY = 'linear';
@@ -117,13 +119,13 @@ export class BybitAdapter extends BaseAdapter {
     const pathWithQuery = `${path}${query}`;
     const bodyText = data ? JSON.stringify(data) : '';
     const headers = auth ? await this.getAuthHeaders(upper, pathWithQuery, bodyText) : {};
-    const response = await axios({
+    const response = await axios(withKeepAlive({
       method: upper,
       url: `${this.config.restUrl}${pathWithQuery}`,
       headers,
       data: data || undefined,
       timeout
-    });
+    }));
     const payload = response?.data || {};
     if (Number(payload.retCode) !== 0) {
       throw new Error(`Bybit ${path} failed: ${payload.retMsg || 'unknown'} (code=${payload.retCode ?? 'n/a'})`);
@@ -161,6 +163,7 @@ export class BybitAdapter extends BaseAdapter {
       const ws = new WebSocket(this.config.wsUrl);
       this.ws = ws;
       ws.on('open', () => {
+        tuneWebSocket(ws);
         this.connected = true;
         if (this.subscribedSymbols.length > 0) {
           this.#subscribeTopics(this.subscribedSymbols);

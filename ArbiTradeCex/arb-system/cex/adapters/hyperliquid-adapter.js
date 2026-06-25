@@ -8,6 +8,8 @@ import { BaseAdapter } from './base-adapter.js';
 import { Balance, Order, Position, OrderStatus, EventTypes } from '../types.js';
 import { checkOrderPreconditions as runCheckOrderPreconditions } from '../utils/check-order-preconditions.js';
 import { signL1Action, splitHyperliquidSignature } from '../utils/hyperliquid-sign.js';
+import { withKeepAlive } from '../utils/http-agents.js';
+import { tuneWebSocket } from '../utils/ws-tune.js';
 
 const MAX_SANE_WS_DELAY_MS = 30_000;
 
@@ -99,12 +101,22 @@ export class HyperliquidAdapter extends BaseAdapter {
   }
 
   async #info(body, timeout = 15000) {
-    const { data } = await axios.post(`${this.config.restUrl}/info`, body, { timeout });
+    const { data } = await axios(withKeepAlive({
+      method: 'post',
+      url: `${this.config.restUrl}/info`,
+      data: body,
+      timeout
+    }));
     return data;
   }
 
   async #exchange(payload, timeout = 15000) {
-    const { data } = await axios.post(`${this.config.restUrl}/exchange`, payload, { timeout });
+    const { data } = await axios(withKeepAlive({
+      method: 'post',
+      url: `${this.config.restUrl}/exchange`,
+      data: payload,
+      timeout
+    }));
     if (data?.status === 'err') {
       throw new Error(`Hyperliquid exchange failed: ${data.response || JSON.stringify(data)}`);
     }
@@ -143,6 +155,7 @@ export class HyperliquidAdapter extends BaseAdapter {
       const ws = new WebSocket(this.config.wsUrl);
       this.ws = ws;
       ws.on('open', () => {
+        tuneWebSocket(ws);
         this.connected = true;
         if (this.subscribedSymbols.length > 0) this.#subscribeTopics(this.subscribedSymbols);
         this.#startFeedWatchdog();

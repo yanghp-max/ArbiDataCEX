@@ -3,11 +3,13 @@
  * 测量 placeOrder（真正提交到交易所）REST 往返耗时
  *
  * 用法:
- *   node scripts/bench-order-submit.js --symbol SIRENUSDT --leg both --rounds 3
- *   node scripts/bench-order-submit.js --symbol SIRENUSDT --leg binance --rounds 5 --confirm
- *   node scripts/bench-order-submit.js --symbol SIRENUSDT --leg both --confirm --reduce-only --side sell
+ *   node scripts/bench-order-submit.js --symbol SIRENUSDT --leg a --rounds 3
+ *   node scripts/bench-order-submit.js --symbol SIRENUSDT --leg aster --rounds 5 --confirm
+ *   node scripts/bench-order-submit.js --symbol SIRENUSDT --leg okx --confirm --reduce-only --side sell
+ *   node scripts/bench-order-submit.js --symbol BTCUSDT --leg binance --rounds 5 --confirm --warmup
  *
  * 不加 --confirm 只预览参数，不会真下单。
+ * 每次只测一个交易所：--leg a|b|<provider>（a/b 对应 config.json adapters）。
  */
 import 'dotenv/config';
 import fs from 'node:fs/promises';
@@ -15,24 +17,38 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CexManager } from '../cex/manager.js';
 import { loadConfig, getRootDir } from '../config/global-config.js';
+import { resolveAdapterPair } from '../cex/adapter-pair.js';
+import { isContractQuantityUnit } from '../cex/utils/leg-order-context.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+const ENV_BY_PROVIDER = {
+  binance: ['BINANCE_API_KEY', 'BINANCE_API_SECRET'],
+  gate: ['GATE_API_KEY', 'GATE_API_SECRET'],
+  okx: ['OKX_API_KEY', 'OKX_API_SECRET', 'OKX_API_PASSPHRASE'],
+  bybit: ['BYBIT_API_KEY', 'BYBIT_API_SECRET'],
+  bitget: ['BITGET_API_KEY', 'BITGET_API_SECRET', 'BITGET_API_PASSPHRASE'],
+  aster: ['ASTER_USER', 'ASTER_PRIVATE_KEY'],
+  hyperliquid: ['HYPERLIQUID_PRIVATE_KEY']
+};
 
 function parseArgs(argv) {
   const out = {
     symbol: 'SIRENUSDT',
-    leg: 'both',
+    leg: 'a',
     rounds: 1,
     confirm: false,
     reduceOnly: false,
-    side: 'buy'
+    side: 'buy',
+    warmup: false
   };
   for (let i = 2; i < argv.length; i += 1) {
     const a = argv[i];
     if (a === '--confirm') out.confirm = true;
     else if (a === '--reduce-only') out.reduceOnly = true;
+    else if (a === '--warmup') out.warmup = true;
     else if (a === '--symbol') out.symbol = String(argv[++i] || '').toUpperCase();
-    else if (a === '--leg') out.leg = String(argv[++i] || 'both').toLowerCase();
+    else if (a === '--leg') out.leg = String(argv[++i] || 'a').toLowerCase();
     else if (a === '--rounds') out.rounds = Math.max(1, Number(argv[++i]) || 1);
     else if (a === '--side') out.side = String(argv[++i] || 'buy').toLowerCase();
     else if (a === '--help' || a === '-h') out.help = true;
@@ -58,13 +74,84 @@ function summarize(samples) {
   };
 }
 
-async function loadSymbolLimits(symbol, minQtyJsonPath) {
+async function loadSymbolEntry(symbol, minQtyJsonPath) {
   const text = await fs.readFile(minQtyJsonPath, 'utf8');
   const json = JSON.parse(text);
   const key = compact(symbol);
   const row = json.symbols?.[key];
   if (!row) throw new Error(`min-order-qty.json 无 ${key}`);
   return row;
+}
+
+function resolveLegLimits(entry, legKey, provider) {
+  const v2 = entry?.legs?.[legKey]?.limits;
+  if (v2) return v2;
+  const fromProviders = entry?.providers?.[provider];
+  if (fromProviders) return fromProviders;
+  if (legKey === 'A') return entry.binance || null;
+  return entry.gate || null;
+}
+
+function buildLegOrder({ legKey, provider, limits, symbol, side, reduceOnly }) {
+  if (!limits) throw new Error(`leg ${legKey} limits missing`);
+
+  const positionDirection = side === 'sell' ? '-a+b' : '+a-b';
+  const binancePositionSide = positionDirection === '-a+b' ? 'SHORT' : 'LONG';
+  const isLegA = legKey === 'A';
+
+  if (isContractQuantityUnit(limits)) {
+    const contracts = Number(limits.gateOrderSizeMin ?? limits.minQty ?? limits.stepSize) || 1;
+    return {
+      order: {
+        symbol,
+        side,
+        type: 'market',
+        amount: contracts,
+        decimalSize: Boolean(limits.enableDecimal),
+        reduceOnly
+      },
+      meta: { qty: contracts * (Number(limits.quantoMultiplier) || 1), orderAmount: contracts, unit: 'contract' }
+    };
+  }
+
+  const qty = Number(limits.minQty ?? limits.stepSize) || 1;
+  const order = {
+    symbol,
+    side,
+    type: 'market',
+    amount: qty,
+    reduceOnly
+  };
+
+  if (isLegA && (provider === 'binance' || provider === 'aster')) {
+    order.stepSize = limits.stepSize;
+    order.positionDirection = positionDirection;
+    order.positionSide = binancePositionSide;
+  }
+
+  return { order, meta: { qty, orderAmount: qty, unit: 'base' } };
+}
+
+function resolveLegTarget(legArg, pair) {
+  const raw = String(legArg || 'a').toLowerCase();
+  if (raw === 'both') {
+    throw new Error('--leg both 已移除，请指定单个交易所：--leg a|--leg b|--leg binance 等');
+  }
+  if (raw === 'a') return { legKey: 'A', provider: pair.providerA };
+  if (raw === 'b') return { legKey: 'B', provider: pair.providerB };
+  if (raw === pair.providerA) return { legKey: 'A', provider: pair.providerA };
+  if (raw === pair.providerB) return { legKey: 'B', provider: pair.providerB };
+  throw new Error(`--leg 无效: ${legArg}（当前 pair ${pair.providerA}/${pair.providerB}）`);
+}
+
+function assertEnvForProvider(provider) {
+  const missing = [];
+  for (const key of ENV_BY_PROVIDER[provider] || []) {
+    if (!String(process.env[key] || '').trim()) missing.push(`${provider}:${key}`);
+  }
+  if (missing.length) {
+    throw new Error(`缺少环境变量: ${missing.join(', ')}`);
+  }
 }
 
 async function timedPlace(cex, exchange, orderData) {
@@ -88,53 +175,36 @@ async function timedPlace(cex, exchange, orderData) {
   }
 }
 
-function buildOrders({ symbol, limits, side, reduceOnly }) {
-  const binanceQty = Number(limits.binance?.minQty) || Number(limits.binance?.stepSize) || 1;
-  const gateSize = Number(limits.gate?.gateOrderSizeMin) || Number(limits.gate?.stepSize) || 1;
-  const gateDecimal = Boolean(limits.gate?.enableDecimal);
-  const positionDirection = side === 'sell' ? '-a+b' : '+a-b';
-  const binancePositionSide = positionDirection === '-a+b' ? 'SHORT' : 'LONG';
-
-  return {
-    binance: {
-      symbol,
-      side,
-      type: 'market',
-      amount: binanceQty,
-      stepSize: limits.binance?.stepSize,
-      reduceOnly,
-      positionDirection,
-      positionSide: binancePositionSide
-    },
-    gate: {
-      symbol,
-      side,
-      type: 'market',
-      amount: gateSize,
-      decimalSize: gateDecimal,
-      reduceOnly
-    },
-    meta: { binanceQty, gateSize, gateDecimal }
-  };
+async function warmupProvider(cex, provider) {
+  console.log(`预热 REST keep-alive: ${provider}`);
+  try {
+    await cex.getBalance(provider, { silent: true });
+    console.log(`  [warmup] ${provider} getBalance ok`);
+  } catch (err) {
+    console.warn(`  [warmup] ${provider} skipped: ${err.message}`);
+  }
+  console.log('');
 }
 
 function printHelp() {
   console.log(`
-测量 placeOrder REST 提交耗时（与实盘 OrderExecutor 同一接口）
+测量 placeOrder REST 提交耗时（与实盘 OrderExecutor 同一 CexManager 接口）
 
 选项:
   --symbol SIRENUSDT   交易对（默认 SIRENUSDT）
-  --leg binance|gate|both  测哪条腿（默认 both，并行同实盘）
+  --leg a|b|<provider> 测哪个交易所（默认 a，即 adapters.A）
   --rounds N           重复次数（默认 1）
   --side buy|sell      买卖方向（默认 buy）
   --reduce-only        只减仓（平仓）
+  --warmup             正式测前拉一次 getBalance 预热 keep-alive
   --confirm            必须加才会真下单
 
 示例（先预览）:
-  node scripts/bench-order-submit.js --symbol SIRENUSDT --leg both --rounds 3
+  node scripts/bench-order-submit.js --symbol SIRENUSDT --leg a --rounds 3
+  node scripts/bench-order-submit.js --symbol SIRENUSDT --leg aster
 
 示例（真下单，最小量）:
-  node scripts/bench-order-submit.js --symbol SIRENUSDT --leg both --rounds 3 --confirm
+  node scripts/bench-order-submit.js --symbol SIRENUSDT --leg binance --rounds 3 --confirm --warmup
 `);
 }
 
@@ -146,90 +216,73 @@ async function main() {
   }
 
   const config = loadConfig();
+  const pair = resolveAdapterPair(config);
+  const legTarget = resolveLegTarget(args.leg, pair);
+
   const rootDir = getRootDir();
   const minQtyPath = path.isAbsolute(config.strategy.minQtyJson)
     ? config.strategy.minQtyJson
     : path.resolve(rootDir, config.strategy.minQtyJson);
 
   const symbol = compact(args.symbol);
-  const limits = await loadSymbolLimits(symbol, minQtyPath);
-  const orders = buildOrders({
+  const entry = await loadSymbolEntry(symbol, minQtyPath);
+
+  const leg = buildLegOrder({
+    legKey: legTarget.legKey,
+    provider: legTarget.provider,
+    limits: resolveLegLimits(entry, legTarget.legKey, legTarget.provider),
     symbol,
-    limits,
     side: args.side,
     reduceOnly: args.reduceOnly
   });
 
   console.log('=== placeOrder 提交耗时测试 ===');
-  console.log(`symbol=${symbol} leg=${args.leg} rounds=${args.rounds} side=${args.side} reduceOnly=${args.reduceOnly}`);
-  console.log(`Binance qty=${orders.meta.binanceQty}  Gate size=${orders.meta.gateSize} decimal=${orders.meta.gateDecimal}`);
+  console.log(`pair=${pair.providerA}/${pair.providerB} symbol=${symbol} leg=${legTarget.provider} rounds=${args.rounds}`);
+  console.log(`side=${args.side} reduceOnly=${args.reduceOnly}`);
+  console.log(`${legTarget.provider}: unit=${leg.meta.unit} qty≈${leg.meta.qty} orderAmount=${leg.meta.orderAmount}`);
   console.log(args.confirm ? '模式: 真实下单' : '模式: 预览（加 --confirm 才会真下单）');
   console.log('');
 
   if (!args.confirm) {
     console.log('将发送的订单参数:');
-    if (args.leg === 'binance' || args.leg === 'both') {
-      console.log('  [binance]', JSON.stringify(orders.binance));
-    }
-    if (args.leg === 'gate' || args.leg === 'both') {
-      console.log('  [gate]', JSON.stringify(orders.gate));
-    }
+    console.log(`  [${legTarget.provider}]`, JSON.stringify(leg.order));
     return;
   }
 
-  if (!process.env.BINANCE_API_KEY || !process.env.GATE_API_KEY) {
-    throw new Error('需要 .env 中配置 BINANCE_API_KEY / GATE_API_KEY');
+  assertEnvForProvider(legTarget.provider);
+
+  const cex = await CexManager.createDefault(config.strategy, {
+    providers: [legTarget.provider],
+    enablePublicStream: false
+  });
+
+  if (args.warmup) {
+    await warmupProvider(cex, legTarget.provider);
   }
 
-  const cex = await CexManager.createDefault(config.strategy);
-  const binanceSamples = [];
-  const gateSamples = [];
-  const parallelSamples = [];
+  const samples = [];
 
   for (let i = 0; i < args.rounds; i += 1) {
-    if (args.leg === 'both') {
-      const wall0 = Date.now();
-      const [aRes, bRes] = await Promise.all([
-        timedPlace(cex, 'binance', orders.binance),
-        timedPlace(cex, 'gate', orders.gate)
-      ]);
-      const wallMs = Date.now() - wall0;
-      parallelSamples.push(wallMs);
-      if (aRes.ok) binanceSamples.push(aRes.ms);
-      else console.warn(`[round ${i + 1}] Binance 失败 ${aRes.ms}ms: ${aRes.error}`);
-      if (bRes.ok) gateSamples.push(bRes.ms);
-      else console.warn(`[round ${i + 1}] Gate 失败 ${bRes.ms}ms: ${bRes.error}`);
-      console.log(
-        `[round ${i + 1}] 并行墙钟 ${wallMs}ms`
-        + ` | Binance ${aRes.ok ? `${aRes.ms}ms id=${aRes.orderId} filled=${aRes.filled}` : `FAIL ${aRes.error}`}`
-        + ` | Gate ${bRes.ok ? `${bRes.ms}ms id=${bRes.orderId} filled=${bRes.filled}` : `FAIL ${bRes.error}`}`
-      );
-    } else if (args.leg === 'binance') {
-      const res = await timedPlace(cex, 'binance', orders.binance);
-      if (res.ok) binanceSamples.push(res.ms);
-      console.log(`[round ${i + 1}] Binance ${res.ok ? `${res.ms}ms id=${res.orderId}` : `FAIL ${res.error}`}`);
-    } else if (args.leg === 'gate') {
-      const res = await timedPlace(cex, 'gate', orders.gate);
-      if (res.ok) gateSamples.push(res.ms);
-      console.log(`[round ${i + 1}] Gate ${res.ok ? `${res.ms}ms id=${res.orderId}` : `FAIL ${res.error}`}`);
-    }
+    const res = await timedPlace(cex, legTarget.provider, leg.order);
+    if (res.ok) samples.push(res.ms);
+    console.log(
+      `[round ${i + 1}] ${legTarget.provider} `
+      + `${res.ok ? `${res.ms}ms id=${res.orderId} filled=${res.filled}` : `FAIL ${res.error}`}`
+    );
+
     if (i < args.rounds - 1) {
       await new Promise((r) => setTimeout(r, 500));
     }
   }
 
   console.log('\n=== 汇总 (ms) ===');
-  if (parallelSamples.length) {
-    const s = summarize(parallelSamples);
-    console.log(`并行墙钟(两腿同时): min=${s.min} p50=${s.p50} avg=${s.avg} max=${s.max} (n=${s.count})`);
-  }
-  if (binanceSamples.length) {
-    const s = summarize(binanceSamples);
-    console.log(`Binance placeOrder: min=${s.min} p50=${s.p50} avg=${s.avg} max=${s.max} (n=${s.count})`);
-  }
-  if (gateSamples.length) {
-    const s = summarize(gateSamples);
-    console.log(`Gate placeOrder: min=${s.min} p50=${s.p50} avg=${s.avg} max=${s.max} (n=${s.count})`);
+  if (samples.length) {
+    const s = summarize(samples);
+    console.log(`${legTarget.provider} placeOrder: min=${s.min} p50=${s.p50} avg=${s.avg} max=${s.max} (n=${s.count})`);
+    if (s.count >= 2) {
+      const rest = summarize(samples.slice(1));
+      console.log(`  → 去掉第1单后 p50≈${rest.p50}ms（keep-alive 预热后通常更低）`);
+    }
   }
 
   await cex.disconnectAll();
