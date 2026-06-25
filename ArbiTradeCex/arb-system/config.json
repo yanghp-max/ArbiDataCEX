@@ -29,6 +29,7 @@
     "minAvailableUsdt": 6,
     "balanceCheckRate": 0.1,
     "accountCacheMaxAgeMs": 5000,
+    "restKeepAliveWarmupIntervalMs": 45000,
     "gateAccountMode": "single",
     "listenKeyKeepaliveMin": 30,
     "reservationTtlMs": 30000,

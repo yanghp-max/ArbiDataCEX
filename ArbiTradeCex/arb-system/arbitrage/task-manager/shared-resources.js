@@ -12,6 +12,8 @@ import { CexPriceHub } from './cex-price-hub.js';
 import eventBus from '../event-bus/index.js';
 import { DashboardBridge } from '../dashboard/dashboard-bridge.js';
 import { resolveEnforceLatency, getRootDir } from '../../config/global-config.js';
+import { resolveAdapterPair } from '../../cex/adapter-pair.js';
+import { RestKeepAliveWarmup } from '../../cex/utils/rest-keepalive-warmup.js';
 
 function isCexMarketWorkerEnabled(strat) {
   if (strat.cexMarketWorkerEnabled === false) return false;
@@ -44,6 +46,8 @@ export class SharedResources {
     this.cexMarketWorkerClient = null;
     this.cexPriceHub = null;
     this.useCexMarketWorker = false;
+    this.adapterPair = resolveAdapterPair(config);
+    this.restKeepAliveWarmup = null;
   }
 
   async init() {
@@ -161,6 +165,30 @@ export class SharedResources {
     this.dashboardBridge.refreshAccountSnapshot().catch((err) => {
       console.warn('[Dashboard] initial account snapshot failed:', err.message);
     });
+
+    this.#startRestKeepAliveWarmup(strat);
+  }
+
+  #startRestKeepAliveWarmup(strat) {
+    if (this.useMockAccount) return;
+
+    const raw = strat.restKeepAliveWarmupIntervalMs;
+    const intervalMs = raw == null || raw === '' ? 45000 : Number(raw);
+    if (!Number.isFinite(intervalMs) || intervalMs <= 0) return;
+
+    this.restKeepAliveWarmup = new RestKeepAliveWarmup({
+      cexManager: this.cexManager,
+      providers: this.adapterPair.providers,
+      intervalMs,
+      logFailures: strat.restKeepAliveWarmupLogFailures === true
+    });
+
+    if (this.restKeepAliveWarmup.start()) {
+      console.log(
+        `[SharedResources] REST keep-alive warmup every ${Math.round(intervalMs / 1000)}s`
+        + ` (${this.adapterPair.providers.join(', ')}, silent getBalance, no AccountCache write)`
+      );
+    }
   }
 
   getAdapter(exchange) {
@@ -168,6 +196,8 @@ export class SharedResources {
   }
 
   async shutdown() {
+    this.restKeepAliveWarmup?.stop();
+    this.restKeepAliveWarmup = null;
     await Promise.all([
       this.cexPriceHub?.stop(),
       this.cexMarketWorkerClient?.cleanup(),
@@ -179,4 +209,4 @@ export class SharedResources {
 }
 
 export default SharedResources;
-
+
