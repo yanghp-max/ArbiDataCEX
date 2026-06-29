@@ -62,6 +62,6 @@
   },
   "adapters": {
     "A": { "provider": "binance" },
-    "B": { "provider": "okx" }
+    "B": { "provider": "bitget" }
   }
 }

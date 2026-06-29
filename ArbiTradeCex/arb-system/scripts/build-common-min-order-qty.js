@@ -7,7 +7,7 @@
  * - no legacy binance/gate compatibility keys
  *
  * Usage:
- * - Default pair from config.json:
+ * - Default pair from config.json adapters (no min-order-qty pair validation):
  *   node scripts/build-common-min-order-qty.js
  * - Specify pair:
  *   node scripts/build-common-min-order-qty.js --provider-a binance --provider-b aster
@@ -22,7 +22,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import axios from 'axios';
-import { getRootDir, loadConfig } from '../config/global-config.js';
+import { getRootDir } from '../config/global-config.js';
 import { resolveBinanceOrderLimits } from '../common/utils/binance-order-limits.js';
 import { isBinanceExchangeInfoStale, reconcileBinanceSymbolFilters } from '../common/utils/binance-symbol-info.js';
 import { resolveGateOrderLimits } from '../common/utils/gate-contract-limits.js';
@@ -59,22 +59,26 @@ function normalizeProvider(value, fallback) {
   return p || fallback;
 }
 
-function resolveDefaultProviders() {
-  let cfg = null;
+async function readAdapterProvidersFromConfig() {
   try {
-    cfg = loadConfig();
+    const configPath = path.join(getRootDir(), 'config.json');
+    const raw = await fs.readFile(configPath, 'utf8');
+    return JSON.parse(raw);
   } catch {
-    cfg = null;
+    return null;
   }
+}
+
+function resolveDefaultProviders(cfg) {
   return {
     providerA: normalizeProvider(cfg?.adapters?.A?.provider, 'binance'),
     providerB: normalizeProvider(cfg?.adapters?.B?.provider, 'gate')
   };
 }
 
-function parseArgs(argv) {
+function parseArgs(argv, configDefaults) {
   const rootDir = getRootDir();
-  const defaults = resolveDefaultProviders();
+  const defaults = resolveDefaultProviders(configDefaults);
   const args = {
     top: null,
     outputMinQty: path.join(rootDir, 'config/min-order-qty.json'),
@@ -888,7 +892,8 @@ async function fetchProviderBMarketBundle(restUrl, provider) {
 }
 
 async function main() {
-  const args = parseArgs(process.argv);
+  const configDefaults = await readAdapterProvidersFromConfig();
+  const args = parseArgs(process.argv, configDefaults);
   const restA = DEFAULT_URLS[args.providerA];
   const restB = DEFAULT_URLS[args.providerB];
 
