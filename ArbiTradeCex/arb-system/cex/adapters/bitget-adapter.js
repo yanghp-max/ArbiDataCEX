@@ -1,5 +1,5 @@
 /**
- * Bitget USDT-M futures adapter (v2 API).
+ * Bitget USDT-M futures adapter (UTA v3 API).
  */
 import crypto from 'node:crypto';
 import WebSocket from 'ws';
@@ -11,8 +11,10 @@ import { withKeepAlive } from '../utils/http-agents.js';
 import { tuneWebSocket } from '../utils/ws-tune.js';
 
 const MAX_SANE_WS_DELAY_MS = 30_000;
-const PRODUCT_TYPE = 'USDT-FUTURES';
+const CATEGORY = 'USDT-FUTURES';
 const MARGIN_COIN = 'USDT';
+/** place-order 超时/未知错误：需用 clientOid 反查最终结果 */
+const AMBIGUOUS_SUBMIT_ERROR_CODES = new Set(['40010', '40725', '45001']);
 
 function compactSymbol(symbol) {
   return String(symbol || '').replace(/[-_/]/g, '').toUpperCase();
@@ -107,6 +109,77 @@ export class BitgetAdapter extends BaseAdapter {
     };
   }
 
+  #asArray(data, listKey = 'list') {
+    if (Array.isArray(data)) return data;
+    if (data && Array.isArray(data[listKey])) return data[listKey];
+    return data ? [data] : [];
+  }
+
+  #pickRow(data) {
+    if (Array.isArray(data)) return data[0] ?? null;
+    return data ?? null;
+  }
+
+  #extractErrorCode(err) {
+    const match = String(err?.message || '').match(/\(code=(\d+)\)/);
+    return match ? match[1] : null;
+  }
+
+  #isAmbiguousSubmitError(err) {
+    const code = this.#extractErrorCode(err);
+    if (code && AMBIGUOUS_SUBMIT_ERROR_CODES.has(code)) return true;
+    const msg = String(err?.message || '');
+    return /request timed out|service return an error|unknown error/i.test(msg);
+  }
+
+  #isOrderNotFoundError(err) {
+    const msg = String(err?.message || '');
+    return /not found|43001|40768|40017|does not exist/i.test(msg);
+  }
+
+  async #fetchOrderInfo({ orderId = null, clientOid = null } = {}) {
+    const params = {};
+    if (orderId) params.orderId = String(orderId);
+    else if (clientOid) params.clientOid = String(clientOid);
+    else return null;
+    try {
+      const row = await this.#request('GET', '/api/v3/trade/order-info', { params, auth: true });
+      if (!row || (!row.orderId && !row.clientOid)) return null;
+      return row;
+    } catch (err) {
+      if (this.#isOrderNotFoundError(err)) return null;
+      throw err;
+    }
+  }
+
+  async #resolvePlacedOrder(row, { clientOid, sym, side, type, qty, orderData }) {
+    let resolved = row;
+    if (!String(resolved?.orderId || '')) {
+      const looked = await this.#fetchOrderInfo({ clientOid });
+      if (looked) resolved = looked;
+    }
+    const orderId = String(resolved?.orderId || '');
+    if (!orderId) {
+      throw new Error(`Bitget placeOrder missing orderId after clientOid lookup: ${clientOid} ${sym}`);
+    }
+    if (resolved.orderStatus != null || resolved.cumExecQty != null) {
+      return this.#mapOrderRow(resolved, orderId, sym);
+    }
+    return new Order({
+      orderId,
+      clientOrderId: resolved.clientOid || clientOid,
+      symbol: this.normalizeSymbol(sym),
+      exchange: this.config.name,
+      side,
+      type,
+      amount: qty,
+      price: Number(orderData.price || 0),
+      status: OrderStatus.PENDING,
+      filled: 0,
+      timestamp: Date.now()
+    });
+  }
+
   async #request(method, path, { params = null, data = null, auth = false, timeout = 15000 } = {}) {
     const upper = String(method || 'GET').toUpperCase();
     const query = params ? `?${new URLSearchParams(
@@ -134,13 +207,14 @@ export class BitgetAdapter extends BaseAdapter {
   }
 
   async #loadInstruments() {
-    const rows = await this.#request('GET', '/api/v2/mix/market/contracts', {
-      params: { productType: PRODUCT_TYPE }
+    const rows = await this.#request('GET', '/api/v3/market/instruments', {
+      params: { category: CATEGORY }
     });
     const list = Array.isArray(rows) ? rows : [];
     this._instrumentBySymbol.clear();
     for (const row of list) {
-      if (String(row.symbolStatus || row.status || '').toLowerCase() !== 'normal') continue;
+      const status = String(row.status || row.symbolStatus || '').toLowerCase();
+      if (status !== 'online' && status !== 'normal') continue;
       const sym = String(row.symbol || '').toUpperCase();
       if (sym) this._instrumentBySymbol.set(sym, row);
     }
@@ -205,7 +279,7 @@ export class BitgetAdapter extends BaseAdapter {
   #subscribeTopics(symbols) {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
     const args = symbols.map((s) => ({
-      instType: PRODUCT_TYPE,
+      instType: CATEGORY,
       channel: 'books1',
       instId: this.toExchangeSymbol(s)
     }));
@@ -299,12 +373,13 @@ export class BitgetAdapter extends BaseAdapter {
 
   async getBookTicker(symbol, options = {}) {
     const sym = this.toExchangeSymbol(symbol);
-    const row = await this.#request('GET', '/api/v2/mix/market/ticker', {
-      params: { symbol: sym, productType: PRODUCT_TYPE },
+    const rows = await this.#request('GET', '/api/v3/market/tickers', {
+      params: { category: CATEGORY, symbol: sym },
       timeout: Number(options.timeoutMs) || 5000
     });
-    const bid = Number(row?.bidPr ?? row?.bestBid);
-    const ask = Number(row?.askPr ?? row?.bestAsk);
+    const row = this.#pickRow(rows);
+    const bid = Number(row?.bid1Price ?? row?.bidPr ?? row?.bestBid);
+    const ask = Number(row?.ask1Price ?? row?.askPr ?? row?.bestAsk);
     if (!isFinitePositive(bid) || !isFinitePositive(ask)) {
       throw new Error(`Invalid Bitget ticker ${sym}`);
     }
@@ -312,29 +387,30 @@ export class BitgetAdapter extends BaseAdapter {
       symbol: this.normalizeSymbol(sym),
       bid,
       ask,
-      timestamp: Number(row.ts) || Date.now(),
-      serverTimestamp: Number(row.ts) || null,
+      timestamp: Number(row?.ts) || Date.now(),
+      serverTimestamp: Number(row?.ts) || null,
       restReason: options.reason ?? 'rest'
     };
   }
 
   async getFundingRate(symbol) {
     const sym = this.toExchangeSymbol(symbol);
-    const row = await this.#request('GET', '/api/v2/mix/market/current-fund-rate', {
-      params: { symbol: sym, productType: PRODUCT_TYPE }
+    const rows = await this.#request('GET', '/api/v3/market/current-fund-rate', {
+      params: { category: CATEGORY, symbol: sym }
     });
+    const row = this.#pickRow(rows);
     return Number(row?.fundingRate);
   }
 
   async setSymbolLeverage(symbol, leverage = 1) {
     const sym = this.toExchangeSymbol(symbol);
     const lev = Math.max(1, Math.min(125, Math.floor(Number(leverage) || 1)));
-    await this.#request('POST', '/api/v2/mix/account/set-leverage', {
+    await this.#request('POST', '/api/v3/account/set-leverage', {
       data: {
+        category: CATEGORY,
         symbol: sym,
-        productType: PRODUCT_TYPE,
-        marginCoin: MARGIN_COIN,
-        leverage: String(lev)
+        leverage: String(lev),
+        marginMode: 'crossed'
       },
       auth: true
     });
@@ -342,54 +418,49 @@ export class BitgetAdapter extends BaseAdapter {
   }
 
   async getBalance(options = {}) {
-    const rows = await this.#request('GET', '/api/v2/mix/account/accounts', {
-      params: { productType: PRODUCT_TYPE },
-      auth: true
-    });
-    const list = Array.isArray(rows) ? rows : [];
-    const balances = list
-      .filter((row) => String(row.marginCoin || '').toUpperCase() === MARGIN_COIN)
-      .map((row) => {
-        const currency = MARGIN_COIN;
-        const total = Number(row.accountEquity ?? row.usdtEquity ?? row.equity ?? 0);
-        const available = Number(row.available ?? row.crossedMaxAvailable ?? total);
-        return new Balance({
-          currency,
-          exchange: this.config.name,
-          total,
-          available,
-          marginUsed: Math.max(0, total - available),
-          frozen: Math.max(0, total - available),
-          timestamp: Date.now()
-        });
-      });
+    const data = await this.#request('GET', '/api/v3/account/assets', { auth: true });
+    const assets = Array.isArray(data?.assets) ? data.assets : [];
+    const usdtRow = assets.find((row) => String(row.coin || '').toUpperCase() === MARGIN_COIN);
+    const total = Number(usdtRow?.equity ?? data?.usdtEquity ?? data?.accountEquity ?? 0);
+    const available = Number(usdtRow?.available ?? total);
+    const balances = total > 0 || available > 0
+      ? [new Balance({
+        currency: MARGIN_COIN,
+        exchange: this.config.name,
+        total,
+        available,
+        marginUsed: Math.max(0, total - available),
+        frozen: Math.max(0, total - available),
+        timestamp: Date.now()
+      })]
+      : [];
     this._balanceCache = balances;
     if (!options.silent) this.emitBalanceUpdate(balances);
     return balances;
   }
 
   async getPositions(options = {}) {
-    const rows = await this.#request('GET', '/api/v2/mix/position/all-position', {
-      params: { productType: PRODUCT_TYPE, marginCoin: MARGIN_COIN },
+    const data = await this.#request('GET', '/api/v3/position/current-position', {
+      params: { category: CATEGORY },
       auth: true
     });
-    const list = Array.isArray(rows) ? rows : [];
+    const list = this.#asArray(data, 'list');
     const positions = list
       .filter((r) => Math.abs(Number(r.total)) > 0)
       .map((r) => {
         const sym = String(r.symbol || '').toUpperCase();
-        const holdSide = String(r.holdSide || '').toLowerCase();
+        const posSide = String(r.posSide || r.holdSide || '').toLowerCase();
         const qtyRaw = Number(r.total || 0);
-        const qty = holdSide === 'short' ? -qtyRaw : qtyRaw;
+        const qty = posSide === 'short' ? -qtyRaw : qtyRaw;
         return new Position({
           symbol: this.toCompactSymbol(sym),
           exchange: this.config.name,
           side: qty >= 0 ? 'long' : 'short',
           size: Math.abs(qty),
           qty,
-          entryPrice: Number(r.openPriceAvg || r.averageOpenPrice || 0),
+          entryPrice: Number(r.avgPrice || r.openPriceAvg || 0),
           markPrice: Number(r.markPrice || 0),
-          unrealizedPnl: Number(r.unrealizedPL || 0),
+          unrealizedPnl: Number(r.unrealisedPnl || r.unrealizedPL || 0),
           leverage: Number(r.leverage || 1),
           timestamp: Date.now()
         });
@@ -427,44 +498,40 @@ export class BitgetAdapter extends BaseAdapter {
     const qty = Number(orderData.amount);
     if (!(qty > 0)) throw new Error('Bitget order size must be > 0');
     const payload = {
+      category: CATEGORY,
       symbol: sym,
-      productType: PRODUCT_TYPE,
       marginMode: 'crossed',
-      marginCoin: MARGIN_COIN,
       side,
       orderType: type,
-      size: String(qty),
+      qty: String(qty),
       clientOid: orderData.clientOrderId || this.generateClientOrderId(),
-      force: 'gtc'
+      timeInForce: type === 'market' ? 'ioc' : 'gtc'
     };
     if (type === 'limit' && orderData.price) payload.price = String(orderData.price);
-    if (orderData.reduceOnly) payload.reduceOnly = 'YES';
-    if (type === 'market') payload.force = 'ioc';
-    const row = await this.#request('POST', '/api/v2/mix/order/place-order', { data: payload, auth: true });
-    const orderId = String(row?.orderId || '');
-    if (!orderId) throw new Error('Bitget placeOrder missing orderId');
-    return new Order({
-      orderId,
-      clientOrderId: row?.clientOid || payload.clientOid,
-      symbol: this.normalizeSymbol(sym),
-      exchange: this.config.name,
+    if (orderData.reduceOnly) payload.reduceOnly = 'yes';
+    const clientOid = payload.clientOid;
+    let row;
+    try {
+      row = await this.#request('POST', '/api/v3/trade/place-order', { data: payload, auth: true });
+    } catch (err) {
+      if (!this.#isAmbiguousSubmitError(err)) throw err;
+      row = await this.#fetchOrderInfo({ clientOid });
+      if (!row) throw err;
+    }
+    return this.#resolvePlacedOrder(row, {
+      clientOid,
+      sym,
       side,
       type,
-      amount: qty,
-      price: Number(orderData.price || 0),
-      status: OrderStatus.PENDING,
-      filled: 0,
-      timestamp: Date.now()
+      qty,
+      orderData
     });
   }
 
   async cancelOrder(orderId, symbol) {
-    const sym = this.toExchangeSymbol(symbol);
-    return this.#request('POST', '/api/v2/mix/order/cancel-order', {
+    return this.#request('POST', '/api/v3/trade/cancel-order', {
       data: {
-        symbol: sym,
-        productType: PRODUCT_TYPE,
-        marginCoin: MARGIN_COIN,
+        category: CATEGORY,
         orderId: String(orderId)
       },
       auth: true
@@ -472,8 +539,8 @@ export class BitgetAdapter extends BaseAdapter {
   }
 
   #mapOrderRow(row, orderId, sym) {
-    const filled = Number(row.baseVolume ?? row.filledQty ?? row.size ?? 0);
-    const avg = Number(row.priceAvg ?? row.averagePrice ?? 0);
+    const filled = Number(row.cumExecQty ?? row.baseVolume ?? row.filledQty ?? 0);
+    const avg = Number(row.avgPrice ?? row.priceAvg ?? row.averagePrice ?? 0);
     return new Order({
       orderId: String(row.orderId || orderId),
       clientOrderId: row.clientOid || null,
@@ -481,67 +548,92 @@ export class BitgetAdapter extends BaseAdapter {
       exchange: this.config.name,
       side: String(row.side || '').toLowerCase(),
       type: String(row.orderType || '').toLowerCase(),
-      amount: Number(row.size ?? 0),
+      amount: Number(row.qty ?? row.size ?? 0),
       price: Number(row.price ?? 0),
-      status: this.#mapOrderStatus(row.state ?? row.status),
+      status: this.#mapOrderStatus(row.orderStatus ?? row.state ?? row.status),
       filled,
-      timestamp: Number(row.cTime || Date.now()),
-      updateTime: Number(row.uTime || row.cTime || Date.now()),
+      timestamp: Number(row.createdTime || row.cTime || Date.now()),
+      updateTime: Number(row.updatedTime || row.uTime || row.createdTime || Date.now()),
       avgPrice: avg,
-      cumQuote: Number(row.quoteVolume || (filled > 0 && avg > 0 ? filled * avg : 0))
+      cumQuote: Number(row.cumExecValue ?? row.quoteVolume ?? (filled > 0 && avg > 0 ? filled * avg : 0))
     });
   }
 
-  async getOrderStatus(orderId, symbol) {
+  async getOrderStatus(orderId, symbol, options = {}) {
     const sym = this.toExchangeSymbol(symbol);
-    const row = await this.#request('GET', '/api/v2/mix/order/detail', {
+    const oid = String(orderId);
+    let row = await this.#fetchOrderInfo({ orderId: oid });
+    if (!row && options.clientOid) {
+      row = await this.#fetchOrderInfo({ clientOid: options.clientOid });
+    }
+    if (row) return this.#mapOrderRow(row, oid, sym);
+
+    const history = await this.#request('GET', '/api/v3/trade/history-orders', {
       params: {
+        category: CATEGORY,
         symbol: sym,
-        productType: PRODUCT_TYPE,
-        orderId: String(orderId)
+        limit: '100'
       },
       auth: true
     });
-    if (!row) throw new Error(`Bitget order not found: ${orderId} ${sym}`);
-    return this.#mapOrderRow(row, orderId, sym);
+    const list = this.#asArray(history, 'list');
+    const histRow = list.find((item) => String(item.orderId) === oid);
+    if (histRow) return this.#mapOrderRow(histRow, oid, sym);
+
+    const unfilled = await this.#request('GET', '/api/v3/trade/unfilled-orders', {
+      params: {
+        category: CATEGORY,
+        symbol: sym,
+        limit: '100'
+      },
+      auth: true
+    });
+    const openList = this.#asArray(unfilled, 'list');
+    const openRow = openList.find((item) => String(item.orderId) === oid);
+    if (openRow) return this.#mapOrderRow(openRow, oid, sym);
+
+    throw new Error(`Bitget order not found: ${oid} ${sym}`);
   }
 
   async getOrderHistory(symbol, limit = 100) {
     const sym = this.toExchangeSymbol(symbol);
-    const rows = await this.#request('GET', '/api/v2/mix/order/orders-history', {
+    const data = await this.#request('GET', '/api/v3/trade/history-orders', {
       params: {
+        category: CATEGORY,
         symbol: sym,
-        productType: PRODUCT_TYPE,
-        pageSize: Math.min(Math.max(Number(limit) || 100, 1), 100)
+        limit: String(Math.min(Math.max(Number(limit) || 100, 1), 100))
       },
       auth: true
     });
-    const list = Array.isArray(rows?.entrustedList) ? rows.entrustedList : (Array.isArray(rows) ? rows : []);
+    const list = this.#asArray(data, 'list');
     return list.map((row) => this.#mapOrderRow(row, row.orderId, sym));
   }
 
   async getOrderTrades(orderId, symbol) {
     const sym = this.toExchangeSymbol(symbol);
-    const rows = await this.#request('GET', '/api/v2/mix/order/fills', {
+    const data = await this.#request('GET', '/api/v3/trade/fills', {
       params: {
+        category: CATEGORY,
         symbol: sym,
-        productType: PRODUCT_TYPE,
-        orderId: String(orderId)
+        orderId: String(orderId),
+        limit: '100'
       },
       auth: true
     });
-    const list = Array.isArray(rows?.fillList) ? rows.fillList : (Array.isArray(rows) ? rows : []);
+    const list = this.#asArray(data, 'list');
     return list.map((row) => {
-      const qty = Math.abs(Number(row.baseVolume ?? row.size ?? 0));
-      const price = Number(row.priceAvg ?? row.price ?? 0);
+      const qty = Math.abs(Number(row.execQty ?? row.baseVolume ?? row.size ?? 0));
+      const price = Number(row.execPrice ?? row.priceAvg ?? row.price ?? 0);
+      const feeRows = Array.isArray(row.feeDetail) ? row.feeDetail : [];
+      const feeRow = feeRows[0] || {};
       return {
         contracts: qty,
         size: qty,
         qty,
         price,
-        quoteQty: Number(row.quoteVolume || qty * price),
-        fee: Math.abs(Number(row.fee ?? 0)),
-        feeAsset: String(row.feeCoin || 'USDT').toUpperCase()
+        quoteQty: Number(row.execValue ?? row.quoteVolume ?? qty * price),
+        fee: Math.abs(Number(feeRow.fee ?? row.fee ?? 0)),
+        feeAsset: String(feeRow.feeCoin || row.feeCoin || 'USDT').toUpperCase()
       };
     });
   }
@@ -552,7 +644,11 @@ export class BitgetAdapter extends BaseAdapter {
   }
 
   async checkOrderPreconditions(params) {
-    return runCheckOrderPreconditions(this, { legRole: params?.legRole || 'B', ...params, futuresMode: true });
+    return runCheckOrderPreconditions(this, {
+      ...params,
+      legRole: params?.legRole ?? 'B',
+      futuresMode: true
+    });
   }
 
   async checkOrder(orderData) {

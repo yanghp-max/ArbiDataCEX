@@ -188,7 +188,8 @@ function buildPerpSetBybit(instruments) {
 function buildPerpSetBitget(contracts) {
   const out = new Set();
   for (const row of contracts || []) {
-    if (String(row.symbolStatus || row.status || '').toLowerCase() !== 'normal') continue;
+    const status = String(row.status || row.symbolStatus || '').toLowerCase();
+    if (status !== 'online' && status !== 'normal') continue;
     const sym = String(row.symbol || '').toUpperCase();
     if (sym) out.add(sym);
   }
@@ -263,7 +264,7 @@ function buildQvMapBitget(rows) {
   for (const row of rows || []) {
     const sym = String(row.symbol || '').toUpperCase();
     if (!sym) continue;
-    out.set(sym, Number(row.usdtVolume || row.quoteVolume || row.baseVolume || 0));
+    out.set(sym, Number(row.turnover24h || row.usdtVolume || row.quoteVolume || row.baseVolume || 0));
   }
   return out;
 }
@@ -355,9 +356,9 @@ function buildBookTickerMapBitget(rows) {
   for (const t of rows || []) {
     const sym = String(t.symbol || '').toUpperCase();
     if (!sym) continue;
-    const bid = Number(t.bidPr ?? t.bestBid);
-    const ask = Number(t.askPr ?? t.bestAsk);
-    const last = Number(t.lastPr);
+    const bid = Number(t.bid1Price ?? t.bidPr ?? t.bestBid);
+    const ask = Number(t.ask1Price ?? t.askPr ?? t.bestAsk);
+    const last = Number(t.lastPrice ?? t.lastPr);
     map.set(sym, {
       bid: Number.isFinite(bid) ? bid : null,
       ask: Number.isFinite(ask) ? ask : null,
@@ -463,8 +464,8 @@ function resolveBybitOrderLimits(row, { refPrice = null, binanceMinQty = 0 } = {
 }
 
 function resolveBitgetOrderLimits(row, { binanceMinQty = 0 } = {}) {
-  const minQty = Number(row.minTradeNum || row.minTradeAmount || 0.001);
-  const stepSize = Number(row.volumePlace || row.sizeMultiplier || minQty);
+  const minQty = Number(row.minOrderQty || row.minTradeNum || row.minTradeAmount || 0.001);
+  const stepSize = Number(row.quantityMultiplier || row.sizeMultiplier || row.volumePlace || minQty);
   let hedgeMinBaseQty = minQty;
   if (stepSize > 0 && Number.isFinite(binanceMinQty) && binanceMinQty > 0) {
     const k = Math.ceil(binanceMinQty / stepSize);
@@ -481,7 +482,7 @@ function resolveBitgetOrderLimits(row, { binanceMinQty = 0 } = {}) {
     gateOrderSizeRound: null,
     hedgeMinBaseQty,
     hedgeMinQtyByBinanceStep: hedgeMinBaseQty,
-    minNotional: Number(row.minTradeUSDT || 0),
+    minNotional: Number(row.minOrderAmount || row.minTradeUSDT || 0),
     lotMinQty: minQty
   };
 }
@@ -762,12 +763,12 @@ async function fetchBybitBundle(restUrl) {
 
 async function fetchBitgetBundle(restUrl) {
   const [contracts, tickers] = await Promise.all([
-    axios.get(`${restUrl}/api/v2/mix/market/contracts`, {
-      params: { productType: 'USDT-FUTURES' },
+    axios.get(`${restUrl}/api/v3/market/instruments`, {
+      params: { category: 'USDT-FUTURES' },
       timeout: 30000
     }).then((r) => r.data?.data || []),
-    axios.get(`${restUrl}/api/v2/mix/market/tickers`, {
-      params: { productType: 'USDT-FUTURES' },
+    axios.get(`${restUrl}/api/v3/market/tickers`, {
+      params: { category: 'USDT-FUTURES' },
       timeout: 30000
     }).then((r) => r.data?.data || [])
   ]);
