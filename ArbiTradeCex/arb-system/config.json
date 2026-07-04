@@ -61,7 +61,7 @@
     "broadcastIntervalMs": 1000
   },
   "adapters": {
-    "A": { "provider": "gate" },
-    "B": { "provider": "bitget" }
+    "A": { "provider": "bitget" },
+    "B": { "provider": "gate" }
   }
 }
