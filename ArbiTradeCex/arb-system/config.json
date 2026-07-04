@@ -61,7 +61,7 @@
     "broadcastIntervalMs": 1000
   },
   "adapters": {
-    "A": { "provider": "binance" },
+    "A": { "provider": "gate" },
     "B": { "provider": "bitget" }
   }
 }
